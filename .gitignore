@@ -1,0 +1,44 @@
+# Build output
+.gradle/
+build/
+out/
+
+# IntelliJ IDEA
+.idea/
+*.iml
+*.iws
+*.ipr
+
+# Eclipse
+.project
+.settings/
+.classpath
+
+# NetBeans
+nbactions.xml
+nb-configuration.xml
+nbproject/
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs
+*.log
+logs/
+
+# Local config / secrets (never commit)
+local.properties
+gradle.properties.local
+.env
+
+# Local dev scripts (not part of the plugin)
+build07flip.bat
+
+# AI assistant files (not part of the plugin)
+CLAUDE.md
+claude.md
+build-guide.md
+.claude/
+memory/
