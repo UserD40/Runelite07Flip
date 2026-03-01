@@ -67,4 +67,94 @@ public interface O7FlipConfig extends Config
 	{
 		return 99;
 	}
+
+	// ── Tab visibility ─────────────────────────────────────────────────────
+
+	@ConfigItem(
+		keyName = "showFlips",
+		name = "Show Flips tab",
+		description = "Show the Flips tab in the panel.",
+		position = 3
+	)
+	default boolean showFlips()
+	{
+		return true;
+	}
+
+	@ConfigItem(
+		keyName = "showDumps",
+		name = "Show Dumps tab",
+		description = "Show the Dumps tab in the panel.",
+		position = 4
+	)
+	default boolean showDumps()
+	{
+		return true;
+	}
+
+	@ConfigItem(
+		keyName = "showSpikes",
+		name = "Show Spikes tab",
+		description = "Show the Spikes tab in the panel.",
+		position = 5
+	)
+	default boolean showSpikes()
+	{
+		return true;
+	}
+
+	@ConfigItem(
+		keyName = "showDips",
+		name = "Show Dips tab",
+		description = "Show the Dips tab in the panel.",
+		position = 6
+	)
+	default boolean showDips()
+	{
+		return true;
+	}
+
+	@ConfigItem(
+		keyName = "showAlerts",
+		name = "Show Alerts tab",
+		description = "Show the Alerts tab in the panel. Requires a premium 07flip.com subscription.",
+		position = 7
+	)
+	default boolean showAlerts()
+	{
+		return true;
+	}
+
+	@ConfigItem(
+		keyName = "showMoon",
+		name = "Show Moon tab",
+		description = "Show the Moon armour tab in the panel. Requires an 07flip.com API key.",
+		position = 8
+	)
+	default boolean showMoon()
+	{
+		return true;
+	}
+
+	@ConfigItem(
+		keyName = "showBarrows",
+		name = "Show Barrows tab",
+		description = "Show the Barrows tab in the panel. Requires an 07flip.com API key.",
+		position = 9
+	)
+	default boolean showBarrows()
+	{
+		return true;
+	}
+
+	@ConfigItem(
+		keyName = "showDecant",
+		name = "Show Decant tab",
+		description = "Show the Decanting tab in the panel.",
+		position = 10
+	)
+	default boolean showDecant()
+	{
+		return true;
+	}
 }

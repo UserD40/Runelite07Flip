@@ -47,6 +47,7 @@ import com.o7flip.util.Fonts;
 import net.runelite.client.game.ItemManager;
 import net.runelite.client.ui.ColorScheme;
 import net.runelite.client.ui.PluginPanel;
+import net.runelite.client.util.LinkBrowser;
 import javax.inject.Inject;
 import javax.inject.Singleton;
 import javax.swing.BorderFactory;
@@ -74,7 +75,6 @@ import java.awt.CardLayout;
 import java.awt.Color;
 import java.awt.Component;
 import java.awt.Cursor;
-import java.awt.Desktop;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.FontMetrics;
@@ -86,7 +86,6 @@ import java.awt.Rectangle;
 import java.awt.RenderingHints;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
-import java.net.URI;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -271,6 +270,13 @@ public class O7FlipPanel extends PluginPanel
 	private O7FlipPlugin plugin;
 	@Inject
 	private ItemManager itemManager;
+	@Inject
+	private O7FlipConfig config;
+
+	// -------------------------------------------------------------------------
+	// Tabs wrapper (allows rebuilding without losing the CardLayout slot)
+	// -------------------------------------------------------------------------
+	private JPanel tabsWrapper;
 
 	// =========================================================================
 	// Constructor
@@ -302,9 +308,13 @@ public class O7FlipPanel extends PluginPanel
 			}
 		});
 
+		tabsWrapper = new JPanel(new BorderLayout());
+		tabsWrapper.setBackground(ColorScheme.DARK_GRAY_COLOR);
+		tabsWrapper.add(buildTabs(), BorderLayout.CENTER);
+
 		mainArea = new JPanel(new CardLayout());
 		mainArea.setBackground(ColorScheme.DARK_GRAY_COLOR);
-		mainArea.add(buildTabs(),       "tabs");
+		mainArea.add(tabsWrapper,       "tabs");
 		mainArea.add(buildSearchView(), "search");
 
 		add(buildTopPanel(), BorderLayout.NORTH);
@@ -321,15 +331,7 @@ public class O7FlipPanel extends PluginPanel
 		this.isSignedIn = signedIn;
 		this.isPremium  = premium;
 		presetSelector.repaint();
-		String q = filtered();
-		renderFlips(q);
-		renderSpikes(q);
-		renderDips(q);
-		renderDumps(q);
-		renderBarrows(q);
-		renderMoon(q);
-		renderDecants(q);
-		renderAlerts(q);
+		rebuildTabs();
 	}
 
 	// =========================================================================
@@ -1052,16 +1054,17 @@ public class O7FlipPanel extends PluginPanel
 		searchField.setBorder(new EmptyBorder(5, 8, 5, 4));
 
 		// ── Clear (×) button — shown only when the field has text ─────────────
-		JLabel clearBtn = new JLabel("\u00D7");
-		clearBtn.setFont(Fonts.SM);
+		JLabel clearBtn = new JLabel("\u00D7", SwingConstants.CENTER);
+		clearBtn.setFont(Fonts.BOLD);
 		clearBtn.setForeground(new Color(0x666666));
-		clearBtn.setBorder(new EmptyBorder(0, 2, 0, 8));
+		clearBtn.setBorder(new EmptyBorder(0, 6, 0, 8));
+		clearBtn.setPreferredSize(new Dimension(28, 28));
 		clearBtn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
 		clearBtn.setVisible(false);
 		clearBtn.addMouseListener(new MouseAdapter()
 		{
 			@Override
-			public void mouseClicked(MouseEvent e)
+			public void mousePressed(MouseEvent e)
 			{
 				searchField.setText("");
 				searchField.requestFocus();
@@ -1137,15 +1140,44 @@ public class O7FlipPanel extends PluginPanel
 		tabs.setForeground(Color.WHITE);
 		tabs.setFont(Fonts.SM);
 
-		tabs.addTab("Flips",   buildFlipsTab());
-		tabs.addTab("Dumps",   buildDumpsTab());
-		tabs.addTab("Spikes",  buildSpikesTab());
-		tabs.addTab("Dips",    buildDipsTab());
-		tabs.addTab("Alerts",  buildGenericTab("Merch"));
-		tabs.addTab("Moon",    buildMoonTab());
-		tabs.addTab("Barrows", buildGenericTab("Barrows"));
-		tabs.addTab("Decant",  buildGenericTab("Decant"));
+		// Always build all tab content to initialise list-panel fields,
+		// then conditionally add each tab based on config + auth state.
+		JPanel flipsContent   = buildFlipsTab();
+		JPanel dumpsContent   = buildDumpsTab();
+		JPanel spikesContent  = buildSpikesTab();
+		JPanel dipsContent    = buildDipsTab();
+		JPanel alertsContent  = buildGenericTab("Merch");
+		JPanel moonContent    = buildMoonTab();
+		JPanel barrowsContent = buildGenericTab("Barrows");
+		JPanel decantContent  = buildGenericTab("Decant");
+
+		if (config == null || config.showFlips())                          tabs.addTab("Flips",   flipsContent);
+		if (config == null || config.showDumps())                          tabs.addTab("Dumps",   dumpsContent);
+		if (config == null || config.showSpikes())                         tabs.addTab("Spikes",  spikesContent);
+		if (config == null || config.showDips())                           tabs.addTab("Dips",    dipsContent);
+		if ((config == null || config.showAlerts()) && isPremium)          tabs.addTab("Alerts",  alertsContent);
+		if ((config == null || config.showMoon()) && isSignedIn)           tabs.addTab("Moon",    moonContent);
+		if ((config == null || config.showBarrows()) && isSignedIn)        tabs.addTab("Barrows", barrowsContent);
+		if (config == null || config.showDecant())                         tabs.addTab("Decant",  decantContent);
+
 		return tabs;
+	}
+
+	public void rebuildTabs()
+	{
+		tabsWrapper.removeAll();
+		tabsWrapper.add(buildTabs(), BorderLayout.CENTER);
+		tabsWrapper.revalidate();
+		tabsWrapper.repaint();
+		String q = filtered();
+		renderFlips(q);
+		renderSpikes(q);
+		renderDips(q);
+		renderDumps(q);
+		renderBarrows(q);
+		renderMoon(q);
+		renderDecants(q);
+		renderAlerts(q);
 	}
 
 	private JPanel buildFlipsTab()
@@ -1880,13 +1912,7 @@ public class O7FlipPanel extends PluginPanel
 
 	private void openUrl(String url)
 	{
-		try
-		{
-			Desktop.getDesktop().browse(new URI(url));
-		}
-		catch (Exception ignored)
-		{
-		}
+		LinkBrowser.browse(url);
 	}
 
 	// =========================================================================

@@ -29,6 +29,7 @@ import com.o7flip.util.Fonts;
 import net.runelite.client.game.ItemManager;
 import net.runelite.client.ui.ColorScheme;
 import net.runelite.client.util.AsyncBufferedImage;
+import net.runelite.client.util.LinkBrowser;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.SwingConstants;
@@ -41,7 +42,6 @@ import java.awt.Dimension;
 import java.awt.GridLayout;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
-import java.net.URI;
 
 public class FlipItemPanel extends JPanel
 {
@@ -145,12 +145,6 @@ public class FlipItemPanel extends JPanel
 
 	static void openUrl(String url)
 	{
-		try
-		{
-			java.awt.Desktop.getDesktop().browse(new URI(url));
-		}
-		catch (Exception ignored)
-		{
-		}
+		LinkBrowser.browse(url);
 	}
 }

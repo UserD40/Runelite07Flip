@@ -28,6 +28,7 @@ public class AlertItem
 {
 	public int itemId;
 	public String name;
+	public String tier;
 	public long currentPrice;
 	public long sellTarget;
 	public double upsidePct;

@@ -388,6 +388,7 @@ public class O7FlipApiClient
 					AlertItem alert = new AlertItem();
 					alert.itemId       = getInt(obj, "item_id", 0);
 					alert.name         = getString(obj, "name", "Unknown");
+					alert.tier         = getString(obj, "tier", "");
 					alert.currentPrice = getLong(obj, "current_price", 0);
 					alert.sellTarget   = getLong(obj, "sell_target", 0);
 					alert.upsidePct    = getDouble(obj, "upside_pct", 0);

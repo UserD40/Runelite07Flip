@@ -27,6 +27,7 @@ package com.o7flip;
 import com.google.inject.Provides;
 import com.o7flip.model.BarrowsSet;
 import net.runelite.client.config.ConfigManager;
+import net.runelite.client.events.ConfigChanged;
 import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
 import net.runelite.client.ui.ClientToolbar;
@@ -41,6 +42,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
+import net.runelite.client.eventbus.Subscribe;
 
 @PluginDescriptor(
 	name = "07Flip - GE Flip Finder",
@@ -105,6 +107,20 @@ public class O7FlipPlugin extends Plugin
 		}
 		clientToolbar.removeNavigation(navButton);
 		log.info("[07Flip] Stopped");
+	}
+
+	// -------------------------------------------------------------------------
+	// Config changes — rebuild tabs when visibility toggles change
+	// -------------------------------------------------------------------------
+
+	@Subscribe
+	public void onConfigChanged(ConfigChanged event)
+	{
+		if (!"o7flip".equals(event.getGroup()))
+		{
+			return;
+		}
+		SwingUtilities.invokeLater(() -> panel.rebuildTabs());
 	}
 
 	// -------------------------------------------------------------------------

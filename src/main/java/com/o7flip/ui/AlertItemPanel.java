@@ -79,9 +79,14 @@ public class AlertItemPanel extends JPanel
 		headerRow.add(nameLabel, java.awt.BorderLayout.CENTER);
 		headerRow.add(linkLabel, java.awt.BorderLayout.EAST);
 
+		// ── Tier badge ─────────────────────────────────────────────────────────
+		JLabel tierBadge = buildTierBadge(alert.tier);
+		tierBadge.setAlignmentX(Component.LEFT_ALIGNMENT);
+		tierBadge.setBorder(new EmptyBorder(5, 0, 2, 0));
+
 		// ── Price section: Current Price | Est. Sell Target ───────────────────
 		JPanel priceLabels = row2();
-		priceLabels.setBorder(new EmptyBorder(6, 0, 1, 0));
+		priceLabels.setBorder(new EmptyBorder(4, 0, 1, 0));
 		priceLabels.add(lbl("Current Price",    Fonts.SM, GRAY_LBL));
 		priceLabels.add(lbl("Est. Sell Target", Fonts.SM, GRAY_LBL));
 
@@ -121,6 +126,7 @@ public class AlertItemPanel extends JPanel
 		// ── Assemble ───────────────────────────────────────────────────────────
 		add(headerRow);
 		add(cardSep());
+		add(tierBadge);
 		add(priceLabels);
 		add(priceValues);
 		add(cardSep());
@@ -156,6 +162,31 @@ public class AlertItemPanel extends JPanel
 	// =========================================================================
 	// Layout helpers
 	// =========================================================================
+
+	private static JLabel buildTierBadge(String tier)
+	{
+		String text;
+		Color  color;
+		if ("conviction".equalsIgnoreCase(tier))
+		{
+			text  = "CONVICTION";
+			color = new Color(0xFF981F);
+		}
+		else if ("high_probability".equalsIgnoreCase(tier))
+		{
+			text  = "HIGH PROB";
+			color = new Color(0xFFD700);
+		}
+		else
+		{
+			text  = tier != null ? tier.toUpperCase() : "";
+			color = new Color(0x888888);
+		}
+		JLabel lbl = new JLabel(text);
+		lbl.setFont(Fonts.SM_BOLD);
+		lbl.setForeground(color);
+		return lbl;
+	}
 
 	private static JPanel row2()
 	{
