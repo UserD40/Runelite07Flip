@@ -36,6 +36,7 @@ import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.events.ConfigChanged;
 import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
+import net.runelite.client.Notifier;
 import net.runelite.client.ui.ClientToolbar;
 import net.runelite.client.ui.NavigationButton;
 import net.runelite.client.util.ImageUtil;
@@ -65,6 +66,9 @@ public class O7FlipPlugin extends Plugin
 	private ClientThread clientThread;
 
 	@Inject
+	private Notifier notifier;
+
+	@Inject
 	private ClientToolbar clientToolbar;
 
 	@Inject
@@ -92,6 +96,7 @@ public class O7FlipPlugin extends Plugin
 		pendingGeBuyItemId = itemId;
 		pendingGeBuyPrice  = price;
 		pendingGeBuyName   = name;
+		notifier.notify("Open the Grand Exchange to pre-fill your offer for " + name);
 		log.debug("[07Flip] GE buy queued: {} ({}) @ {}", name, itemId, price);
 	}
 
