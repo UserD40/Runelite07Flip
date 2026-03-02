@@ -73,6 +73,21 @@ public class O7FlipApiClient
 	@Inject
 	private O7FlipConfig config;
 
+	/** Epoch ms until which all requests should be skipped after a 429 response. */
+	private volatile long backoffUntil = 0;
+
+	/** Returns true if the client is currently in a rate-limit backoff window. */
+	boolean isRateLimited()
+	{
+		return System.currentTimeMillis() < backoffUntil;
+	}
+
+	private void markRateLimited()
+	{
+		backoffUntil = System.currentTimeMillis() + 60_000;
+		log.warn("[07Flip] Rate limited (429) — pausing all requests for 60s");
+	}
+
 	private void fetch(String url, Callback callback)
 	{
 		Request.Builder builder = new Request.Builder()
@@ -623,6 +638,10 @@ public class O7FlipApiClient
 	                                    JsonMapper<T> mapper,
 	                                    BiConsumer<List<T>, Integer> callback)
 	{
+		if (response.code() == 429)
+		{
+			markRateLimited();
+		}
 		if (!response.isSuccessful() || response.body() == null)
 		{
 			log.warn("[07Flip] HTTP {} for '{}'", response.code(), arrayKey);
@@ -669,6 +688,10 @@ public class O7FlipApiClient
 	/** Parses an array from an HTTP response (used by non-paginated endpoints). */
 	private <T> List<T> parseArray(Response response, String arrayKey, JsonMapper<T> mapper)
 	{
+		if (response.code() == 429)
+		{
+			markRateLimited();
+		}
 		if (!response.isSuccessful() || response.body() == null)
 		{
 			log.warn("[07Flip] HTTP {} for key '{}'", response.code(), arrayKey);

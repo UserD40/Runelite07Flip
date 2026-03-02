@@ -231,6 +231,12 @@ public class O7FlipPlugin extends Plugin
 			return;
 		}
 
+		// Back off if the server returned 429 recently — let the window expire before retrying.
+		if (apiClient.isRateLimited())
+		{
+			return;
+		}
+
 		SwingUtilities.invokeLater(() -> panel.setLoading(true));
 
 		// Real-time endpoints — refresh every cycle.
