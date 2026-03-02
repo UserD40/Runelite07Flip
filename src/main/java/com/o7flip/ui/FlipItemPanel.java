@@ -24,6 +24,7 @@
  */
 package com.o7flip.ui;
 
+import com.o7flip.O7FlipPlugin;
 import com.o7flip.model.FlipItem;
 import com.o7flip.util.Fonts;
 import net.runelite.client.game.ItemManager;
@@ -31,8 +32,11 @@ import net.runelite.client.ui.ColorScheme;
 import net.runelite.client.util.AsyncBufferedImage;
 import net.runelite.client.util.LinkBrowser;
 import javax.swing.JLabel;
+import javax.swing.JMenuItem;
 import javax.swing.JPanel;
+import javax.swing.JPopupMenu;
 import javax.swing.SwingConstants;
+import javax.swing.SwingUtilities;
 import javax.swing.border.EmptyBorder;
 import java.awt.BorderLayout;
 import java.awt.Color;
@@ -49,7 +53,7 @@ public class FlipItemPanel extends JPanel
 	private static final Color HOVER_BG = new Color(0x3A3A3A);
 	private static final Color GREEN    = new Color(0x00C27A);
 
-	public FlipItemPanel(FlipItem flip, ItemManager itemManager, boolean odd)
+	public FlipItemPanel(FlipItem flip, ItemManager itemManager, boolean odd, O7FlipPlugin plugin)
 	{
 		Color bg = odd ? ODD_BG : ColorScheme.DARK_GRAY_COLOR;
 
@@ -67,12 +71,15 @@ public class FlipItemPanel extends JPanel
 		nameLabel.setFont(Fonts.BOLD);
 		nameLabel.setForeground(Color.WHITE);
 
-		// ── PRICE: buy (red) → sell (green) ───────────────────────────────────
-		JLabel priceLabel = new JLabel(
-			"<html><font color='#FF7070'>" + formatGp(flip.buyPrice) + "</font>"
-			+ "<font color='#666666'> \u2192 </font>"
-			+ "<font color='#00C27A'>" + formatGp(flip.sellPrice) + "</font></html>");
-		priceLabel.setFont(Fonts.SM);
+		// ── BUY (red) ─────────────────────────────────────────────────────────
+		JLabel buyLabel = new JLabel("Buy:  " + formatGp(flip.buyPrice));
+		buyLabel.setFont(Fonts.SM);
+		buyLabel.setForeground(new Color(0xFF7070));
+
+		// ── SELL (green) ──────────────────────────────────────────────────────
+		JLabel sellLabel = new JLabel("Sell:  " + formatGp(flip.sellPrice));
+		sellLabel.setFont(Fonts.SM);
+		sellLabel.setForeground(GREEN);
 
 		// ── PROFIT + ROI ───────────────────────────────────────────────────────
 		String limitText = flip.buyLimit > 0 ? "  \u00B7  Limit " + flip.buyLimit : "";
@@ -81,10 +88,11 @@ public class FlipItemPanel extends JPanel
 		profitLabel.setFont(Fonts.SM);
 		profitLabel.setForeground(GREEN);
 
-		JPanel textPanel = new JPanel(new GridLayout(3, 1, 0, 2));
+		JPanel textPanel = new JPanel(new GridLayout(4, 1, 0, 2));
 		textPanel.setBackground(bg);
 		textPanel.add(nameLabel);
-		textPanel.add(priceLabel);
+		textPanel.add(buyLabel);
+		textPanel.add(sellLabel);
 		textPanel.add(profitLabel);
 
 		add(iconLabel, BorderLayout.WEST);
@@ -107,7 +115,22 @@ public class FlipItemPanel extends JPanel
 			@Override
 			public void mouseClicked(MouseEvent e)
 			{
-				openUrl("https://07flip.com/item/" + flip.itemId);
+				if (SwingUtilities.isLeftMouseButton(e))
+				{
+					openUrl("https://07flip.com/item/" + flip.itemId);
+				}
+			}
+			@Override
+			public void mousePressed(MouseEvent e)
+			{
+				if (SwingUtilities.isRightMouseButton(e) && plugin != null)
+				{
+					JPopupMenu menu = new JPopupMenu();
+					JMenuItem buyItem = new JMenuItem("Buy on GE \u2014 " + formatGp(flip.sellPrice));
+					buyItem.addActionListener(ae -> plugin.queueGeBuy(flip.itemId, flip.sellPrice, flip.name));
+					menu.add(buyItem);
+					menu.show(e.getComponent(), e.getX(), e.getY());
+				}
 			}
 		});
 		setMaximumSize(new Dimension(Integer.MAX_VALUE, getPreferredSize().height));
@@ -132,14 +155,6 @@ public class FlipItemPanel extends JPanel
 
 	public static String formatGp(long amount)
 	{
-		if (amount >= 1_000_000_000)
-		{
-			return String.format("%.1fB", amount / 1_000_000_000.0);
-		}
-		if (amount >= 1_000_000)
-		{
-			return String.format("%.1fM", amount / 1_000_000.0);
-		}
 		return String.format("%,d", amount);
 	}
 

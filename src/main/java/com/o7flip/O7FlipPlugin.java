@@ -26,7 +26,13 @@ package com.o7flip;
 
 import com.google.inject.Provides;
 import com.o7flip.model.BarrowsSet;
+import net.runelite.api.Client;
+import net.runelite.api.ScriptID;
+import net.runelite.api.events.WidgetLoaded;
+import net.runelite.api.widgets.InterfaceID;
+import net.runelite.client.callback.ClientThread;
 import net.runelite.client.config.ConfigManager;
+import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.events.ConfigChanged;
 import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
@@ -42,7 +48,6 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
-import net.runelite.client.eventbus.Subscribe;
 
 @PluginDescriptor(
 	name = "07Flip - GE Flip Finder",
@@ -52,6 +57,12 @@ import net.runelite.client.eventbus.Subscribe;
 public class O7FlipPlugin extends Plugin
 {
 	private static final Logger log = LoggerFactory.getLogger(O7FlipPlugin.class);
+
+	@Inject
+	private Client client;
+
+	@Inject
+	private ClientThread clientThread;
 
 	@Inject
 	private ClientToolbar clientToolbar;
@@ -66,6 +77,23 @@ public class O7FlipPlugin extends Plugin
 	private NavigationButton navButton;
 	private ScheduledExecutorService executor;
 	private ScheduledFuture<?> refreshTask;
+
+	// -------------------------------------------------------------------------
+	// Pending GE buy intent (set by panel right-click, cleared after use)
+	// -------------------------------------------------------------------------
+
+	volatile int    pendingGeBuyItemId = -1;
+	volatile long   pendingGeBuyPrice  = -1;
+	volatile String pendingGeBuyName   = null;
+
+	/** Called by item panels on right-click to queue a GE buy pre-fill. */
+	public void queueGeBuy(int itemId, long price, String name)
+	{
+		pendingGeBuyItemId = itemId;
+		pendingGeBuyPrice  = price;
+		pendingGeBuyName   = name;
+		log.debug("[07Flip] GE buy queued: {} ({}) @ {}", name, itemId, price);
+	}
 
 	@Override
 	protected void startUp() throws Exception
@@ -107,6 +135,35 @@ public class O7FlipPlugin extends Plugin
 		}
 		clientToolbar.removeNavigation(navButton);
 		log.info("[07Flip] Stopped");
+	}
+
+	// -------------------------------------------------------------------------
+	// GE auto-fill — fires when the Grand Exchange interface opens
+	// -------------------------------------------------------------------------
+
+	@Subscribe
+	public void onWidgetLoaded(WidgetLoaded event)
+	{
+		if (event.getGroupId() != InterfaceID.GRAND_EXCHANGE)
+		{
+			return;
+		}
+		if (pendingGeBuyItemId == -1)
+		{
+			return;
+		}
+		final int    itemId = pendingGeBuyItemId;
+		final long   price  = pendingGeBuyPrice;
+		final String name   = pendingGeBuyName;
+		pendingGeBuyItemId = -1;
+		pendingGeBuyPrice  = -1;
+		pendingGeBuyName   = null;
+		clientThread.invokeLater(() -> fillGeBuyOffer(itemId, price, name));
+	}
+
+	private void fillGeBuyOffer(int itemId, long price, String name)
+	{
+		client.runScript(ScriptID.GE_ITEM_SEARCH, name);
 	}
 
 	// -------------------------------------------------------------------------

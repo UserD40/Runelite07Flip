@@ -24,6 +24,7 @@
  */
 package com.o7flip.ui;
 
+import com.o7flip.O7FlipPlugin;
 import com.o7flip.model.DumpItem;
 import com.o7flip.util.Fonts;
 import net.runelite.client.game.ItemManager;
@@ -31,7 +32,10 @@ import net.runelite.client.ui.ColorScheme;
 import javax.swing.Box;
 import javax.swing.BoxLayout;
 import javax.swing.JLabel;
+import javax.swing.JMenuItem;
 import javax.swing.JPanel;
+import javax.swing.JPopupMenu;
+import javax.swing.SwingUtilities;
 import javax.swing.border.EmptyBorder;
 import java.awt.BorderLayout;
 import java.awt.Color;
@@ -49,7 +53,7 @@ public class DumpItemPanel extends JPanel
 	private static final Color MID      = new Color(0xFFAA00);  // score >= 30
 	private static final Color LOW      = new Color(0x888888);  // score < 30
 
-	public DumpItemPanel(DumpItem item, ItemManager itemManager, boolean odd)
+	public DumpItemPanel(DumpItem item, ItemManager itemManager, boolean odd, O7FlipPlugin plugin)
 	{
 		Color bg = odd ? ODD_BG : ColorScheme.DARK_GRAY_COLOR;
 
@@ -175,7 +179,22 @@ public class DumpItemPanel extends JPanel
 			@Override
 			public void mouseClicked(MouseEvent e)
 			{
-				FlipItemPanel.openUrl("https://07flip.com/item/" + item.itemId);
+				if (SwingUtilities.isLeftMouseButton(e))
+				{
+					FlipItemPanel.openUrl("https://07flip.com/item/" + item.itemId);
+				}
+			}
+			@Override
+			public void mousePressed(MouseEvent e)
+			{
+				if (SwingUtilities.isRightMouseButton(e) && plugin != null)
+				{
+					JPopupMenu menu = new JPopupMenu();
+					JMenuItem buyItem = new JMenuItem("Buy on GE \u2014 " + FlipItemPanel.formatGp(item.sellPrice));
+					buyItem.addActionListener(ae -> plugin.queueGeBuy(item.itemId, item.sellPrice, item.name));
+					menu.add(buyItem);
+					menu.show(e.getComponent(), e.getX(), e.getY());
+				}
 			}
 		});
 		setMaximumSize(new Dimension(Integer.MAX_VALUE, getPreferredSize().height));

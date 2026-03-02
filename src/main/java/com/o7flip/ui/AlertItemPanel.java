@@ -24,13 +24,17 @@
  */
 package com.o7flip.ui;
 
+import com.o7flip.O7FlipPlugin;
 import com.o7flip.model.AlertItem;
 import com.o7flip.util.Fonts;
 import net.runelite.client.game.ItemManager;
 import net.runelite.client.ui.ColorScheme;
 import javax.swing.BoxLayout;
 import javax.swing.JLabel;
+import javax.swing.JMenuItem;
 import javax.swing.JPanel;
+import javax.swing.JPopupMenu;
+import javax.swing.SwingUtilities;
 import javax.swing.border.EmptyBorder;
 import java.awt.Color;
 import java.awt.Component;
@@ -49,7 +53,7 @@ public class AlertItemPanel extends JPanel
 	private static final Color GRAY_LBL = new Color(0x888888);
 	private static final Color SEP_COL  = new Color(0x3A3A3A);
 
-	public AlertItemPanel(AlertItem alert, ItemManager itemManager, boolean odd)
+	public AlertItemPanel(AlertItem alert, ItemManager itemManager, boolean odd, O7FlipPlugin plugin)
 	{
 		Color bg = odd ? ODD_BG : ColorScheme.DARK_GRAY_COLOR;
 
@@ -153,7 +157,22 @@ public class AlertItemPanel extends JPanel
 			@Override
 			public void mouseClicked(MouseEvent e)
 			{
-				FlipItemPanel.openUrl("https://07flip.com/item/" + alert.itemId);
+				if (SwingUtilities.isLeftMouseButton(e))
+				{
+					FlipItemPanel.openUrl("https://07flip.com/item/" + alert.itemId);
+				}
+			}
+			@Override
+			public void mousePressed(MouseEvent e)
+			{
+				if (SwingUtilities.isRightMouseButton(e) && plugin != null)
+				{
+					JPopupMenu menu = new JPopupMenu();
+					JMenuItem buyItem = new JMenuItem("Buy on GE \u2014 " + formatGpFull(alert.currentPrice));
+					buyItem.addActionListener(ae -> plugin.queueGeBuy(alert.itemId, alert.currentPrice, alert.name));
+					menu.add(buyItem);
+					menu.show(e.getComponent(), e.getX(), e.getY());
+				}
 			}
 		});
 		setMaximumSize(new Dimension(Integer.MAX_VALUE, getPreferredSize().height));
@@ -221,14 +240,6 @@ public class AlertItemPanel extends JPanel
 
 	private static String formatGpFull(long amount)
 	{
-		if (amount >= 1_000_000_000)
-		{
-			return String.format("%.1fB gp", amount / 1_000_000_000.0);
-		}
-		if (amount >= 1_000_000)
-		{
-			return String.format("%.2fM gp", amount / 1_000_000.0);
-		}
 		return String.format("%,d gp", amount);
 	}
 

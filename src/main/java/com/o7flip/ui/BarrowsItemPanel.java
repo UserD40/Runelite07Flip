@@ -24,6 +24,7 @@
  */
 package com.o7flip.ui;
 
+import com.o7flip.O7FlipPlugin;
 import com.o7flip.model.BarrowsItem;
 import com.o7flip.util.Fonts;
 import net.runelite.client.game.ItemManager;
@@ -31,7 +32,10 @@ import net.runelite.client.ui.ColorScheme;
 import javax.swing.Box;
 import javax.swing.BoxLayout;
 import javax.swing.JLabel;
+import javax.swing.JMenuItem;
 import javax.swing.JPanel;
+import javax.swing.JPopupMenu;
+import javax.swing.SwingUtilities;
 import javax.swing.border.EmptyBorder;
 import java.awt.BorderLayout;
 import java.awt.Color;
@@ -46,7 +50,7 @@ public class BarrowsItemPanel extends JPanel
 	private static final Color ODD_BG   = new Color(0x272727);
 	private static final Color HOVER_BG = new Color(0x3A3A3A);
 
-	public BarrowsItemPanel(BarrowsItem item, ItemManager itemManager, boolean odd)
+	public BarrowsItemPanel(BarrowsItem item, ItemManager itemManager, boolean odd, O7FlipPlugin plugin)
 	{
 		Color bg = odd ? ODD_BG : ColorScheme.DARK_GRAY_COLOR;
 
@@ -70,22 +74,18 @@ public class BarrowsItemPanel extends JPanel
 		textPanel.add(nameLabel);
 		textPanel.add(Box.createVerticalStrut(4));
 
-		JLabel buyLbl  = new JLabel("Buy: " + FlipItemPanel.formatGp(item.brokenBuyPrice));
+		JLabel buyLbl = new JLabel("Buy: " + FlipItemPanel.formatGp(item.brokenBuyPrice));
 		buyLbl.setFont(Fonts.SM);
 		buyLbl.setForeground(new Color(0xFF7070));
+		buyLbl.setAlignmentX(Component.LEFT_ALIGNMENT);
+		textPanel.add(buyLbl);
+		textPanel.add(Box.createVerticalStrut(3));
 
-		JLabel sellLbl = new JLabel("  \u2192  Sell: " + FlipItemPanel.formatGp(item.repairedAfterTax));
+		JLabel sellLbl = new JLabel("Sell: " + FlipItemPanel.formatGp(item.repairedAfterTax));
 		sellLbl.setFont(Fonts.SM);
 		sellLbl.setForeground(new Color(0x00C27A));
-
-		JPanel buySellRow = new JPanel();
-		buySellRow.setLayout(new BoxLayout(buySellRow, BoxLayout.X_AXIS));
-		buySellRow.setBackground(bg);
-		buySellRow.setAlignmentX(Component.LEFT_ALIGNMENT);
-		buySellRow.add(buyLbl);
-		buySellRow.add(sellLbl);
-		buySellRow.add(Box.createHorizontalGlue());
-		textPanel.add(buySellRow);
+		sellLbl.setAlignmentX(Component.LEFT_ALIGNMENT);
+		textPanel.add(sellLbl);
 		textPanel.add(Box.createVerticalStrut(3));
 
 		JLabel npcRprLbl = new JLabel("NPC: " + FlipItemPanel.formatGp(item.npcRepairCost));
@@ -143,7 +143,6 @@ public class BarrowsItemPanel extends JPanel
 			{
 				setBackground(HOVER_BG);
 				textPanel.setBackground(HOVER_BG);
-				buySellRow.setBackground(HOVER_BG);
 				repairRow.setBackground(HOVER_BG);
 				profitRow.setBackground(HOVER_BG);
 			}
@@ -152,14 +151,28 @@ public class BarrowsItemPanel extends JPanel
 			{
 				setBackground(bg);
 				textPanel.setBackground(bg);
-				buySellRow.setBackground(bg);
 				repairRow.setBackground(bg);
 				profitRow.setBackground(bg);
 			}
 			@Override
 			public void mouseClicked(MouseEvent e)
 			{
-				FlipItemPanel.openUrl("https://07flip.com/item/" + item.itemIdRepaired);
+				if (SwingUtilities.isLeftMouseButton(e))
+				{
+					FlipItemPanel.openUrl("https://07flip.com/item/" + item.itemIdRepaired);
+				}
+			}
+			@Override
+			public void mousePressed(MouseEvent e)
+			{
+				if (SwingUtilities.isRightMouseButton(e) && plugin != null)
+				{
+					JPopupMenu menu = new JPopupMenu();
+					JMenuItem buyItem = new JMenuItem("Buy on GE \u2014 " + FlipItemPanel.formatGp(item.repairedSellPrice));
+					buyItem.addActionListener(ae -> plugin.queueGeBuy(item.itemIdRepaired, item.repairedSellPrice, item.name));
+					menu.add(buyItem);
+					menu.show(e.getComponent(), e.getX(), e.getY());
+				}
 			}
 		});
 		setMaximumSize(new Dimension(Integer.MAX_VALUE, getPreferredSize().height));

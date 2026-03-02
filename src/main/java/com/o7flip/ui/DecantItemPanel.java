@@ -34,6 +34,7 @@ import javax.swing.BoxLayout;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.SwingConstants;
+import javax.swing.SwingUtilities;
 import javax.swing.border.EmptyBorder;
 import java.awt.BorderLayout;
 import java.awt.Color;
@@ -118,6 +119,14 @@ public class DecantItemPanel extends JPanel
 			{
 				setBackground(bg);
 				textPanel.setBackground(bg);
+			}
+			@Override
+			public void mouseClicked(MouseEvent e)
+			{
+				if (SwingUtilities.isLeftMouseButton(e))
+				{
+					FlipItemPanel.openUrl("https://07flip.com/item/" + item.itemId);
+				}
 			}
 		});
 		setMaximumSize(new Dimension(Integer.MAX_VALUE, getPreferredSize().height));

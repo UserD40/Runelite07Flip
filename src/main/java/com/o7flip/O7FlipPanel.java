@@ -673,8 +673,19 @@ public class O7FlipPanel extends PluginPanel
 
 	private List<AlertItem> sortAlerts(List<AlertItem> items)
 	{
-		Comparator<AlertItem> c = alertsSortIdx == 1 ? Comparator.comparingDouble((AlertItem x) -> x.drawdownPct)
-			: Comparator.comparingDouble((AlertItem x) -> x.upsidePct);
+		Comparator<AlertItem> c;
+		if (alertsSortIdx == 1)
+		{
+			c = Comparator.comparingDouble((AlertItem x) -> x.upsidePct);
+		}
+		else if (alertsSortIdx == 2)
+		{
+			c = Comparator.comparingDouble((AlertItem x) -> x.drawdownPct);
+		}
+		else
+		{
+			c = Comparator.comparing((AlertItem x) -> x.detectedAt);
+		}
 		return items.stream().sorted(c.reversed()).collect(Collectors.toList());
 	}
 
@@ -687,7 +698,7 @@ public class O7FlipPanel extends PluginPanel
 		List<FlipItem> list = sortFlips(fFlips(q));
 		fillListPaged(flipsListPanel, list, flipsPage, flipsTotal,
 			flipsPageLabel, flipsPrev, flipsNext,
-			(item, odd) -> new FlipItemPanel(item, itemManager, odd),
+			(item, odd) -> new FlipItemPanel(item, itemManager, odd, plugin),
 			"No flips found", "Try a different preset or filter");
 		hilite(flipsSortBtns, flipsSortIdx);
 	}
@@ -696,7 +707,7 @@ public class O7FlipPanel extends PluginPanel
 	{
 		fillListPaged(spikesListPanel, fSpikes(q), spikesPage, spikesTotal,
 			spikesPageLabel, spikesPrev, spikesNext,
-			(item, odd) -> new SpikeItemPanel(item, itemManager, odd),
+			(item, odd) -> new SpikeItemPanel(item, itemManager, odd, plugin),
 			"No spike signals", "Check back soon");
 		hilite(spikesSortBtns, spikesSortIdx);
 	}
@@ -705,7 +716,7 @@ public class O7FlipPanel extends PluginPanel
 	{
 		fillListPaged(dipsListPanel, fDips(q), dipsPage, dipsTotal,
 			dipsPageLabel, dipsPrev, dipsNext,
-			(item, odd) -> new DipItemPanel(item, itemManager, odd),
+			(item, odd) -> new DipItemPanel(item, itemManager, odd, plugin),
 			"No dip signals", "Check back soon");
 		hilite(dipsSortBtns, dipsSortIdx);
 	}
@@ -714,7 +725,7 @@ public class O7FlipPanel extends PluginPanel
 	{
 		fillListPaged(dumpsListPanel, sortDumps(fDumps(q)), dumpsPage, dumpsTotal,
 			dumpsPageLabel, dumpsPrev, dumpsNext,
-			(item, odd) -> new DumpItemPanel(item, itemManager, odd),
+			(item, odd) -> new DumpItemPanel(item, itemManager, odd, plugin),
 			"No dump signals", "Check back soon");
 		hiliteFilter(dumpsSortBtns, dumpsSortIdx);
 	}
@@ -722,7 +733,7 @@ public class O7FlipPanel extends PluginPanel
 	private void renderBarrows(String q)
 	{
 		fillList(barrowsListPanel, sortBarrows(fBarrows(q)), barrowsPage, barrowsPageLabel, barrowsPrev, barrowsNext,
-			(item, odd) -> new BarrowsSetPanel(item, itemManager, odd,
+			(item, odd) -> new BarrowsSetPanel(item, itemManager, odd, plugin,
 				() ->
 				{
 					if (plugin != null)
@@ -747,7 +758,7 @@ public class O7FlipPanel extends PluginPanel
 		// Per-item rows
 		for (int i = 0; i < set.items.size(); i++)
 		{
-			barrowsDetailPanel.add(new BarrowsItemPanel(set.items.get(i), itemManager, i % 2 != 0));
+			barrowsDetailPanel.add(new BarrowsItemPanel(set.items.get(i), itemManager, i % 2 != 0, plugin));
 			barrowsDetailPanel.add(sep());
 		}
 
@@ -798,7 +809,7 @@ public class O7FlipPanel extends PluginPanel
 	private void renderMoon(String q)
 	{
 		fillList(moonListPanel, fMoon(q), moonPage, moonPageLabel, moonPrev, moonNext,
-			(item, odd) -> new MoonSetPanel(item, itemManager, odd),
+			(item, odd) -> new MoonSetPanel(item, itemManager, odd, plugin),
 			"No Moon armour data", "");
 		hiliteFilter(moonFilterBtns, moonFilterIdx);
 	}
@@ -815,7 +826,7 @@ public class O7FlipPanel extends PluginPanel
 	{
 		fillListPaged(alertsListPanel, sortAlerts(fAlerts(q)), alertsPage, alertsTotal,
 			alertsPageLabel, alertsPrev, alertsNext,
-			(item, odd) -> new AlertItemPanel(item, itemManager, odd),
+			(item, odd) -> new AlertItemPanel(item, itemManager, odd, plugin),
 			"No active price alerts", "Alerts posted twice daily");
 		hilite(alertsSortBtns, alertsSortIdx);
 	}
@@ -1552,7 +1563,7 @@ public class O7FlipPanel extends PluginPanel
 					decantListPanel, buildPageBar(decantPageLabel, decantPrev, decantNext));
 
 			default: // Merch / Price Alerts
-				alertsSortBtns  = new JButton[2];
+				alertsSortBtns  = new JButton[3];
 				alertsListPanel = listPanel();
 				alertsPageLabel = pageLabel();
 				alertsPrev      = pageBtn("\u2039");
@@ -1571,7 +1582,7 @@ public class O7FlipPanel extends PluginPanel
 						plugin.onAlertsPageChanged(++alertsPage);
 					}
 				});
-				return assembleTab(buildSortBar(alertsSortBtns, new String[]{"Upside %", "Drawdown"},
+				return assembleTab(buildSortBar(alertsSortBtns, new String[]{"Recent", "Upside %", "Drawdown"},
 					() -> alertsSortIdx, i ->
 					{
 						alertsSortIdx = i;

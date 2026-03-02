@@ -24,6 +24,7 @@
  */
 package com.o7flip.ui;
 
+import com.o7flip.O7FlipPlugin;
 import com.o7flip.model.BarrowsSet;
 import com.o7flip.util.Fonts;
 import com.o7flip.util.ItemIds;
@@ -32,7 +33,10 @@ import net.runelite.client.ui.ColorScheme;
 import javax.swing.Box;
 import javax.swing.BoxLayout;
 import javax.swing.JLabel;
+import javax.swing.JMenuItem;
 import javax.swing.JPanel;
+import javax.swing.JPopupMenu;
+import javax.swing.SwingUtilities;
 import javax.swing.SwingConstants;
 import javax.swing.border.EmptyBorder;
 import java.awt.BorderLayout;
@@ -50,7 +54,7 @@ public class BarrowsSetPanel extends JPanel
 	private static final Color GREEN    = new Color(0x00C27A);
 	private static final Color RED      = new Color(0xFF5555);
 
-	public BarrowsSetPanel(BarrowsSet set, ItemManager itemManager, boolean odd, Runnable onDrillDown)
+	public BarrowsSetPanel(BarrowsSet set, ItemManager itemManager, boolean odd, O7FlipPlugin plugin, Runnable onDrillDown)
 	{
 		Color bg = odd ? ODD_BG : ColorScheme.DARK_GRAY_COLOR;
 
@@ -128,9 +132,21 @@ public class BarrowsSetPanel extends JPanel
 			@Override
 			public void mouseClicked(MouseEvent e)
 			{
-				if (onDrillDown != null)
+				if (SwingUtilities.isLeftMouseButton(e) && onDrillDown != null)
 				{
 					onDrillDown.run();
+				}
+			}
+			@Override
+			public void mousePressed(MouseEvent e)
+			{
+				if (SwingUtilities.isRightMouseButton(e) && plugin != null)
+				{
+					JPopupMenu menu = new JPopupMenu();
+					JMenuItem buyItem = new JMenuItem("Buy on GE \u2014 " + FlipItemPanel.formatGp(set.totalBrokenCost));
+					buyItem.addActionListener(ae -> plugin.queueGeBuy(set.iconItemId, set.totalBrokenCost, set.shortName));
+					menu.add(buyItem);
+					menu.show(e.getComponent(), e.getX(), e.getY());
 				}
 			}
 		});

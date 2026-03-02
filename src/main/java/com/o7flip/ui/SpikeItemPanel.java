@@ -24,15 +24,17 @@
  */
 package com.o7flip.ui;
 
+import com.o7flip.O7FlipPlugin;
 import com.o7flip.model.SpikeItem;
 import com.o7flip.util.Fonts;
 import net.runelite.client.game.ItemManager;
 import net.runelite.client.ui.ColorScheme;
-import javax.swing.Box;
-import javax.swing.BoxLayout;
 import javax.swing.JLabel;
+import javax.swing.JMenuItem;
 import javax.swing.JPanel;
+import javax.swing.JPopupMenu;
 import javax.swing.SwingConstants;
+import javax.swing.SwingUtilities;
 import javax.swing.border.EmptyBorder;
 import java.awt.BorderLayout;
 import java.awt.Color;
@@ -49,7 +51,7 @@ public class SpikeItemPanel extends JPanel
 	private static final Color HOVER_BG = new Color(0x3A3A3A);
 	private static final Color GREEN    = new Color(0x00C27A);
 
-	public SpikeItemPanel(SpikeItem item, ItemManager itemManager, boolean odd)
+	public SpikeItemPanel(SpikeItem item, ItemManager itemManager, boolean odd, O7FlipPlugin plugin)
 	{
 		Color bg = odd ? ODD_BG : ColorScheme.DARK_GRAY_COLOR;
 
@@ -67,21 +69,15 @@ public class SpikeItemPanel extends JPanel
 		nameLabel.setFont(Fonts.BOLD);
 		nameLabel.setForeground(Color.WHITE);
 
-		// ── Prices ────────────────────────────────────────────────────────────
+		// ── Buy (red, own line) ────────────────────────────────────────────────
 		JLabel buyLbl = new JLabel("Buy: " + FlipItemPanel.formatGp(item.buyPrice));
 		buyLbl.setFont(Fonts.SM);
 		buyLbl.setForeground(new Color(0xFF7070));
 
-		JLabel avgLbl = new JLabel("  24h avg: " + FlipItemPanel.formatGp(item.avg24hBuy));
+		// ── 24h avg (gray, own line) ──────────────────────────────────────────
+		JLabel avgLbl = new JLabel("24h avg: " + FlipItemPanel.formatGp(item.avg24hBuy));
 		avgLbl.setFont(Fonts.SM);
 		avgLbl.setForeground(new Color(0x666666));
-
-		JPanel priceRow = new JPanel();
-		priceRow.setLayout(new BoxLayout(priceRow, BoxLayout.X_AXIS));
-		priceRow.setBackground(bg);
-		priceRow.add(buyLbl);
-		priceRow.add(avgLbl);
-		priceRow.add(Box.createHorizontalGlue());
 
 		// ── Volume ────────────────────────────────────────────────────────────
 		String volStr   = item.hourlyVolume > 0 ? "Vol: " + FlipItemPanel.formatGp(item.hourlyVolume) + "/hr" : "";
@@ -90,10 +86,11 @@ public class SpikeItemPanel extends JPanel
 		volLabel.setFont(Fonts.SM);
 		volLabel.setForeground(new Color(0x888888));
 
-		JPanel textPanel = new JPanel(new GridLayout(3, 1, 0, 6));
+		JPanel textPanel = new JPanel(new GridLayout(4, 1, 0, 4));
 		textPanel.setBackground(bg);
 		textPanel.add(nameLabel);
-		textPanel.add(priceRow);
+		textPanel.add(buyLbl);
+		textPanel.add(avgLbl);
 		textPanel.add(volLabel);
 
 		// ── Spike badge ───────────────────────────────────────────────────────
@@ -117,19 +114,32 @@ public class SpikeItemPanel extends JPanel
 			{
 				setBackground(HOVER_BG);
 				textPanel.setBackground(HOVER_BG);
-				priceRow.setBackground(HOVER_BG);
 			}
 			@Override
 			public void mouseExited(MouseEvent e)
 			{
 				setBackground(bg);
 				textPanel.setBackground(bg);
-				priceRow.setBackground(bg);
 			}
 			@Override
 			public void mouseClicked(MouseEvent e)
 			{
-				FlipItemPanel.openUrl("https://07flip.com/item/" + item.itemId);
+				if (SwingUtilities.isLeftMouseButton(e))
+				{
+					FlipItemPanel.openUrl("https://07flip.com/item/" + item.itemId);
+				}
+			}
+			@Override
+			public void mousePressed(MouseEvent e)
+			{
+				if (SwingUtilities.isRightMouseButton(e) && plugin != null)
+				{
+					JPopupMenu menu = new JPopupMenu();
+					JMenuItem buyItem = new JMenuItem("Buy on GE \u2014 " + FlipItemPanel.formatGp(item.buyPrice));
+					buyItem.addActionListener(ae -> plugin.queueGeBuy(item.itemId, item.buyPrice, item.name));
+					menu.add(buyItem);
+					menu.show(e.getComponent(), e.getX(), e.getY());
+				}
 			}
 		});
 		setMaximumSize(new Dimension(Integer.MAX_VALUE, getPreferredSize().height));

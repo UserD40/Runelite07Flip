@@ -24,6 +24,7 @@
  */
 package com.o7flip.ui;
 
+import com.o7flip.O7FlipPlugin;
 import com.o7flip.model.MoonItem;
 import com.o7flip.model.MoonSet;
 import com.o7flip.util.Fonts;
@@ -32,7 +33,10 @@ import net.runelite.client.ui.ColorScheme;
 import javax.swing.Box;
 import javax.swing.BoxLayout;
 import javax.swing.JLabel;
+import javax.swing.JMenuItem;
 import javax.swing.JPanel;
+import javax.swing.JPopupMenu;
+import javax.swing.SwingUtilities;
 import javax.swing.border.CompoundBorder;
 import javax.swing.border.EmptyBorder;
 import javax.swing.border.MatteBorder;
@@ -53,13 +57,17 @@ public class MoonSetPanel extends JPanel
 	private static final Color BLUE_ACC    = new Color(0x1E3E60);
 	private static final Color ECLIPSE_BG  = new Color(0x1C1808);
 	private static final Color ECLIPSE_ACC = new Color(0x524418);
+	private static final Color HOVER_BG    = new Color(0x3A3A3A);
 
 	private static final Color GREEN  = new Color(0x00C27A);
 	private static final Color ORANGE = new Color(0xFF981F);
 	private static final Color WHITE  = Color.WHITE;
 
-	public MoonSetPanel(MoonSet set, ItemManager itemManager, boolean ignored)
+	private final O7FlipPlugin plugin;
+
+	public MoonSetPanel(MoonSet set, ItemManager itemManager, boolean ignored, O7FlipPlugin plugin)
 	{
+		this.plugin = plugin;
 		Color bg  = bgFor(set.setName);
 		Color acc = accFor(set.setName);
 
@@ -156,18 +164,10 @@ public class MoonSetPanel extends JPanel
 		JPanel row = new JPanel(new BorderLayout(6, 0));
 		row.setBackground(bg);
 		row.setAlignmentX(Component.LEFT_ALIGNMENT);
+		row.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
 
 		int iconId = isWeapon ? item.itemIdRepaired : item.itemIdBroken;
 		JLabel iconLabel = FlipItemPanel.buildIcon(iconId, itemManager);
-		iconLabel.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
-		iconLabel.addMouseListener(new MouseAdapter()
-		{
-			@Override
-			public void mouseClicked(MouseEvent e)
-			{
-				FlipItemPanel.openUrl("https://07flip.com/item/" + item.itemIdRepaired);
-			}
-		});
 		row.add(iconLabel, BorderLayout.WEST);
 
 		JPanel text = new JPanel();
@@ -225,6 +225,43 @@ public class MoonSetPanel extends JPanel
 
 		row.add(text, BorderLayout.CENTER);
 		row.setMaximumSize(new Dimension(Integer.MAX_VALUE, row.getPreferredSize().height));
+
+		row.addMouseListener(new MouseAdapter()
+		{
+			@Override
+			public void mouseEntered(MouseEvent e)
+			{
+				row.setBackground(HOVER_BG);
+				text.setBackground(HOVER_BG);
+			}
+			@Override
+			public void mouseExited(MouseEvent e)
+			{
+				row.setBackground(bg);
+				text.setBackground(bg);
+			}
+			@Override
+			public void mouseClicked(MouseEvent e)
+			{
+				if (SwingUtilities.isLeftMouseButton(e))
+				{
+					FlipItemPanel.openUrl("https://07flip.com/item/" + item.itemIdRepaired);
+				}
+			}
+			@Override
+			public void mousePressed(MouseEvent e)
+			{
+				if (SwingUtilities.isRightMouseButton(e) && plugin != null)
+				{
+					JPopupMenu menu = new JPopupMenu();
+					JMenuItem buyItem = new JMenuItem("Buy on GE \u2014 " + FlipItemPanel.formatGp(item.repairedSellPrice));
+					buyItem.addActionListener(ae -> plugin.queueGeBuy(item.itemIdRepaired, item.repairedSellPrice, item.name));
+					menu.add(buyItem);
+					menu.show(e.getComponent(), e.getX(), e.getY());
+				}
+			}
+		});
+
 		return row;
 	}
 

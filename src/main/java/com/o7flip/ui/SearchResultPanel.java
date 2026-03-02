@@ -71,24 +71,27 @@ public class SearchResultPanel extends JPanel
 		boolean stale    = item.dataAgeMinutes != null && item.dataAgeMinutes > STALE;
 		boolean hasPrice = item.buyPrice != null && item.sellPrice != null;
 
-		JLabel priceLabel;
+		JLabel buyLabel;
+		JLabel sellLabel = new JLabel("");
 		if (!hasPrice)
 		{
-			priceLabel = new JLabel("No recent price data");
-			priceLabel.setFont(Fonts.SM);
-			priceLabel.setForeground(new Color(0x555555));
+			buyLabel = new JLabel("No recent price data");
+			buyLabel.setFont(Fonts.SM);
+			buyLabel.setForeground(new Color(0x555555));
 		}
 		else
 		{
-			String buyColor  = stale ? "#666666" : "#FF7070";
-			String sellColor = stale ? "#666666" : "#00C27A";
-			priceLabel = new JLabel(
-				"<html><font color='" + buyColor  + "'>" + FlipItemPanel.formatGp(item.buyPrice)  + "</font>"
-				+ "<font color='#555555'> \u2192 </font>"
-				+ "<font color='" + sellColor + "'>" + FlipItemPanel.formatGp(item.sellPrice) + "</font></html>");
-			priceLabel.setFont(Fonts.SM);
+			Color buyColor  = stale ? new Color(0x666666) : new Color(0xFF7070);
+			Color sellColor = stale ? new Color(0x666666) : new Color(0x00C27A);
+			buyLabel = new JLabel("Buy: " + FlipItemPanel.formatGp(item.buyPrice));
+			buyLabel.setFont(Fonts.SM);
+			buyLabel.setForeground(buyColor);
+			sellLabel = new JLabel("Sell: " + FlipItemPanel.formatGp(item.sellPrice));
+			sellLabel.setFont(Fonts.SM);
+			sellLabel.setForeground(sellColor);
 		}
-		priceLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
+		buyLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
+		sellLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
 
 		JLabel profitLabel = new JLabel("");
 		if (item.profit != null && hasPrice)
@@ -116,7 +119,12 @@ public class SearchResultPanel extends JPanel
 		textPanel.setBackground(bg);
 		textPanel.add(nameLabel);
 		textPanel.add(Box.createVerticalStrut(2));
-		textPanel.add(priceLabel);
+		textPanel.add(buyLabel);
+		if (hasPrice)
+		{
+			textPanel.add(Box.createVerticalStrut(2));
+			textPanel.add(sellLabel);
+		}
 		textPanel.add(Box.createVerticalStrut(2));
 		textPanel.add(profitLabel);
 		textPanel.add(Box.createVerticalStrut(2));
