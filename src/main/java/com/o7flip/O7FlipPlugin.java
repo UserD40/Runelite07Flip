@@ -82,6 +82,11 @@ public class O7FlipPlugin extends Plugin
 	private ScheduledExecutorService executor;
 	private ScheduledFuture<?> refreshTask;
 
+	// Barrows/Moon/Decanting change with GE prices (hourly), not every minute.
+	// Only refresh them every SLOW_EVERY cycles to reduce server load.
+	private static final int SLOW_EVERY = 5;
+	private int slowTick = 0;
+
 	// -------------------------------------------------------------------------
 	// Pending GE buy intent (set by panel right-click, cleared after use)
 	// -------------------------------------------------------------------------
@@ -117,9 +122,9 @@ public class O7FlipPlugin extends Plugin
 
 		executor = Executors.newSingleThreadScheduledExecutor();
 		fetchAuthStatus();
-		fetchAll();
+		executor.execute(() -> fetchAll(true)); // forced — panel not yet visible at startup
 		refreshTask = executor.scheduleAtFixedRate(
-			this::fetchAll,
+			() -> fetchAll(false),
 			config.refreshIntervalSeconds(),
 			config.refreshIntervalSeconds(),
 			TimeUnit.SECONDS
@@ -182,6 +187,18 @@ public class O7FlipPlugin extends Plugin
 		{
 			return;
 		}
+		// Re-check auth only when the API key itself changes.
+		if ("apiKey".equals(event.getKey()))
+		{
+			executor.execute(this::fetchAuthStatus);
+		}
+		// Re-fetch repair costs immediately when smithing level changes —
+		// but no need to rebuild tabs for that setting.
+		if ("smithingLevel".equals(event.getKey()))
+		{
+			executor.execute(this::fetchSlow);
+			return;
+		}
 		SwingUtilities.invokeLater(() -> panel.rebuildTabs());
 	}
 
@@ -205,11 +222,18 @@ public class O7FlipPlugin extends Plugin
 	// Full refresh (scheduled + on startup)
 	// -------------------------------------------------------------------------
 
-	void fetchAll()
+	void fetchAll(boolean forced)
 	{
-		SwingUtilities.invokeLater(() -> panel.setLoading(true));
-		fetchAuthStatus();
+		// Skip entirely if the panel is not visible — no point fetching data nobody is looking at.
+		// The forced flag bypasses this on startup when the panel isn't yet in the component tree.
+		if (!forced && !panel.isShowing())
+		{
+			return;
+		}
 
+		SwingUtilities.invokeLater(() -> panel.setLoading(true));
+
+		// Real-time endpoints — refresh every cycle.
 		apiClient.fetchFlips(panel.getSelectedPreset(),
 			panel.getFlipsMinProfit(), panel.getFlipsPriceMin(), panel.getFlipsPriceMax(),
 			panel.getFlipsPage(),
@@ -229,6 +253,19 @@ public class O7FlipPlugin extends Plugin
 		apiClient.fetchAlerts(panel.getAlertsPage(),
 			(items, total) -> SwingUtilities.invokeLater(() -> panel.updateAlerts(items, total, panel.getAlertsPage())));
 
+		// Slow endpoints — Barrows, Moon, and Decanting are driven by GE prices which
+		// update hourly. Refreshing them every SLOW_EVERY cycles (default: every 5 minutes)
+		// is more than sufficient and cuts their server load by ~80%.
+		slowTick++;
+		if (slowTick >= SLOW_EVERY)
+		{
+			slowTick = 0;
+			fetchSlow();
+		}
+	}
+
+	void fetchSlow()
+	{
 		apiClient.fetchBarrows(config.smithingLevel(),
 			sets -> SwingUtilities.invokeLater(() -> panel.updateBarrows(sets)));
 
