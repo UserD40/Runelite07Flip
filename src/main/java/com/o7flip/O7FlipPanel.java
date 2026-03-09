@@ -65,6 +65,7 @@ import javax.swing.ListCellRenderer;
 import javax.swing.Scrollable;
 import javax.swing.SwingConstants;
 import javax.swing.Timer;
+import javax.swing.Box;
 import javax.swing.border.EmptyBorder;
 import javax.swing.border.MatteBorder;
 import javax.swing.event.DocumentEvent;
@@ -278,6 +279,11 @@ public class O7FlipPanel extends PluginPanel
 	// -------------------------------------------------------------------------
 	private JPanel tabsWrapper;
 
+	// -------------------------------------------------------------------------
+	// Auth banner (shown below search, hidden when premium)
+	// -------------------------------------------------------------------------
+	private JPanel authBanner;
+
 	// =========================================================================
 	// Constructor
 	// =========================================================================
@@ -317,9 +323,17 @@ public class O7FlipPanel extends PluginPanel
 		mainArea.add(tabsWrapper,       "tabs");
 		mainArea.add(buildSearchView(), "search");
 
-		add(buildTopPanel(), BorderLayout.NORTH);
-		add(mainArea,        BorderLayout.CENTER);
-		add(buildFooter(),   BorderLayout.SOUTH);
+		authBanner = new JPanel(new BorderLayout());
+		authBanner.setVisible(false);
+
+		JPanel northArea = new JPanel(new BorderLayout());
+		northArea.setBackground(ColorScheme.DARK_GRAY_COLOR);
+		northArea.add(buildTopPanel(), BorderLayout.NORTH);
+		northArea.add(authBanner,      BorderLayout.SOUTH);
+
+		add(northArea,     BorderLayout.NORTH);
+		add(mainArea,      BorderLayout.CENTER);
+		add(buildFooter(), BorderLayout.SOUTH);
 	}
 
 	// =========================================================================
@@ -331,7 +345,108 @@ public class O7FlipPanel extends PluginPanel
 		this.isSignedIn = signedIn;
 		this.isPremium  = premium;
 		presetSelector.repaint();
+		updateAuthBanner();
 		rebuildTabs();
+	}
+
+	private void updateAuthBanner()
+	{
+		authBanner.removeAll();
+
+		if (isPremium)
+		{
+			authBanner.setVisible(false);
+			authBanner.revalidate();
+			authBanner.repaint();
+			return;
+		}
+
+		JPanel inner = new JPanel();
+		inner.setLayout(new BoxLayout(inner, BoxLayout.Y_AXIS));
+		inner.setOpaque(false);
+
+		if (isSignedIn)
+		{
+			// ── Free account — upgrade prompt ─────────────────────────────────
+			authBanner.setBackground(new Color(0x0D1A0D));
+			authBanner.setBorder(BorderFactory.createCompoundBorder(
+				new MatteBorder(1, 0, 1, 0, new Color(0x1E4A1E)),
+				new EmptyBorder(9, 10, 9, 10)));
+
+			bannerRow(inner, "\u2713 Free Account Connected", Fonts.BOLD, GREEN, 0);
+			bannerRow(inner, "Upgrade to Premium to unlock:", Fonts.SM, new Color(0x777777), 5);
+			bannerRow(inner, "\u2022  Merch Alerts & high-conviction signals", Fonts.SM, new Color(0xAAAAAA), 2);
+			bannerRow(inner, "\u2022  High Volume & Price Dip flip presets", Fonts.SM, new Color(0xAAAAAA), 1);
+			bannerRow(inner, "\u2022  Full pagination — 90+ pages of results", Fonts.SM, new Color(0xAAAAAA), 1);
+			bannerRow(inner, "\u2022  Moon & Barrows repair calculators",       Fonts.SM, new Color(0xAAAAAA), 1);
+
+			inner.add(Box.createRigidArea(new java.awt.Dimension(0, 9)));
+
+			JButton btn = pillButton("Upgrade to Premium");
+			btn.setBackground(ORANGE);
+			btn.setForeground(Color.BLACK);
+			btn.setAlignmentX(Component.LEFT_ALIGNMENT);
+			btn.setMaximumSize(new java.awt.Dimension(Integer.MAX_VALUE, 24));
+			btn.addActionListener(e -> openUrl(PREMIUM_URL));
+			inner.add(btn);
+		}
+		else
+		{
+			// ── Not signed in — full API key setup guide ──────────────────────
+			authBanner.setBackground(new Color(0x0D0D1E));
+			authBanner.setBorder(BorderFactory.createCompoundBorder(
+				new MatteBorder(1, 0, 1, 0, new Color(0x2A2A55)),
+				new EmptyBorder(9, 10, 9, 10)));
+
+			bannerRow(inner, "\uD83D\uDD11 Connect Your Account", Fonts.BOLD, ORANGE, 0);
+			bannerRow(inner, "A free API key unlocks full results,", Fonts.SM, new Color(0x777777), 4);
+			bannerRow(inner, "all flip presets and premium features.", Fonts.SM, new Color(0x777777), 0);
+
+			inner.add(Box.createRigidArea(new java.awt.Dimension(0, 10)));
+
+			bannerRow(inner, "GET YOUR KEY:", Fonts.SM_BOLD, new Color(0x999999), 0);
+			bannerRow(inner, "1.  Visit 07flip.com and sign up",           Fonts.SM, new Color(0xDDDDDD), 3);
+			bannerRow(inner, "2.  Log in with Discord",                    Fonts.SM, new Color(0xDDDDDD), 1);
+			bannerRow(inner, "3.  Click your profile icon (top-right)",    Fonts.SM, new Color(0xDDDDDD), 1);
+			bannerRow(inner, "     \u2192  Select \u201CView API Key\u201D",      Fonts.SM, new Color(0xFF981F), 0);
+			bannerRow(inner, "4.  Copy the key shown on screen",           Fonts.SM, new Color(0xDDDDDD), 1);
+
+			inner.add(Box.createRigidArea(new java.awt.Dimension(0, 9)));
+
+			bannerRow(inner, "ADD KEY IN RUNELITE:", Fonts.SM_BOLD, new Color(0x999999), 0);
+			bannerRow(inner, "1.  Right-click the 07Flip plugin icon",     Fonts.SM, new Color(0xDDDDDD), 3);
+			bannerRow(inner, "2.  Click \u201CConfigure\u201D",                   Fonts.SM, new Color(0xDDDDDD), 1);
+			bannerRow(inner, "3.  Paste key into the API Key field",       Fonts.SM, new Color(0xDDDDDD), 1);
+			bannerRow(inner, "4.  Press Enter \u2014 done!",               Fonts.SM, new Color(0xDDDDDD), 1);
+
+			inner.add(Box.createRigidArea(new java.awt.Dimension(0, 10)));
+
+			JButton btn = pillButton("Visit 07flip.com");
+			btn.setBackground(ORANGE);
+			btn.setForeground(Color.BLACK);
+			btn.setAlignmentX(Component.LEFT_ALIGNMENT);
+			btn.setMaximumSize(new java.awt.Dimension(Integer.MAX_VALUE, 24));
+			btn.addActionListener(e -> openUrl(WEBSITE_URL));
+			inner.add(btn);
+		}
+
+		authBanner.add(inner, BorderLayout.CENTER);
+		authBanner.setVisible(true);
+		authBanner.revalidate();
+		authBanner.repaint();
+	}
+
+	private static void bannerRow(JPanel panel, String text, java.awt.Font font, Color color, int topPad)
+	{
+		JLabel lbl = new JLabel(text);
+		lbl.setFont(font);
+		lbl.setForeground(color);
+		lbl.setAlignmentX(Component.LEFT_ALIGNMENT);
+		if (topPad > 0)
+		{
+			lbl.setBorder(new EmptyBorder(topPad, 0, 0, 0));
+		}
+		panel.add(lbl);
 	}
 
 	// =========================================================================
@@ -1873,7 +1988,7 @@ public class O7FlipPanel extends PluginPanel
 		t.setForeground(ORANGE);
 		t.setAlignmentX(Component.LEFT_ALIGNMENT);
 
-		JLabel sub = new JLabel("Add your API key in plugin settings");
+		JLabel sub = new JLabel("Sign up at 07flip.com \u2192 Profile \u2192 View API Key");
 		sub.setFont(Fonts.SM);
 		sub.setForeground(new Color(0x666666));
 		sub.setAlignmentX(Component.LEFT_ALIGNMENT);
