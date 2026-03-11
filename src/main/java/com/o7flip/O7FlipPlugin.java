@@ -24,6 +24,7 @@
  */
 package com.o7flip;
 
+import com.google.gson.JsonObject;
 import com.google.inject.Provides;
 import com.o7flip.model.BarrowsSet;
 import net.runelite.api.Client;
@@ -252,37 +253,139 @@ public class O7FlipPlugin extends Plugin
 
 		SwingUtilities.invokeLater(() -> panel.setLoading(true));
 
-		// Real-time endpoints — refresh every cycle.
-		apiClient.fetchFlips(panel.getSelectedPreset(),
-			panel.getFlipsMinProfit(), panel.getFlipsPriceMin(), panel.getFlipsPriceMax(),
-			panel.getFlipsPage(),
-			(items, total) -> SwingUtilities.invokeLater(() -> panel.updateFlips(items, total, panel.getFlipsPage())));
+		// Build the bundle sections object — only include tabs the user has enabled.
+		JsonObject sections = new JsonObject();
 
-		apiClient.fetchSpikes(panel.getSpikesSortKey(), panel.getSpikesPage(),
-			(items, total) -> SwingUtilities.invokeLater(() -> panel.updateSpikes(items, total, panel.getSpikesPage())));
+		if (config.showFlips())
+		{
+			JsonObject p = new JsonObject();
+			String preset = panel.getSelectedPreset();
+			if (preset != null && !preset.isEmpty())
+			{
+				p.addProperty("preset", preset);
+			}
+			long minProfit = panel.getFlipsMinProfit();
+			if (minProfit > 0)
+			{
+				p.addProperty("minProfit", minProfit);
+			}
+			long priceMin = panel.getFlipsPriceMin();
+			if (priceMin > 0)
+			{
+				p.addProperty("priceMin", priceMin);
+			}
+			long priceMax = panel.getFlipsPriceMax();
+			if (priceMax < Long.MAX_VALUE)
+			{
+				p.addProperty("priceMax", priceMax);
+			}
+			p.addProperty("page", panel.getFlipsPage());
+			sections.add("flips", p);
+		}
 
-		apiClient.fetchDips(panel.getDipsSortKey(), panel.getDipsPage(),
-			(items, total) -> SwingUtilities.invokeLater(() -> panel.updateDips(items, total, panel.getDipsPage())));
+		if (config.showSpikes())
+		{
+			JsonObject p = new JsonObject();
+			String sort = panel.getSpikesSortKey();
+			if (sort != null && !sort.isEmpty())
+			{
+				p.addProperty("sort", sort);
+			}
+			p.addProperty("page", panel.getSpikesPage());
+			sections.add("spikes", p);
+		}
 
-		apiClient.fetchDumps(panel.getDumpsSortKey(),
-			panel.getDumpsMinProfit(), panel.getDumpsPriceMin(), panel.getDumpsPriceMax(),
-			panel.getDumpsPage(),
-			(items, total) -> SwingUtilities.invokeLater(() -> panel.updateDumps(items, total, panel.getDumpsPage())));
+		if (config.showDips())
+		{
+			JsonObject p = new JsonObject();
+			String sort = panel.getDipsSortKey();
+			if (sort != null && !sort.isEmpty())
+			{
+				p.addProperty("sort", sort);
+			}
+			p.addProperty("page", panel.getDipsPage());
+			sections.add("dips", p);
+		}
 
-		apiClient.fetchAlerts(panel.getAlertsPage(),
-			(items, total) -> SwingUtilities.invokeLater(() -> panel.updateAlerts(items, total, panel.getAlertsPage())));
+		if (config.showDumps())
+		{
+			JsonObject p = new JsonObject();
+			String sort = panel.getDumpsSortKey();
+			if (sort != null && !sort.isEmpty())
+			{
+				p.addProperty("sort", sort);
+			}
+			long minProfit = panel.getDumpsMinProfit();
+			if (minProfit > 0)
+			{
+				p.addProperty("minProfit", minProfit);
+			}
+			long priceMin = panel.getDumpsPriceMin();
+			if (priceMin > 0)
+			{
+				p.addProperty("priceMin", priceMin);
+			}
+			long priceMax = panel.getDumpsPriceMax();
+			if (priceMax < Long.MAX_VALUE)
+			{
+				p.addProperty("priceMax", priceMax);
+			}
+			p.addProperty("page", panel.getDumpsPage());
+			sections.add("dumps", p);
+		}
 
-		// Slow endpoints — Barrows, Moon, and Decanting are driven by GE prices which
-		// update hourly. Refreshing them every SLOW_EVERY cycles (default: every 5 minutes)
-		// is more than sufficient and cuts their server load by ~80%.
+		if (config.showAlerts())
+		{
+			JsonObject p = new JsonObject();
+			p.addProperty("page", panel.getAlertsPage());
+			sections.add("alerts", p);
+		}
+
+		// Slow sections (Barrows, Moon, Decanting) update hourly — include only every SLOW_EVERY cycles.
 		slowTick++;
-		if (slowTick >= SLOW_EVERY)
+		boolean includeSlow = slowTick >= SLOW_EVERY;
+		if (includeSlow)
 		{
 			slowTick = 0;
-			fetchSlow();
+			if (config.showBarrows())
+			{
+				JsonObject p = new JsonObject();
+				p.addProperty("smithingLevel", config.smithingLevel());
+				sections.add("barrows", p);
+			}
+			if (config.showMoon())
+			{
+				JsonObject p = new JsonObject();
+				p.addProperty("smithingLevel", config.smithingLevel());
+				sections.add("moon", p);
+			}
+			if (config.showDecant())
+			{
+				sections.add("decanting", new JsonObject());
+			}
 		}
+
+		final int flipsPage   = panel.getFlipsPage();
+		final int spikesPage  = panel.getSpikesPage();
+		final int dipsPage    = panel.getDipsPage();
+		final int dumpsPage   = panel.getDumpsPage();
+		final int alertsPage  = panel.getAlertsPage();
+
+		apiClient.fetchBundle(
+			sections,
+			config.showFlips()   ? (items, total) -> SwingUtilities.invokeLater(() -> panel.updateFlips(items, total, flipsPage))   : null,
+			config.showSpikes()  ? (items, total) -> SwingUtilities.invokeLater(() -> panel.updateSpikes(items, total, spikesPage)) : null,
+			config.showDips()    ? (items, total) -> SwingUtilities.invokeLater(() -> panel.updateDips(items, total, dipsPage))     : null,
+			config.showDumps()   ? (items, total) -> SwingUtilities.invokeLater(() -> panel.updateDumps(items, total, dumpsPage))   : null,
+			config.showAlerts()  ? (items, total) -> SwingUtilities.invokeLater(() -> panel.updateAlerts(items, total, alertsPage)) : null,
+			(config.showBarrows() && includeSlow) ? sets    -> SwingUtilities.invokeLater(() -> panel.updateBarrows(sets))    : null,
+			(config.showMoon()    && includeSlow) ? sets    -> SwingUtilities.invokeLater(() -> panel.updateMoon(sets))       : null,
+			(config.showDecant()  && includeSlow) ? decants -> SwingUtilities.invokeLater(() -> panel.updateDecanting(decants)) : null
+		);
 	}
 
+	// Used when smithingLevel config changes — still hits individual endpoints
+	// since this is a rare, user-triggered event and not the scheduled poll.
 	void fetchSlow()
 	{
 		apiClient.fetchBarrows(config.smithingLevel(),

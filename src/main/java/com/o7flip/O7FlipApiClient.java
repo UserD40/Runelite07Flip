@@ -44,8 +44,10 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import okhttp3.Call;
 import okhttp3.Callback;
+import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
+import okhttp3.RequestBody;
 import okhttp3.Response;
 import javax.inject.Inject;
 import javax.inject.Singleton;
@@ -60,9 +62,10 @@ public class O7FlipApiClient
 {
 	private static final Logger log = LoggerFactory.getLogger(O7FlipApiClient.class);
 
-	private static final String BASE_URL    = "https://07flip.com/api/runelite";
-	private static final String USER_AGENT  = "07Flip-RuneLite/1.0";
-	private static final int    PAGE_LIMIT  = 10;   // items per page — must match O7FlipPanel.PAGE_SIZE
+	private static final String    BASE_URL        = "https://07flip.com/api/runelite";
+	private static final String    USER_AGENT      = "07Flip-RuneLite/1.0";
+	private static final int       PAGE_LIMIT      = 10;   // items per page — must match O7FlipPanel.PAGE_SIZE
+	private static final MediaType MEDIA_TYPE_JSON = MediaType.get("application/json; charset=utf-8");
 
 	@Inject
 	private OkHttpClient okHttpClient;
@@ -226,20 +229,7 @@ public class O7FlipApiClient
 			@Override
 			public void onResponse(Call call, Response response) throws IOException
 			{
-				parsePagedResponse(response, "flips", obj ->
-				{
-					FlipItem item = new FlipItem();
-					item.itemId          = getInt(obj, "item_id", 0);
-					item.name            = getString(obj, "name", "Unknown");
-					item.buyPrice        = getLong(obj, "buy_price", 0);
-					item.sellPrice       = getLong(obj, "sell_price", 0);
-					item.profit          = getLong(obj, "profit", 0);
-					item.roiPct          = getDouble(obj, "roi_pct", 0);
-					item.potentialProfit = getLong(obj, "potential_profit", 0);
-					item.buyLimit        = getInt(obj, "buy_limit", 0);
-					item.members         = getBool(obj, "members", true);
-					return item;
-				}, callback);
+				parsePagedResponse(response, "flips", O7FlipApiClient.this::parseFlipItem, callback);
 			}
 		});
 	}
@@ -264,21 +254,7 @@ public class O7FlipApiClient
 			@Override
 			public void onResponse(Call call, Response response) throws IOException
 			{
-				parsePagedResponse(response, "spikes", obj ->
-				{
-					SpikeItem item = new SpikeItem();
-					item.itemId       = getInt(obj, "item_id", 0);
-					item.name         = getString(obj, "name", "Unknown");
-					item.buyPrice     = getLong(obj, "buy_price", 0);
-					item.avg24hBuy    = getLong(obj, "avg_24h_buy", 0);
-					item.spikePct     = getDouble(obj, "spike_pct", 0);
-					item.hourlyVolume = getInt(obj, "hourly_volume", 0);
-					item.dailyVolume  = getInt(obj, "daily_volume", 0);
-					item.buyLimit     = getInt(obj, "buy_limit", 0);
-					item.members      = getBool(obj, "members", true);
-					item.lastUpdated  = getString(obj, "last_updated", "");
-					return item;
-				}, callback);
+				parsePagedResponse(response, "spikes", O7FlipApiClient.this::parseSpikeItem, callback);
 			}
 		});
 	}
@@ -303,21 +279,7 @@ public class O7FlipApiClient
 			@Override
 			public void onResponse(Call call, Response response) throws IOException
 			{
-				parsePagedResponse(response, "dips", obj ->
-				{
-					DipItem item = new DipItem();
-					item.itemId       = getInt(obj, "item_id", 0);
-					item.name         = getString(obj, "name", "Unknown");
-					item.buyPrice     = getLong(obj, "buy_price", 0);
-					item.avg24hBuy    = getLong(obj, "avg_24h_buy", 0);
-					item.dipPct       = getDouble(obj, "dip_pct", 0);
-					item.hourlyVolume = getInt(obj, "hourly_volume", 0);
-					item.dailyVolume  = getInt(obj, "daily_volume", 0);
-					item.buyLimit     = getInt(obj, "buy_limit", 0);
-					item.members      = getBool(obj, "members", true);
-					item.lastUpdated  = getString(obj, "last_updated", "");
-					return item;
-				}, callback);
+				parsePagedResponse(response, "dips", O7FlipApiClient.this::parseDipItem, callback);
 			}
 		});
 	}
@@ -355,30 +317,7 @@ public class O7FlipApiClient
 			@Override
 			public void onResponse(Call call, Response response) throws IOException
 			{
-				parsePagedResponse(response, "dumps", obj ->
-				{
-					DumpItem item = new DumpItem();
-					item.itemId           = getInt(obj, "item_id", 0);
-					item.name             = getString(obj, "name", "Unknown");
-					item.buyPrice         = getLong(obj, "buy_price", 0);
-					item.sellPrice        = getLong(obj, "sell_price", 0);
-					item.profit           = getLong(obj, "profit", 0);
-					// Fallback: older API versions use current_price instead of buy_price
-					if (item.buyPrice == 0)
-					{
-						item.buyPrice = getLong(obj, "current_price", 0);
-					}
-					item.dumpScore        = getInt(obj, "dump_score", 0);
-					item.dumpPct          = getDouble(obj, "dump_pct", 0);
-					item.dumpStatus       = getString(obj, "dump_status", "none");
-					item.lastDumpHoursAgo = getDoubleOrNull(obj, "last_dump_hours_ago");
-					item.nextDumpHours    = getDoubleOrNull(obj, "next_dump_hours");
-					item.burstCount       = getIntOrNull(obj, "burst_count");
-					item.hourlyVolume     = getInt(obj, "hourly_volume", 0);
-					item.buyLimit         = getInt(obj, "buy_limit", 0);
-					item.members          = getBool(obj, "members", true);
-					return item;
-				}, callback);
+				parsePagedResponse(response, "dumps", O7FlipApiClient.this::parseDumpItem, callback);
 			}
 		});
 	}
@@ -398,22 +337,113 @@ public class O7FlipApiClient
 			@Override
 			public void onResponse(Call call, Response response) throws IOException
 			{
-				parsePagedResponse(response, "alerts", obj ->
+				parsePagedResponse(response, "alerts", O7FlipApiClient.this::parseAlertItem, callback);
+			}
+		});
+	}
+
+	// -------------------------------------------------------------------------
+	// Bundle endpoint — single POST replacing all scheduled individual calls
+	// -------------------------------------------------------------------------
+
+	public void fetchBundle(
+		JsonObject sections,
+		BiConsumer<List<FlipItem>, Integer>  onFlips,
+		BiConsumer<List<SpikeItem>, Integer> onSpikes,
+		BiConsumer<List<DipItem>, Integer>   onDips,
+		BiConsumer<List<DumpItem>, Integer>  onDumps,
+		BiConsumer<List<AlertItem>, Integer> onAlerts,
+		Consumer<List<BarrowsSet>>           onBarrows,
+		Consumer<List<MoonSet>>              onMoon,
+		Consumer<List<DecantItem>>           onDecanting
+	)
+	{
+		JsonObject body = new JsonObject();
+		body.add("sections", sections);
+		RequestBody requestBody = RequestBody.create(gson.toJson(body), MEDIA_TYPE_JSON);
+
+		Request.Builder builder = new Request.Builder()
+			.url(BASE_URL + "/bundle")
+			.post(requestBody)
+			.header("User-Agent", USER_AGENT);
+		String key = config != null ? config.apiKey() : null;
+		if (key != null && !key.trim().isEmpty())
+		{
+			builder.header("Authorization", "Bearer " + key.trim());
+		}
+
+		okHttpClient.newCall(builder.build()).enqueue(new Callback()
+		{
+			@Override
+			public void onFailure(Call call, IOException e)
+			{
+				log.warn("[07Flip] fetchBundle failed: {}", e.getMessage());
+			}
+
+			@Override
+			public void onResponse(Call call, Response response) throws IOException
+			{
+				if (response.code() == 429)
 				{
-					AlertItem alert = new AlertItem();
-					alert.itemId       = getInt(obj, "item_id", 0);
-					alert.name         = getString(obj, "name", "Unknown");
-					alert.tier         = getString(obj, "tier", "");
-					alert.currentPrice = getLong(obj, "current_price", 0);
-					alert.sellTarget   = getLong(obj, "sell_target", 0);
-					alert.upsidePct    = getDouble(obj, "upside_pct", 0);
-					alert.holdTime     = getString(obj, "hold_time", "");
-					alert.high90d      = getLong(obj, "high_90d", 0);
-					alert.low90d       = getLong(obj, "low_90d", 0);
-					alert.drawdownPct  = getDouble(obj, "drawdown_pct", 0);
-					alert.detectedAt   = getString(obj, "detected_at", "");
-					return alert;
-				}, callback);
+					markRateLimited();
+					return;
+				}
+				if (!response.isSuccessful() || response.body() == null)
+				{
+					log.warn("[07Flip] fetchBundle HTTP {}", response.code());
+					return;
+				}
+				try
+				{
+					JsonObject root = gson.fromJson(response.body().string(), JsonObject.class);
+
+					if (onFlips != null && root.has("flips"))
+					{
+						JsonObject sec = root.getAsJsonObject("flips");
+						List<FlipItem> items = parseArray(sec, "flips", O7FlipApiClient.this::parseFlipItem);
+						onFlips.accept(items, getInt(sec, "total", items.size()));
+					}
+					if (onSpikes != null && root.has("spikes"))
+					{
+						JsonObject sec = root.getAsJsonObject("spikes");
+						List<SpikeItem> items = parseArray(sec, "spikes", O7FlipApiClient.this::parseSpikeItem);
+						onSpikes.accept(items, getInt(sec, "total", items.size()));
+					}
+					if (onDips != null && root.has("dips"))
+					{
+						JsonObject sec = root.getAsJsonObject("dips");
+						List<DipItem> items = parseArray(sec, "dips", O7FlipApiClient.this::parseDipItem);
+						onDips.accept(items, getInt(sec, "total", items.size()));
+					}
+					if (onDumps != null && root.has("dumps"))
+					{
+						JsonObject sec = root.getAsJsonObject("dumps");
+						List<DumpItem> items = parseArray(sec, "dumps", O7FlipApiClient.this::parseDumpItem);
+						onDumps.accept(items, getInt(sec, "total", items.size()));
+					}
+					if (onAlerts != null && root.has("alerts"))
+					{
+						JsonObject sec = root.getAsJsonObject("alerts");
+						List<AlertItem> items = parseArray(sec, "alerts", O7FlipApiClient.this::parseAlertItem);
+						onAlerts.accept(items, getInt(sec, "total", items.size()));
+					}
+					if (onBarrows != null && root.has("barrows"))
+					{
+						onBarrows.accept(parseArray(root.getAsJsonObject("barrows"), "sets", O7FlipApiClient.this::parseBarrowsSet));
+					}
+					if (onMoon != null && root.has("moon"))
+					{
+						onMoon.accept(parseArray(root.getAsJsonObject("moon"), "sets", O7FlipApiClient.this::parseMoonSet));
+					}
+					if (onDecanting != null && root.has("decanting"))
+					{
+						onDecanting.accept(parseArray(root.getAsJsonObject("decanting"), "decants", O7FlipApiClient.this::parseDecantItem));
+					}
+				}
+				catch (Exception e)
+				{
+					log.warn("[07Flip] fetchBundle parse error: {}", e.getMessage());
+				}
 			}
 		});
 	}
@@ -533,56 +563,7 @@ public class O7FlipApiClient
 			@Override
 			public void onResponse(Call call, Response response) throws IOException
 			{
-				callback.accept(parseArray(response, "sets", obj ->
-				{
-					MoonSet s = new MoonSet();
-					s.setName             = getString(obj, "set_name", "");
-					s.shortName           = getString(obj, "short_name", "");
-					s.combatStyle         = getString(obj, "combat_style", "");
-					s.setId               = getInt(obj, "set_id", 0);
-					s.iconItemId          = getInt(obj, "icon_item_id", 0);
-					s.totalBrokenCost     = getLong(obj, "total_broken_cost", 0);
-					s.totalNpcRepairCost  = getLong(obj, "total_npc_repair_cost", 0);
-					s.totalPohRepairCost  = getLong(obj, "total_poh_repair_cost", 0);
-					s.npcProfit           = getLong(obj, "npc_profit", 0);
-					s.pohProfit           = getLong(obj, "poh_profit", 0);
-					s.setPrice            = getLong(obj, "set_price", 0);
-					s.setProfit           = getLong(obj, "set_profit", 0);
-					s.bestStrategy        = getString(obj, "best_strategy", "sell_individual");
-					s.bestProfit          = getLong(obj, "best_profit", 0);
-					JsonArray itemsArr = obj.getAsJsonArray("items");
-					if (itemsArr != null)
-					{
-						for (int i = 0; i < itemsArr.size(); i++)
-						{
-							try
-							{
-								JsonObject io = itemsArr.get(i).getAsJsonObject();
-								MoonItem mi = new MoonItem();
-								mi.itemIdBroken      = getInt(io, "item_id_broken", 0);
-								mi.itemIdRepaired    = getInt(io, "item_id_repaired", 0);
-								mi.name              = getString(io, "name", "");
-								mi.slot              = getString(io, "slot", "");
-								mi.degrades          = getBool(io, "degrades", false);
-								mi.brokenBuyPrice    = getLong(io, "broken_buy_price", 0);
-								mi.repairedSellPrice = getLong(io, "repaired_sell_price", 0);
-								mi.repairedAfterTax  = getLong(io, "repaired_after_tax", 0);
-								mi.npcRepairCost     = getLong(io, "npc_repair_cost", 0);
-								mi.pohRepairCost     = getLong(io, "poh_repair_cost", 0);
-								mi.npcProfit         = getLong(io, "npc_profit", 0);
-								mi.pohProfit         = getLong(io, "poh_profit", 0);
-								mi.npcRoiPct         = getDouble(io, "npc_roi_pct", 0);
-								mi.pohRoiPct         = getDouble(io, "poh_roi_pct", 0);
-								s.items.add(mi);
-							}
-							catch (Exception e)
-							{
-								log.warn("[07Flip] Skipping malformed moon item at index {}: {}", i, e.getMessage());
-							}
-						}
-					}
-					return s;
-				}));
+				callback.accept(parseArray(response, "sets", O7FlipApiClient.this::parseMoonSet));
 			}
 		});
 	}
@@ -601,23 +582,169 @@ public class O7FlipApiClient
 			@Override
 			public void onResponse(Call call, Response response) throws IOException
 			{
-				callback.accept(parseArray(response, "decants", obj ->
-				{
-					DecantItem item = new DecantItem();
-					item.itemId           = getInt(obj, "item_id", 0);
-					item.potionName       = getString(obj, "potion_name", "Unknown");
-					item.strategy         = getString(obj, "strategy", "");
-					item.profitPer4dose   = getLong(obj, "profit_per_4dose", 0);
-					item.profitPerDose    = getLong(obj, "profit_per_dose", 0);
-					item.roiPct           = getDouble(obj, "roi_pct", 0);
-					item.minHourlyVolume  = getInt(obj, "min_hourly_volume", 0);
-					item.dailyVolume      = getInt(obj, "daily_volume", 0);
-					item.buyDose          = getInt(obj, "buy_dose", 0);
-					item.sellDose         = getInt(obj, "sell_dose", 0);
-					return item;
-				}));
+				callback.accept(parseArray(response, "decants", O7FlipApiClient.this::parseDecantItem));
 			}
 		});
+	}
+
+	// -------------------------------------------------------------------------
+	// Per-type parsers (shared by individual fetch methods and fetchBundle)
+	// -------------------------------------------------------------------------
+
+	private FlipItem parseFlipItem(JsonObject obj)
+	{
+		FlipItem item = new FlipItem();
+		item.itemId          = getInt(obj, "item_id", 0);
+		item.name            = getString(obj, "name", "Unknown");
+		item.buyPrice        = getLong(obj, "buy_price", 0);
+		item.sellPrice       = getLong(obj, "sell_price", 0);
+		item.profit          = getLong(obj, "profit", 0);
+		item.roiPct          = getDouble(obj, "roi_pct", 0);
+		item.potentialProfit = getLong(obj, "potential_profit", 0);
+		item.buyLimit        = getInt(obj, "buy_limit", 0);
+		item.members         = getBool(obj, "members", true);
+		return item;
+	}
+
+	private SpikeItem parseSpikeItem(JsonObject obj)
+	{
+		SpikeItem item = new SpikeItem();
+		item.itemId       = getInt(obj, "item_id", 0);
+		item.name         = getString(obj, "name", "Unknown");
+		item.buyPrice     = getLong(obj, "buy_price", 0);
+		item.avg24hBuy    = getLong(obj, "avg_24h_buy", 0);
+		item.spikePct     = getDouble(obj, "spike_pct", 0);
+		item.hourlyVolume = getInt(obj, "hourly_volume", 0);
+		item.dailyVolume  = getInt(obj, "daily_volume", 0);
+		item.buyLimit     = getInt(obj, "buy_limit", 0);
+		item.members      = getBool(obj, "members", true);
+		item.lastUpdated  = getString(obj, "last_updated", "");
+		return item;
+	}
+
+	private DipItem parseDipItem(JsonObject obj)
+	{
+		DipItem item = new DipItem();
+		item.itemId       = getInt(obj, "item_id", 0);
+		item.name         = getString(obj, "name", "Unknown");
+		item.buyPrice     = getLong(obj, "buy_price", 0);
+		item.avg24hBuy    = getLong(obj, "avg_24h_buy", 0);
+		item.dipPct       = getDouble(obj, "dip_pct", 0);
+		item.hourlyVolume = getInt(obj, "hourly_volume", 0);
+		item.dailyVolume  = getInt(obj, "daily_volume", 0);
+		item.buyLimit     = getInt(obj, "buy_limit", 0);
+		item.members      = getBool(obj, "members", true);
+		item.lastUpdated  = getString(obj, "last_updated", "");
+		return item;
+	}
+
+	private DumpItem parseDumpItem(JsonObject obj)
+	{
+		DumpItem item = new DumpItem();
+		item.itemId           = getInt(obj, "item_id", 0);
+		item.name             = getString(obj, "name", "Unknown");
+		item.buyPrice         = getLong(obj, "buy_price", 0);
+		item.sellPrice        = getLong(obj, "sell_price", 0);
+		item.profit           = getLong(obj, "profit", 0);
+		// Fallback: older API versions use current_price instead of buy_price
+		if (item.buyPrice == 0)
+		{
+			item.buyPrice = getLong(obj, "current_price", 0);
+		}
+		item.dumpScore        = getInt(obj, "dump_score", 0);
+		item.dumpPct          = getDouble(obj, "dump_pct", 0);
+		item.dumpStatus       = getString(obj, "dump_status", "none");
+		item.lastDumpHoursAgo = getDoubleOrNull(obj, "last_dump_hours_ago");
+		item.nextDumpHours    = getDoubleOrNull(obj, "next_dump_hours");
+		item.burstCount       = getIntOrNull(obj, "burst_count");
+		item.hourlyVolume     = getInt(obj, "hourly_volume", 0);
+		item.buyLimit         = getInt(obj, "buy_limit", 0);
+		item.members          = getBool(obj, "members", true);
+		return item;
+	}
+
+	private AlertItem parseAlertItem(JsonObject obj)
+	{
+		AlertItem alert = new AlertItem();
+		alert.itemId       = getInt(obj, "item_id", 0);
+		alert.name         = getString(obj, "name", "Unknown");
+		alert.tier         = getString(obj, "tier", "");
+		alert.currentPrice = getLong(obj, "current_price", 0);
+		alert.sellTarget   = getLong(obj, "sell_target", 0);
+		alert.upsidePct    = getDouble(obj, "upside_pct", 0);
+		alert.holdTime     = getString(obj, "hold_time", "");
+		alert.high90d      = getLong(obj, "high_90d", 0);
+		alert.low90d       = getLong(obj, "low_90d", 0);
+		alert.drawdownPct  = getDouble(obj, "drawdown_pct", 0);
+		alert.detectedAt   = getString(obj, "detected_at", "");
+		return alert;
+	}
+
+	private MoonSet parseMoonSet(JsonObject obj)
+	{
+		MoonSet s = new MoonSet();
+		s.setName             = getString(obj, "set_name", "");
+		s.shortName           = getString(obj, "short_name", "");
+		s.combatStyle         = getString(obj, "combat_style", "");
+		s.setId               = getInt(obj, "set_id", 0);
+		s.iconItemId          = getInt(obj, "icon_item_id", 0);
+		s.totalBrokenCost     = getLong(obj, "total_broken_cost", 0);
+		s.totalNpcRepairCost  = getLong(obj, "total_npc_repair_cost", 0);
+		s.totalPohRepairCost  = getLong(obj, "total_poh_repair_cost", 0);
+		s.npcProfit           = getLong(obj, "npc_profit", 0);
+		s.pohProfit           = getLong(obj, "poh_profit", 0);
+		s.setPrice            = getLong(obj, "set_price", 0);
+		s.setProfit           = getLong(obj, "set_profit", 0);
+		s.bestStrategy        = getString(obj, "best_strategy", "sell_individual");
+		s.bestProfit          = getLong(obj, "best_profit", 0);
+		JsonArray itemsArr = obj.getAsJsonArray("items");
+		if (itemsArr != null)
+		{
+			for (int i = 0; i < itemsArr.size(); i++)
+			{
+				try
+				{
+					JsonObject io = itemsArr.get(i).getAsJsonObject();
+					MoonItem mi = new MoonItem();
+					mi.itemIdBroken      = getInt(io, "item_id_broken", 0);
+					mi.itemIdRepaired    = getInt(io, "item_id_repaired", 0);
+					mi.name              = getString(io, "name", "");
+					mi.slot              = getString(io, "slot", "");
+					mi.degrades          = getBool(io, "degrades", false);
+					mi.brokenBuyPrice    = getLong(io, "broken_buy_price", 0);
+					mi.repairedSellPrice = getLong(io, "repaired_sell_price", 0);
+					mi.repairedAfterTax  = getLong(io, "repaired_after_tax", 0);
+					mi.npcRepairCost     = getLong(io, "npc_repair_cost", 0);
+					mi.pohRepairCost     = getLong(io, "poh_repair_cost", 0);
+					mi.npcProfit         = getLong(io, "npc_profit", 0);
+					mi.pohProfit         = getLong(io, "poh_profit", 0);
+					mi.npcRoiPct         = getDouble(io, "npc_roi_pct", 0);
+					mi.pohRoiPct         = getDouble(io, "poh_roi_pct", 0);
+					s.items.add(mi);
+				}
+				catch (Exception e)
+				{
+					log.warn("[07Flip] Skipping malformed moon item at index {}: {}", i, e.getMessage());
+				}
+			}
+		}
+		return s;
+	}
+
+	private DecantItem parseDecantItem(JsonObject obj)
+	{
+		DecantItem item = new DecantItem();
+		item.itemId           = getInt(obj, "item_id", 0);
+		item.potionName       = getString(obj, "potion_name", "Unknown");
+		item.strategy         = getString(obj, "strategy", "");
+		item.profitPer4dose   = getLong(obj, "profit_per_4dose", 0);
+		item.profitPerDose    = getLong(obj, "profit_per_dose", 0);
+		item.roiPct           = getDouble(obj, "roi_pct", 0);
+		item.minHourlyVolume  = getInt(obj, "min_hourly_volume", 0);
+		item.dailyVolume      = getInt(obj, "daily_volume", 0);
+		item.buyDose          = getInt(obj, "buy_dose", 0);
+		item.sellDose         = getInt(obj, "sell_dose", 0);
+		return item;
 	}
 
 	// -------------------------------------------------------------------------

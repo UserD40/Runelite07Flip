@@ -399,23 +399,23 @@ public class O7FlipPanel extends PluginPanel
 				new EmptyBorder(9, 10, 9, 10)));
 
 			bannerRow(inner, "\uD83D\uDD11 Connect Your Account", Fonts.BOLD, ORANGE, 0);
-			bannerRow(inner, "A free API key unlocks full results,", Fonts.SM, new Color(0x777777), 4);
-			bannerRow(inner, "all flip presets and premium features.", Fonts.SM, new Color(0x777777), 0);
+			bannerRow(inner, "An API key unlocks more flip presets.", Fonts.SM, new Color(0x777777), 4);
+			bannerRow(inner, "Premium subscription required for full access.", Fonts.SM, new Color(0x777777), 0);
 
 			inner.add(Box.createRigidArea(new java.awt.Dimension(0, 10)));
 
 			bannerRow(inner, "GET YOUR KEY:", Fonts.SM_BOLD, new Color(0x999999), 0);
 			bannerRow(inner, "1.  Visit 07flip.com and sign up",           Fonts.SM, new Color(0xDDDDDD), 3);
 			bannerRow(inner, "2.  Log in with Discord",                    Fonts.SM, new Color(0xDDDDDD), 1);
-			bannerRow(inner, "3.  Click your profile icon (top-right)",    Fonts.SM, new Color(0xDDDDDD), 1);
-			bannerRow(inner, "     \u2192  Select \u201CView API Key\u201D",      Fonts.SM, new Color(0xFF981F), 0);
+			bannerRow(inner, "3.  Click your Discord user icon (top-right)", Fonts.SM, new Color(0xDDDDDD), 1);
+			bannerRow(inner, "     \u2192  Select \u201CView API Key\u201D",       Fonts.SM, new Color(0xFF981F), 0);
 			bannerRow(inner, "4.  Copy the key shown on screen",           Fonts.SM, new Color(0xDDDDDD), 1);
 
 			inner.add(Box.createRigidArea(new java.awt.Dimension(0, 9)));
 
 			bannerRow(inner, "ADD KEY IN RUNELITE:", Fonts.SM_BOLD, new Color(0x999999), 0);
-			bannerRow(inner, "1.  Right-click the 07Flip plugin icon",     Fonts.SM, new Color(0xDDDDDD), 3);
-			bannerRow(inner, "2.  Click \u201CConfigure\u201D",                   Fonts.SM, new Color(0xDDDDDD), 1);
+			bannerRow(inner, "1.  Open RuneLite plugin settings",            Fonts.SM, new Color(0xDDDDDD), 3);
+			bannerRow(inner, "2.  Find 07Flip and click the spanner icon",  Fonts.SM, new Color(0xDDDDDD), 1);
 			bannerRow(inner, "3.  Paste key into the API Key field",       Fonts.SM, new Color(0xDDDDDD), 1);
 			bannerRow(inner, "4.  Press Enter \u2014 done!",               Fonts.SM, new Color(0xDDDDDD), 1);
 
