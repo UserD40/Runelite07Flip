@@ -165,28 +165,31 @@ public class O7FlipApiClient
 			@Override
 			public void onFailure(Call call, IOException e)
 			{
+				// Network failure — leave existing auth state unchanged rather than resetting to anonymous.
 				log.warn("[07Flip] fetchAuthStatus failed: {}", e.getMessage());
-				callback.accept(new AuthStatus());
 			}
 
 			@Override
 			public void onResponse(Call call, Response response) throws IOException
 			{
-				AuthStatus status = new AuthStatus();
-				if (response.isSuccessful() && response.body() != null)
+				if (!response.isSuccessful() || response.body() == null)
 				{
-					try
-					{
-						JsonObject json = gson.fromJson(response.body().string(), JsonObject.class);
-						status.authenticated = getBool(json, "authenticated", false);
-						status.premium       = getBool(json, "premium",       false);
-					}
-					catch (Exception e)
-					{
-						log.warn("[07Flip] Auth parse error: {}", e.getMessage());
-					}
+					// Server error — leave existing auth state unchanged.
+					log.warn("[07Flip] fetchAuthStatus HTTP {}", response.code());
+					return;
 				}
-				callback.accept(status);
+				try
+				{
+					JsonObject json = gson.fromJson(response.body().string(), JsonObject.class);
+					AuthStatus status = new AuthStatus();
+					status.authenticated = getBool(json, "authenticated", false);
+					status.premium       = getBool(json, "premium",       false);
+					callback.accept(status);
+				}
+				catch (Exception e)
+				{
+					log.warn("[07Flip] Auth parse error: {}", e.getMessage());
+				}
 			}
 		});
 	}
@@ -360,7 +363,7 @@ public class O7FlipApiClient
 	{
 		JsonObject body = new JsonObject();
 		body.add("sections", sections);
-		RequestBody requestBody = RequestBody.create(gson.toJson(body), MEDIA_TYPE_JSON);
+		RequestBody requestBody = RequestBody.create(MEDIA_TYPE_JSON, gson.toJson(body));
 
 		Request.Builder builder = new Request.Builder()
 			.url(BASE_URL + "/bundle")
