@@ -29,7 +29,9 @@ import com.o7flip.model.BarrowsSet;
 import net.runelite.api.Client;
 import net.runelite.api.ScriptID;
 import net.runelite.api.events.WidgetLoaded;
+import net.runelite.api.widgets.ComponentID;
 import net.runelite.api.widgets.InterfaceID;
+import net.runelite.api.widgets.Widget;
 import net.runelite.client.callback.ClientThread;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.eventbus.Subscribe;
@@ -98,11 +100,22 @@ public class O7FlipPlugin extends Plugin
 	/** Called by item panels on right-click to queue a GE buy pre-fill. */
 	public void queueGeBuy(int itemId, long price, String name)
 	{
-		pendingGeBuyItemId = itemId;
-		pendingGeBuyPrice  = price;
-		pendingGeBuyName   = name;
-		notifier.notify("Open the Grand Exchange to pre-fill your offer for " + name);
 		log.debug("[07Flip] GE buy queued: {} ({}) @ {}", name, itemId, price);
+		clientThread.invokeLater(() ->
+		{
+			Widget geWindow = client.getWidget(ComponentID.GRAND_EXCHANGE_WINDOW_CONTAINER);
+			if (geWindow != null && !geWindow.isHidden())
+			{
+				fillGeBuyOffer(itemId, price, name);
+			}
+			else
+			{
+				pendingGeBuyItemId = itemId;
+				pendingGeBuyPrice  = price;
+				pendingGeBuyName   = name;
+				notifier.notify("Open the Grand Exchange to pre-fill your offer for " + name);
+			}
+		});
 	}
 
 	@Override
