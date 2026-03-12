@@ -104,8 +104,9 @@ public class O7FlipPlugin extends Plugin
 		log.debug("[07Flip] GE buy queued: {} ({}) @ {}", name, itemId, price);
 		clientThread.invokeLater(() ->
 		{
-			Widget geWindow = client.getWidget(ComponentID.GRAND_EXCHANGE_WINDOW_CONTAINER);
-			if (geWindow != null && !geWindow.isHidden())
+			// GE_ITEM_SEARCH only works when a buy slot is active (offer container visible).
+			Widget offerContainer = client.getWidget(ComponentID.GRAND_EXCHANGE_OFFER_CONTAINER);
+			if (offerContainer != null && !offerContainer.isHidden())
 			{
 				fillGeBuyOffer(itemId, price, name);
 			}
@@ -114,7 +115,7 @@ public class O7FlipPlugin extends Plugin
 				pendingGeBuyItemId = itemId;
 				pendingGeBuyPrice  = price;
 				pendingGeBuyName   = name;
-				notifier.notify("Open the Grand Exchange to pre-fill your offer for " + name);
+				notifier.notify("Open the Grand Exchange, click an empty buy slot, then your offer will pre-fill for " + name);
 			}
 		});
 	}
@@ -176,13 +177,23 @@ public class O7FlipPlugin extends Plugin
 		{
 			return;
 		}
-		final int    itemId = pendingGeBuyItemId;
-		final long   price  = pendingGeBuyPrice;
-		final String name   = pendingGeBuyName;
-		pendingGeBuyItemId = -1;
-		pendingGeBuyPrice  = -1;
-		pendingGeBuyName   = null;
-		clientThread.invokeLater(() -> fillGeBuyOffer(itemId, price, name));
+		// Wait until the offer container is actually visible before running the search script —
+		// the main GE screen and the buy offer screen both fire WidgetLoaded with the same group.
+		clientThread.invokeLater(() ->
+		{
+			Widget offerContainer = client.getWidget(ComponentID.GRAND_EXCHANGE_OFFER_CONTAINER);
+			if (offerContainer == null || offerContainer.isHidden())
+			{
+				return;
+			}
+			final int    itemId = pendingGeBuyItemId;
+			final long   price  = pendingGeBuyPrice;
+			final String name   = pendingGeBuyName;
+			pendingGeBuyItemId = -1;
+			pendingGeBuyPrice  = -1;
+			pendingGeBuyName   = null;
+			fillGeBuyOffer(itemId, price, name);
+		});
 	}
 
 	private void fillGeBuyOffer(int itemId, long price, String name)
