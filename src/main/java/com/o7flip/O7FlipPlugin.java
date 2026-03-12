@@ -351,6 +351,7 @@ public class O7FlipPlugin extends Plugin
 			{
 				JsonObject p = new JsonObject();
 				p.addProperty("smithingLevel", config.smithingLevel());
+				p.addProperty("set", "all");
 				sections.add("barrows", p);
 			}
 			if (config.showMoon())
@@ -384,18 +385,34 @@ public class O7FlipPlugin extends Plugin
 		);
 	}
 
-	// Used when smithingLevel config changes — still hits individual endpoints
-	// since this is a rare, user-triggered event and not the scheduled poll.
+	// Called when smithingLevel config changes — fires a bundle with just the slow sections.
 	void fetchSlow()
 	{
-		apiClient.fetchBarrows(config.smithingLevel(),
-			sets -> SwingUtilities.invokeLater(() -> panel.updateBarrows(sets)));
-
-		apiClient.fetchMoon(config.smithingLevel(),
-			sets -> SwingUtilities.invokeLater(() -> panel.updateMoon(sets)));
-
-		apiClient.fetchDecanting(
-			decants -> SwingUtilities.invokeLater(() -> panel.updateDecanting(decants)));
+		JsonObject sections = new JsonObject();
+		if (config.showBarrows())
+		{
+			JsonObject p = new JsonObject();
+			p.addProperty("smithingLevel", config.smithingLevel());
+			p.addProperty("set", "all");
+			sections.add("barrows", p);
+		}
+		if (config.showMoon())
+		{
+			JsonObject p = new JsonObject();
+			p.addProperty("smithingLevel", config.smithingLevel());
+			sections.add("moon", p);
+		}
+		if (config.showDecant())
+		{
+			sections.add("decanting", new JsonObject());
+		}
+		apiClient.fetchBundle(
+			sections,
+			null, null, null, null, null,
+			config.showBarrows() ? sets    -> SwingUtilities.invokeLater(() -> panel.updateBarrows(sets))      : null,
+			config.showMoon()    ? sets    -> SwingUtilities.invokeLater(() -> panel.updateMoon(sets))         : null,
+			config.showDecant()  ? decants -> SwingUtilities.invokeLater(() -> panel.updateDecanting(decants)) : null
+		);
 	}
 
 	// -------------------------------------------------------------------------
