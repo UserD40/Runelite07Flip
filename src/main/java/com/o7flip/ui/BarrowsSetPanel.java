@@ -146,6 +146,9 @@ public class BarrowsSetPanel extends JPanel
 					JMenuItem buyItem = new JMenuItem("Buy on GE \u2014 " + FlipItemPanel.formatGp(set.totalBrokenCost));
 					buyItem.addActionListener(ae -> plugin.queueGeBuy(set.iconItemId, set.totalBrokenCost, set.shortName));
 					menu.add(buyItem);
+					JMenuItem hint = new JMenuItem("Open GE \u2192 click a buy slot first");
+					hint.setEnabled(false);
+					menu.add(hint);
 					menu.show(e.getComponent(), e.getX(), e.getY());
 				}
 			}

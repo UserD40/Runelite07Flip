@@ -129,6 +129,9 @@ public class FlipItemPanel extends JPanel
 					JMenuItem buyItem = new JMenuItem("Buy on GE \u2014 " + formatGp(flip.sellPrice));
 					buyItem.addActionListener(ae -> plugin.queueGeBuy(flip.itemId, flip.sellPrice, flip.name));
 					menu.add(buyItem);
+					JMenuItem hint = new JMenuItem("Open GE \u2192 click a buy slot first");
+					hint.setEnabled(false);
+					menu.add(hint);
 					menu.show(e.getComponent(), e.getX(), e.getY());
 				}
 			}

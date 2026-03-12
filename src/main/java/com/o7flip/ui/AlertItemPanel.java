@@ -171,6 +171,9 @@ public class AlertItemPanel extends JPanel
 					JMenuItem buyItem = new JMenuItem("Buy on GE \u2014 " + formatGpFull(alert.currentPrice));
 					buyItem.addActionListener(ae -> plugin.queueGeBuy(alert.itemId, alert.currentPrice, alert.name));
 					menu.add(buyItem);
+					JMenuItem hint = new JMenuItem("Open GE \u2192 click a buy slot first");
+					hint.setEnabled(false);
+					menu.add(hint);
 					menu.show(e.getComponent(), e.getX(), e.getY());
 				}
 			}

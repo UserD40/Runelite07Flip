@@ -138,6 +138,9 @@ public class SpikeItemPanel extends JPanel
 					JMenuItem buyItem = new JMenuItem("Buy on GE \u2014 " + FlipItemPanel.formatGp(item.buyPrice));
 					buyItem.addActionListener(ae -> plugin.queueGeBuy(item.itemId, item.buyPrice, item.name));
 					menu.add(buyItem);
+					JMenuItem hint = new JMenuItem("Open GE \u2192 click a buy slot first");
+					hint.setEnabled(false);
+					menu.add(hint);
 					menu.show(e.getComponent(), e.getX(), e.getY());
 				}
 			}
