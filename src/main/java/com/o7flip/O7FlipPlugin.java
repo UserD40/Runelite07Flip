@@ -29,9 +29,8 @@ import com.google.inject.Provides;
 import com.o7flip.model.BarrowsSet;
 import net.runelite.api.Client;
 import net.runelite.api.ScriptID;
-import net.runelite.api.events.WidgetLoaded;
+import net.runelite.api.events.GameTick;
 import net.runelite.api.widgets.ComponentID;
-import net.runelite.api.widgets.InterfaceID;
 import net.runelite.api.widgets.Widget;
 import net.runelite.client.callback.ClientThread;
 import net.runelite.client.config.ConfigManager;
@@ -166,34 +165,29 @@ public class O7FlipPlugin extends Plugin
 	// GE auto-fill — fires when the Grand Exchange interface opens
 	// -------------------------------------------------------------------------
 
+	// onWidgetLoaded is intentionally NOT used for GE pre-fill because clicking a buy slot
+	// only toggles widget visibility within the already-loaded GRAND_EXCHANGE interface —
+	// it does NOT re-fire WidgetLoaded. onGameTick polls instead.
+
 	@Subscribe
-	public void onWidgetLoaded(WidgetLoaded event)
+	public void onGameTick(GameTick event)
 	{
-		if (event.getGroupId() != InterfaceID.GRAND_EXCHANGE)
-		{
-			return;
-		}
 		if (pendingGeBuyItemId == -1)
 		{
 			return;
 		}
-		// Wait until the offer container is actually visible before running the search script —
-		// the main GE screen and the buy offer screen both fire WidgetLoaded with the same group.
-		clientThread.invokeLater(() ->
+		Widget offerContainer = client.getWidget(ComponentID.GRAND_EXCHANGE_OFFER_CONTAINER);
+		if (offerContainer == null || offerContainer.isHidden())
 		{
-			Widget offerContainer = client.getWidget(ComponentID.GRAND_EXCHANGE_OFFER_CONTAINER);
-			if (offerContainer == null || offerContainer.isHidden())
-			{
-				return;
-			}
-			final int    itemId = pendingGeBuyItemId;
-			final long   price  = pendingGeBuyPrice;
-			final String name   = pendingGeBuyName;
-			pendingGeBuyItemId = -1;
-			pendingGeBuyPrice  = -1;
-			pendingGeBuyName   = null;
-			fillGeBuyOffer(itemId, price, name);
-		});
+			return;
+		}
+		final int    itemId = pendingGeBuyItemId;
+		final long   price  = pendingGeBuyPrice;
+		final String name   = pendingGeBuyName;
+		pendingGeBuyItemId = -1;
+		pendingGeBuyPrice  = -1;
+		pendingGeBuyName   = null;
+		fillGeBuyOffer(itemId, price, name);
 	}
 
 	private void fillGeBuyOffer(int itemId, long price, String name)
