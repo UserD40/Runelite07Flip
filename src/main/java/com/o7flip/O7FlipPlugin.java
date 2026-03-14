@@ -28,10 +28,11 @@ import com.google.gson.JsonObject;
 import com.google.inject.Provides;
 import com.o7flip.model.BarrowsSet;
 import net.runelite.api.Client;
-import net.runelite.api.ScriptID;
 import net.runelite.api.events.GameTick;
+import net.runelite.api.gameval.VarClientID;
 import net.runelite.api.widgets.ComponentID;
 import net.runelite.api.widgets.Widget;
+import net.runelite.api.widgets.WidgetInfo;
 import net.runelite.client.callback.ClientThread;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.eventbus.Subscribe;
@@ -190,9 +191,28 @@ public class O7FlipPlugin extends Plugin
 		fillGeBuyOffer(itemId, price, name);
 	}
 
+	// GE search mode integer used by MESLAYERMODE to indicate an active GE item search.
+	private static final int GE_SEARCH_MODE = 14;
+
 	private void fillGeBuyOffer(int itemId, long price, String name)
 	{
-		client.runScript(ScriptID.GE_ITEM_SEARCH, name);
+		// Pre-fill the search text, then trigger the search by running the chatbox
+		// input widget's own key-listener script — the same mechanism GE Filters uses.
+		client.setVarcStrValue(VarClientID.MESLAYERINPUT, name);
+		client.setVarcIntValue(VarClientID.MESLAYERMODE, GE_SEARCH_MODE);
+		Widget searchBox = client.getWidget(WidgetInfo.CHATBOX_FULL_INPUT);
+		if (searchBox == null)
+		{
+			log.debug("[07Flip] GE search box widget not found");
+			return;
+		}
+		Object[] scriptArgs = searchBox.getOnKeyListener();
+		if (scriptArgs == null)
+		{
+			log.debug("[07Flip] GE search box has no key listener");
+			return;
+		}
+		client.runScript(scriptArgs);
 	}
 
 	// -------------------------------------------------------------------------
