@@ -358,7 +358,8 @@ public class O7FlipApiClient
 		BiConsumer<List<AlertItem>, Integer> onAlerts,
 		Consumer<List<BarrowsSet>>           onBarrows,
 		Consumer<List<MoonSet>>              onMoon,
-		Consumer<List<DecantItem>>           onDecanting
+		Consumer<List<DecantItem>>           onDecanting,
+		Consumer<String>                     onConnectUrl
 	)
 	{
 		JsonObject body = new JsonObject();
@@ -441,6 +442,12 @@ public class O7FlipApiClient
 					if (onDecanting != null && root.has("decanting"))
 					{
 						onDecanting.accept(parseArray(root.getAsJsonObject("decanting"), "decants", O7FlipApiClient.this::parseDecantItem));
+					}
+					if (onConnectUrl != null && root.has("_auth"))
+					{
+						JsonObject auth = root.getAsJsonObject("_auth");
+						boolean connected = getBool(auth, "connected", true);
+						onConnectUrl.accept(connected ? null : getString(auth, "connect_url", ""));
 					}
 				}
 				catch (Exception e)

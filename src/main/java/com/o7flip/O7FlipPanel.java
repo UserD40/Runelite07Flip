@@ -284,6 +284,11 @@ public class O7FlipPanel extends PluginPanel
 	// -------------------------------------------------------------------------
 	private JPanel authBanner;
 
+	// -------------------------------------------------------------------------
+	// Invalid key warning (shown when API key is set but server says not connected)
+	// -------------------------------------------------------------------------
+	private JPanel invalidKeyBar;
+
 	// =========================================================================
 	// Constructor
 	// =========================================================================
@@ -326,9 +331,13 @@ public class O7FlipPanel extends PluginPanel
 		authBanner = new JPanel(new BorderLayout());
 		authBanner.setVisible(false);
 
+		invalidKeyBar = new JPanel(new BorderLayout());
+		invalidKeyBar.setVisible(false);
+
 		JPanel northArea = new JPanel(new BorderLayout());
 		northArea.setBackground(ColorScheme.DARK_GRAY_COLOR);
 		northArea.add(buildTopPanel(), BorderLayout.NORTH);
+		northArea.add(invalidKeyBar,   BorderLayout.CENTER);
 		northArea.add(authBanner,      BorderLayout.SOUTH);
 
 		add(northArea,     BorderLayout.NORTH);
@@ -434,6 +443,37 @@ public class O7FlipPanel extends PluginPanel
 		authBanner.setVisible(true);
 		authBanner.revalidate();
 		authBanner.repaint();
+	}
+
+	public void updateInvalidKeyWarning(String connectUrl)
+	{
+		invalidKeyBar.removeAll();
+		if (connectUrl == null || connectUrl.isEmpty())
+		{
+			invalidKeyBar.setVisible(false);
+			invalidKeyBar.revalidate();
+			invalidKeyBar.repaint();
+			return;
+		}
+		JLabel lbl = new JLabel("\u26A0 API key invalid \u2014 click to reconnect");
+		lbl.setFont(net.runelite.client.ui.FontManager.getRunescapeSmallFont());
+		lbl.setForeground(new Color(0xFF6B6B));
+		lbl.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+		lbl.setBorder(new EmptyBorder(5, 10, 5, 10));
+		lbl.addMouseListener(new MouseAdapter()
+		{
+			@Override
+			public void mouseClicked(MouseEvent e)
+			{
+				LinkBrowser.browse(connectUrl);
+			}
+		});
+		invalidKeyBar.setBackground(new Color(0x2A0000));
+		invalidKeyBar.setBorder(new MatteBorder(1, 0, 1, 0, new Color(0x660000)));
+		invalidKeyBar.add(lbl, BorderLayout.CENTER);
+		invalidKeyBar.setVisible(true);
+		invalidKeyBar.revalidate();
+		invalidKeyBar.repaint();
 	}
 
 	private static void bannerRow(JPanel panel, String text, java.awt.Font font, Color color, int topPad)

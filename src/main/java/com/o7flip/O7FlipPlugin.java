@@ -406,7 +406,13 @@ public class O7FlipPlugin extends Plugin
 			config.showAlerts()  ? (items, total) -> SwingUtilities.invokeLater(() -> panel.updateAlerts(items, total, alertsPage)) : null,
 			(config.showBarrows() && includeSlow) ? sets    -> SwingUtilities.invokeLater(() -> panel.updateBarrows(sets))    : null,
 			(config.showMoon()    && includeSlow) ? sets    -> SwingUtilities.invokeLater(() -> panel.updateMoon(sets))       : null,
-			(config.showDecant()  && includeSlow) ? decants -> SwingUtilities.invokeLater(() -> panel.updateDecanting(decants)) : null
+			(config.showDecant()  && includeSlow) ? decants -> SwingUtilities.invokeLater(() -> panel.updateDecanting(decants)) : null,
+			connectUrl ->
+			{
+				String key = config.apiKey();
+				boolean hasKey = key != null && !key.trim().isEmpty();
+				SwingUtilities.invokeLater(() -> panel.updateInvalidKeyWarning(hasKey ? connectUrl : null));
+			}
 		);
 	}
 
@@ -436,7 +442,8 @@ public class O7FlipPlugin extends Plugin
 			null, null, null, null, null,
 			config.showBarrows() ? sets    -> SwingUtilities.invokeLater(() -> panel.updateBarrows(sets))      : null,
 			config.showMoon()    ? sets    -> SwingUtilities.invokeLater(() -> panel.updateMoon(sets))         : null,
-			config.showDecant()  ? decants -> SwingUtilities.invokeLater(() -> panel.updateDecanting(decants)) : null
+			config.showDecant()  ? decants -> SwingUtilities.invokeLater(() -> panel.updateDecanting(decants)) : null,
+			null
 		);
 	}
 
