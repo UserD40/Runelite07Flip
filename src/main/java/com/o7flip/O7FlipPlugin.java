@@ -32,7 +32,6 @@ import net.runelite.api.events.GameTick;
 import net.runelite.api.gameval.VarClientID;
 import net.runelite.api.widgets.ComponentID;
 import net.runelite.api.widgets.Widget;
-import net.runelite.api.widgets.WidgetInfo;
 import net.runelite.client.callback.ClientThread;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.eventbus.Subscribe;
@@ -200,7 +199,7 @@ public class O7FlipPlugin extends Plugin
 		// input widget's own key-listener script — the same mechanism GE Filters uses.
 		client.setVarcStrValue(VarClientID.MESLAYERINPUT, name);
 		client.setVarcIntValue(VarClientID.MESLAYERMODE, GE_SEARCH_MODE);
-		Widget searchBox = client.getWidget(WidgetInfo.CHATBOX_FULL_INPUT);
+		Widget searchBox = client.getWidget(ComponentID.CHATBOX_FULL_INPUT);
 		if (searchBox == null)
 		{
 			log.debug("[07Flip] GE search box widget not found");
