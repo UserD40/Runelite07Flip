@@ -28,8 +28,14 @@ import com.google.gson.JsonObject;
 import com.google.inject.Provides;
 import com.o7flip.model.BarrowsSet;
 import net.runelite.api.Client;
+import net.runelite.api.MenuAction;
+import net.runelite.api.ScriptID;
 import net.runelite.api.events.GameTick;
+import net.runelite.api.events.ScriptPostFired;
+import net.runelite.api.gameval.InterfaceID;
 import net.runelite.api.gameval.VarClientID;
+import net.runelite.api.gameval.VarPlayerID;
+import net.runelite.api.gameval.VarbitID;
 import net.runelite.api.widgets.ComponentID;
 import net.runelite.api.widgets.Widget;
 import net.runelite.client.callback.ClientThread;
@@ -90,12 +96,23 @@ public class O7FlipPlugin extends Plugin
 	private int slowTick = 0;
 
 	// -------------------------------------------------------------------------
-	// Pending GE buy intent (set by panel right-click, cleared after use)
+	// Pending GE pre-fill state (set by panel right-click, cleared after use)
 	// -------------------------------------------------------------------------
 
+	// Buy flow: set on right-click, consumed when offer container becomes visible
 	volatile int    pendingGeBuyItemId = -1;
 	volatile long   pendingGeBuyPrice  = -1;
 	volatile String pendingGeBuyName   = null;
+
+	// Sell flow: set on right-click, consumed when GE_OFFERS_SETUP_BUILD matches item + sell type
+	volatile int    pendingGeSellItemId = -1;
+	volatile long   pendingGeSellPrice  = -1;
+	volatile String pendingGeSellName   = null;
+
+	// Phase 2: price to fill once GE_OFFERS_SETUP_BUILD fires (buy or sell)
+	volatile long   pendingGeSetPrice   = -1;
+	// Phase 3: price to input once the chatbox opens (script 108)
+	volatile long   pendingGeInputPrice  = -1;
 
 	/** Called by item panels on right-click to queue a GE buy pre-fill. */
 	public void queueGeBuy(int itemId, long price, String name)
@@ -117,6 +134,16 @@ public class O7FlipPlugin extends Plugin
 				notifier.notify("Open the Grand Exchange, click an empty buy slot, then your offer will pre-fill for " + name);
 			}
 		});
+	}
+
+	/** Called by item panels on right-click to queue a GE sell price pre-fill. */
+	public void queueGeSell(int itemId, long price, String name)
+	{
+		log.debug("[07Flip] GE sell queued: {} ({}) @ {}", name, itemId, price);
+		pendingGeSellItemId = itemId;
+		pendingGeSellPrice  = price;
+		pendingGeSellName   = name;
+		notifier.notify("Open GE \u2192 click a sell slot \u2192 select " + name + " from inventory — price will auto-fill");
 	}
 
 	@Override
@@ -211,7 +238,100 @@ public class O7FlipPlugin extends Plugin
 			log.debug("[07Flip] GE search box has no key listener");
 			return;
 		}
+		// Store the price so onScriptPostFired(GE_OFFERS_SETUP_BUILD) can fill it
+		// once the user selects the item from search results.
+		pendingGeSetPrice = price;
 		client.runScript(scriptArgs);
+	}
+
+	// Script ID 108 fires when the GE price chatbox input opens (after clicking "Enter price").
+	private static final int SCRIPT_CHATBOX_INPUT_OPEN = 108;
+
+	@Subscribe
+	public void onScriptPostFired(ScriptPostFired event)
+	{
+		// Phase 2: item was selected in GE search — trigger the "Enter price" button.
+		if (event.getScriptId() == ScriptID.GE_OFFERS_SETUP_BUILD)
+		{
+			long price = -1;
+
+			if (pendingGeSetPrice != -1)
+			{
+				// Buy flow: price was stored when we triggered the item search.
+				price = pendingGeSetPrice;
+				pendingGeSetPrice = -1;
+			}
+			else if (pendingGeSellItemId != -1)
+			{
+				// Sell flow: check that the item and offer type match.
+				int offerType   = client.getVarbitValue(VarbitID.GE_NEWOFFER_TYPE);
+				int currentItem = client.getVarpValue(VarPlayerID.TRADINGPOST_SEARCH);
+				if (offerType == 0 && currentItem == pendingGeSellItemId)
+				{
+					price = pendingGeSellPrice;
+					pendingGeSellItemId = -1;
+					pendingGeSellPrice  = -1;
+					pendingGeSellName   = null;
+				}
+			}
+
+			if (price != -1)
+			{
+				final long finalPrice = price;
+				clientThread.invokeLater(() -> triggerGePriceInput(finalPrice));
+			}
+			return;
+		}
+
+		// Phase 3: chatbox input opened — write the price into the input field.
+		if (event.getScriptId() == SCRIPT_CHATBOX_INPUT_OPEN && pendingGeInputPrice != -1)
+		{
+			final long price = pendingGeInputPrice;
+			pendingGeInputPrice = -1;
+			clientThread.invokeLater(() ->
+			{
+				Widget chat = client.getWidget(InterfaceID.Chatbox.MES_TEXT2);
+				if (chat != null)
+				{
+					chat.setText(String.valueOf(price) + "*");
+					client.setVarcStrValue(VarClientID.MESLAYERINPUT, String.valueOf(price));
+				}
+			});
+		}
+	}
+
+	/** Finds the "Enter price" button in the GE offer setup and clicks it. */
+	private void triggerGePriceInput(long price)
+	{
+		Widget geSetup = client.getWidget(InterfaceID.GeOffers.SETUP);
+		if (geSetup == null)
+		{
+			log.debug("[07Flip] GE offer setup widget not found");
+			return;
+		}
+		Widget[] children = geSetup.getDynamicChildren();
+		if (children == null)
+		{
+			return;
+		}
+		for (Widget w : children)
+		{
+			String[] actions = w.getActions();
+			if (actions == null)
+			{
+				continue;
+			}
+			for (String action : actions)
+			{
+				if ("Enter price".equals(action))
+				{
+					pendingGeInputPrice = price;
+					client.menuAction(w.getIndex(), w.getId(), MenuAction.CC_OP, 1, -1, "Enter price", "");
+					return;
+				}
+			}
+		}
+		log.debug("[07Flip] 'Enter price' button not found in GE offer setup");
 	}
 
 	// -------------------------------------------------------------------------
