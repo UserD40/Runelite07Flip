@@ -28,7 +28,6 @@ import com.google.gson.JsonObject;
 import com.google.inject.Provides;
 import com.o7flip.model.BarrowsSet;
 import net.runelite.api.Client;
-import net.runelite.api.MenuAction;
 import net.runelite.api.ScriptID;
 import net.runelite.api.events.GameTick;
 import net.runelite.api.events.ScriptPostFired;
@@ -47,6 +46,7 @@ import net.runelite.client.plugins.PluginDescriptor;
 import net.runelite.client.Notifier;
 import net.runelite.client.ui.ClientToolbar;
 import net.runelite.client.ui.NavigationButton;
+import net.runelite.client.ui.overlay.OverlayManager;
 import net.runelite.client.util.ImageUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -85,6 +85,12 @@ public class O7FlipPlugin extends Plugin
 	@Inject
 	private O7FlipApiClient apiClient;
 
+	@Inject
+	private OverlayManager overlayManager;
+
+	@Inject
+	private O7FlipOverlay geOverlay;
+
 	private O7FlipPanel panel;
 	private NavigationButton navButton;
 	private ScheduledExecutorService executor;
@@ -109,10 +115,10 @@ public class O7FlipPlugin extends Plugin
 	volatile long   pendingGeSellPrice  = -1;
 	volatile String pendingGeSellName   = null;
 
-	// Phase 2: price to fill once GE_OFFERS_SETUP_BUILD fires (buy or sell)
-	volatile long   pendingGeSetPrice   = -1;
+	// Phase 2: price to highlight once GE_OFFERS_SETUP_BUILD fires (buy or sell)
+	volatile long   pendingGeSetPrice  = -1;
 	// Phase 3: price to input once the chatbox opens (script 108)
-	volatile long   pendingGeInputPrice  = -1;
+	volatile long   pendingGeInputPrice = -1;
 
 	/** Called by item panels on right-click to queue a GE buy pre-fill. */
 	public void queueGeBuy(int itemId, long price, String name)
@@ -143,7 +149,7 @@ public class O7FlipPlugin extends Plugin
 		pendingGeSellItemId = itemId;
 		pendingGeSellPrice  = price;
 		pendingGeSellName   = name;
-		notifier.notify("Open GE \u2192 click a sell slot \u2192 select " + name + " from inventory — price will auto-fill");
+		notifier.notify("Open GE \u2192 click a sell slot \u2192 select " + name + " from inventory \u2014 click the highlighted price button");
 	}
 
 	@Override
@@ -160,6 +166,7 @@ public class O7FlipPlugin extends Plugin
 			.build();
 
 		clientToolbar.addNavigation(navButton);
+		overlayManager.add(geOverlay);
 
 		executor = Executors.newSingleThreadScheduledExecutor();
 		fetchAuthStatus();
@@ -184,6 +191,7 @@ public class O7FlipPlugin extends Plugin
 		{
 			executor.shutdown();
 		}
+		overlayManager.remove(geOverlay);
 		clientToolbar.removeNavigation(navButton);
 		log.info("[07Flip] Stopped");
 	}
@@ -238,7 +246,7 @@ public class O7FlipPlugin extends Plugin
 			log.debug("[07Flip] GE search box has no key listener");
 			return;
 		}
-		// Store the price so onScriptPostFired(GE_OFFERS_SETUP_BUILD) can fill it
+		// Store the price so onScriptPostFired(GE_OFFERS_SETUP_BUILD) can highlight it
 		// once the user selects the item from search results.
 		pendingGeSetPrice = price;
 		client.runScript(scriptArgs);
@@ -250,7 +258,7 @@ public class O7FlipPlugin extends Plugin
 	@Subscribe
 	public void onScriptPostFired(ScriptPostFired event)
 	{
-		// Phase 2: item was selected in GE search — trigger the "Enter price" button.
+		// Phase 2: item was selected in GE search — highlight the "Enter price" button.
 		if (event.getScriptId() == ScriptID.GE_OFFERS_SETUP_BUILD)
 		{
 			long price = -1;
@@ -277,8 +285,7 @@ public class O7FlipPlugin extends Plugin
 
 			if (price != -1)
 			{
-				final long finalPrice = price;
-				clientThread.invokeLater(() -> triggerGePriceInput(finalPrice));
+				pendingGeInputPrice = price;
 			}
 			return;
 		}
@@ -298,40 +305,6 @@ public class O7FlipPlugin extends Plugin
 				}
 			});
 		}
-	}
-
-	/** Finds the "Enter price" button in the GE offer setup and clicks it. */
-	private void triggerGePriceInput(long price)
-	{
-		Widget geSetup = client.getWidget(InterfaceID.GeOffers.SETUP);
-		if (geSetup == null)
-		{
-			log.debug("[07Flip] GE offer setup widget not found");
-			return;
-		}
-		Widget[] children = geSetup.getDynamicChildren();
-		if (children == null)
-		{
-			return;
-		}
-		for (Widget w : children)
-		{
-			String[] actions = w.getActions();
-			if (actions == null)
-			{
-				continue;
-			}
-			for (String action : actions)
-			{
-				if ("Enter price".equals(action))
-				{
-					pendingGeInputPrice = price;
-					client.menuAction(w.getIndex(), w.getId(), MenuAction.CC_OP, 1, -1, "Enter price", "");
-					return;
-				}
-			}
-		}
-		log.debug("[07Flip] 'Enter price' button not found in GE offer setup");
 	}
 
 	// -------------------------------------------------------------------------
