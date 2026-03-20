@@ -374,82 +374,177 @@ public class O7FlipPanel extends PluginPanel
 			authBanner.setVisible(false);
 			authBanner.revalidate();
 			authBanner.repaint();
+			northArea.revalidate();
+			northArea.repaint();
 			return;
 		}
-
-		JPanel inner = new JPanel();
-		inner.setLayout(new BoxLayout(inner, BoxLayout.Y_AXIS));
-		inner.setOpaque(false);
 
 		if (isSignedIn)
 		{
 			// ── Free account — upgrade prompt ─────────────────────────────────
+			JPanel inner = new JPanel();
+			inner.setLayout(new BoxLayout(inner, BoxLayout.Y_AXIS));
+			inner.setOpaque(false);
+
 			authBanner.setBackground(new Color(0x0D1A0D));
 			authBanner.setBorder(BorderFactory.createCompoundBorder(
 				new MatteBorder(1, 0, 1, 0, new Color(0x1E4A1E)),
 				new EmptyBorder(9, 10, 9, 10)));
 
-			bannerRow(inner, "\u2713 Free Account Connected", Fonts.BOLD, GREEN, 0);
-			bannerRow(inner, "Upgrade to Premium to unlock:", Fonts.SM, new Color(0x777777), 5);
-			bannerRow(inner, "\u2022  Merch Alerts & high-conviction signals", Fonts.SM, new Color(0xAAAAAA), 2);
-			bannerRow(inner, "\u2022  High Volume & Price Dip flip presets", Fonts.SM, new Color(0xAAAAAA), 1);
-			bannerRow(inner, "\u2022  Full pagination — 90+ pages of results", Fonts.SM, new Color(0xAAAAAA), 1);
-			bannerRow(inner, "\u2022  Moon & Barrows repair calculators",       Fonts.SM, new Color(0xAAAAAA), 1);
+			bannerRow(inner, "\u2713 Free Account Connected",                        Fonts.BOLD, GREEN,               0);
+			bannerRow(inner, "Unlock with Premium:",                                 Fonts.SM,   new Color(0x777777), 5);
+			bannerRow(inner, "\u2022  Merch Alerts & live prices",                   Fonts.SM,   new Color(0xAAAAAA), 2);
+			bannerRow(inner, "\u2022  High Volume, Price Dip & Stable flip presets", Fonts.SM,   new Color(0xAAAAAA), 1);
+			bannerRow(inner, "\u2022  Full pagination & Moon / Barrows calculators", Fonts.SM,   new Color(0xAAAAAA), 1);
 
 			inner.add(Box.createRigidArea(new java.awt.Dimension(0, 9)));
 
-			JButton btn = pillButton("Upgrade to Premium");
-			btn.setBackground(ORANGE);
-			btn.setForeground(Color.BLACK);
-			btn.setAlignmentX(Component.LEFT_ALIGNMENT);
-			btn.setMaximumSize(new java.awt.Dimension(Integer.MAX_VALUE, 24));
-			btn.addActionListener(e -> openUrl(SUBSCRIBE_URL));
-			inner.add(btn);
+			JButton upgradeBtn = pillButton("Upgrade to Premium");
+			upgradeBtn.setBackground(ORANGE);
+			upgradeBtn.setForeground(Color.BLACK);
+			upgradeBtn.setAlignmentX(Component.LEFT_ALIGNMENT);
+			upgradeBtn.setMaximumSize(new java.awt.Dimension(Integer.MAX_VALUE, 24));
+			upgradeBtn.addActionListener(e -> openUrl(SUBSCRIBE_URL));
+			inner.add(upgradeBtn);
+
+			authBanner.add(inner, BorderLayout.CENTER);
+			authBanner.setVisible(true);
+			authBanner.revalidate();
+			authBanner.repaint();
+			northArea.revalidate();
+			northArea.repaint();
+			return;
 		}
-		else
+
+		// ── Not signed in: separate State A (no key) from State D (has key) ──
+		String key = config.apiKey();
+		boolean noKey = key == null || key.trim().isEmpty();
+
+		if (!noKey)
 		{
-			// ── Not signed in — full API key setup guide ──────────────────────
-			authBanner.setBackground(new Color(0x0D0D1E));
-			authBanner.setBorder(BorderFactory.createCompoundBorder(
-				new MatteBorder(1, 0, 1, 0, new Color(0x2A2A55)),
-				new EmptyBorder(9, 10, 9, 10)));
-
-			bannerRow(inner, "\uD83D\uDD11 Connect Your Account", Fonts.BOLD, ORANGE, 0);
-			bannerRow(inner, "An API key unlocks more flip presets.", Fonts.SM, new Color(0x777777), 4);
-			bannerRow(inner, "Premium subscription required for full access.", Fonts.SM, new Color(0x777777), 0);
-
-			inner.add(Box.createRigidArea(new java.awt.Dimension(0, 10)));
-
-			bannerRow(inner, "GET YOUR KEY:", Fonts.SM_BOLD, new Color(0x999999), 0);
-			bannerRow(inner, "1.  Visit 07flip.com and sign up",           Fonts.SM, new Color(0xDDDDDD), 3);
-			bannerRow(inner, "2.  Log in with Discord",                    Fonts.SM, new Color(0xDDDDDD), 1);
-			bannerRow(inner, "3.  Click your Discord user icon (top-right)", Fonts.SM, new Color(0xDDDDDD), 1);
-			bannerRow(inner, "     \u2192  Select \u201CView API Key\u201D",       Fonts.SM, new Color(0xFF981F), 0);
-			bannerRow(inner, "4.  Copy the key shown on screen",           Fonts.SM, new Color(0xDDDDDD), 1);
-
-			inner.add(Box.createRigidArea(new java.awt.Dimension(0, 9)));
-
-			bannerRow(inner, "ADD KEY IN RUNELITE:", Fonts.SM_BOLD, new Color(0x999999), 0);
-			bannerRow(inner, "1.  Open RuneLite plugin settings",            Fonts.SM, new Color(0xDDDDDD), 3);
-			bannerRow(inner, "2.  Find 07Flip and click the spanner icon",  Fonts.SM, new Color(0xDDDDDD), 1);
-			bannerRow(inner, "3.  Paste key into the API Key field",       Fonts.SM, new Color(0xDDDDDD), 1);
-			bannerRow(inner, "4.  Press Enter \u2014 done!",               Fonts.SM, new Color(0xDDDDDD), 1);
-
-			inner.add(Box.createRigidArea(new java.awt.Dimension(0, 10)));
-
-			JButton btn = pillButton("Visit 07flip.com");
-			btn.setBackground(ORANGE);
-			btn.setForeground(Color.BLACK);
-			btn.setAlignmentX(Component.LEFT_ALIGNMENT);
-			btn.setMaximumSize(new java.awt.Dimension(Integer.MAX_VALUE, 24));
-			btn.addActionListener(e -> openUrl(WEBSITE_URL));
-			inner.add(btn);
+			// State D — key is set but auth hasn't completed or failed.
+			// The invalidKeyBar handles reconnection if the key is invalid.
+			authBanner.setVisible(false);
+			authBanner.revalidate();
+			authBanner.repaint();
+			northArea.revalidate();
+			northArea.repaint();
+			return;
 		}
+
+		// State A — no API key configured
+		authBanner.setBackground(new Color(0x0D0D1E));
+		authBanner.setBorder(BorderFactory.createCompoundBorder(
+			new MatteBorder(1, 0, 1, 0, new Color(0x2A2A55)),
+			new EmptyBorder(0, 0, 0, 0)));
+
+		if (!noKeyBannerExpanded)
+		{
+			// ── Collapsed pill ────────────────────────────────────────────────
+			JPanel pill = new JPanel(new BorderLayout());
+			pill.setOpaque(false);
+			pill.setBorder(new EmptyBorder(4, 10, 4, 10));
+			pill.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+
+			JLabel pillLabel = new JLabel(
+				"\uD83D\uDD11  Connect account to unlock features  \u25BC");
+			pillLabel.setFont(net.runelite.client.ui.FontManager.getRunescapeSmallFont());
+			pillLabel.setForeground(new Color(0xBBBBBB));
+			pill.add(pillLabel, BorderLayout.CENTER);
+
+			pill.addMouseListener(new MouseAdapter()
+			{
+				@Override
+				public void mouseClicked(MouseEvent e)
+				{
+					noKeyBannerExpanded = true;
+					updateAuthBanner();
+				}
+			});
+
+			authBanner.add(pill, BorderLayout.CENTER);
+			authBanner.setVisible(true);
+			authBanner.revalidate();
+			authBanner.repaint();
+			northArea.revalidate();
+			northArea.repaint();
+			return;
+		}
+
+		// ── Expanded guide ────────────────────────────────────────────────────
+		authBanner.setBorder(BorderFactory.createCompoundBorder(
+			new MatteBorder(1, 0, 1, 0, new Color(0x2A2A55)),
+			new EmptyBorder(9, 10, 9, 10)));
+
+		JPanel inner = new JPanel();
+		inner.setLayout(new BoxLayout(inner, BoxLayout.Y_AXIS));
+		inner.setOpaque(false);
+
+		// Header row: title left, collapse chevron right
+		JPanel headerRow = new JPanel(new BorderLayout());
+		headerRow.setOpaque(false);
+		headerRow.setMaximumSize(new java.awt.Dimension(Integer.MAX_VALUE, 20));
+		headerRow.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+		JLabel titleLbl = new JLabel("\uD83D\uDD11 Connect Your Account");
+		titleLbl.setFont(Fonts.BOLD);
+		titleLbl.setForeground(ORANGE);
+		headerRow.add(titleLbl, BorderLayout.CENTER);
+
+		JButton chevron = new JButton("\u25B2");
+		chevron.setFont(net.runelite.client.ui.FontManager.getRunescapeSmallFont());
+		chevron.setForeground(new Color(0x777777));
+		chevron.setBackground(null);
+		chevron.setBorderPainted(false);
+		chevron.setContentAreaFilled(false);
+		chevron.setFocusPainted(false);
+		chevron.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+		chevron.setMargin(new Insets(0, 4, 0, 0));
+		chevron.addActionListener(e ->
+		{
+			noKeyBannerExpanded = false;
+			updateAuthBanner();
+		});
+		headerRow.add(chevron, BorderLayout.EAST);
+
+		inner.add(headerRow);
+
+		bannerRow(inner, "An API key unlocks more flip presets.", Fonts.SM, new Color(0x777777), 4);
+		bannerRow(inner, "Premium subscription required for full access.", Fonts.SM, new Color(0x777777), 0);
+
+		inner.add(Box.createRigidArea(new java.awt.Dimension(0, 10)));
+
+		bannerRow(inner, "GET YOUR KEY:", Fonts.SM_BOLD, new Color(0x999999), 0);
+		bannerRow(inner, "1.  Visit 07flip.com/runelite and sign up",         Fonts.SM, new Color(0xDDDDDD), 3);
+		bannerRow(inner, "2.  Log in with Discord",                           Fonts.SM, new Color(0xDDDDDD), 1);
+		bannerRow(inner, "3.  Click your Discord user icon (top-right)",      Fonts.SM, new Color(0xDDDDDD), 1);
+		bannerRow(inner, "     \u2192  Select \u201CView API Key\u201D",      Fonts.SM, new Color(0xFF981F), 0);
+		bannerRow(inner, "4.  Copy the key shown on screen",                  Fonts.SM, new Color(0xDDDDDD), 1);
+
+		inner.add(Box.createRigidArea(new java.awt.Dimension(0, 9)));
+
+		bannerRow(inner, "ADD KEY IN RUNELITE:", Fonts.SM_BOLD, new Color(0x999999), 0);
+		bannerRow(inner, "1.  Open RuneLite plugin settings",                 Fonts.SM, new Color(0xDDDDDD), 3);
+		bannerRow(inner, "2.  Find 07Flip and click the spanner icon",        Fonts.SM, new Color(0xDDDDDD), 1);
+		bannerRow(inner, "3.  Paste key into the API Key field",              Fonts.SM, new Color(0xDDDDDD), 1);
+		bannerRow(inner, "4.  Press Enter \u2014 done!",                      Fonts.SM, new Color(0xDDDDDD), 1);
+
+		inner.add(Box.createRigidArea(new java.awt.Dimension(0, 10)));
+
+		JButton visitBtn = pillButton("Visit 07flip.com/runelite");
+		visitBtn.setBackground(ORANGE);
+		visitBtn.setForeground(Color.BLACK);
+		visitBtn.setAlignmentX(Component.LEFT_ALIGNMENT);
+		visitBtn.setMaximumSize(new java.awt.Dimension(Integer.MAX_VALUE, 24));
+		visitBtn.addActionListener(e -> openUrl(RUNELITE_URL));
+		inner.add(visitBtn);
 
 		authBanner.add(inner, BorderLayout.CENTER);
 		authBanner.setVisible(true);
 		authBanner.revalidate();
 		authBanner.repaint();
+		northArea.revalidate();
+		northArea.repaint();
 	}
 
 	public void updateInvalidKeyWarning(String connectUrl)
