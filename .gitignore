@@ -43,3 +43,6 @@ build-guide.md
 .claude/
 memory/
 docs/
+
+# Git worktrees (local dev only)
+.worktrees/
