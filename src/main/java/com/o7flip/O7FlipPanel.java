@@ -397,13 +397,13 @@ public class O7FlipPanel extends PluginPanel
 			bannerRow(inner, "\u2022  High Volume, Price Dip & Stable flip presets", Fonts.SM,   new Color(0xAAAAAA), 1);
 			bannerRow(inner, "\u2022  Full pagination & Moon / Barrows calculators", Fonts.SM,   new Color(0xAAAAAA), 1);
 
-			inner.add(Box.createRigidArea(new java.awt.Dimension(0, 9)));
+			inner.add(Box.createRigidArea(new Dimension(0, 9)));
 
 			JButton upgradeBtn = pillButton("Upgrade to Premium");
 			upgradeBtn.setBackground(ORANGE);
 			upgradeBtn.setForeground(Color.BLACK);
 			upgradeBtn.setAlignmentX(Component.LEFT_ALIGNMENT);
-			upgradeBtn.setMaximumSize(new java.awt.Dimension(Integer.MAX_VALUE, 24));
+			upgradeBtn.setMaximumSize(new Dimension(Integer.MAX_VALUE, 24));
 			upgradeBtn.addActionListener(e -> openUrl(SUBSCRIBE_URL));
 			inner.add(upgradeBtn);
 
@@ -483,7 +483,7 @@ public class O7FlipPanel extends PluginPanel
 		// Header row: title left, collapse chevron right
 		JPanel headerRow = new JPanel(new BorderLayout());
 		headerRow.setOpaque(false);
-		headerRow.setMaximumSize(new java.awt.Dimension(Integer.MAX_VALUE, 20));
+		headerRow.setMaximumSize(new Dimension(Integer.MAX_VALUE, 20));
 		headerRow.setAlignmentX(Component.LEFT_ALIGNMENT);
 
 		JLabel titleLbl = new JLabel("\uD83D\uDD11 Connect Your Account");
@@ -512,7 +512,7 @@ public class O7FlipPanel extends PluginPanel
 		bannerRow(inner, "An API key unlocks more flip presets.", Fonts.SM, new Color(0x777777), 4);
 		bannerRow(inner, "Premium subscription required for full access.", Fonts.SM, new Color(0x777777), 0);
 
-		inner.add(Box.createRigidArea(new java.awt.Dimension(0, 10)));
+		inner.add(Box.createRigidArea(new Dimension(0, 10)));
 
 		bannerRow(inner, "GET YOUR KEY:", Fonts.SM_BOLD, new Color(0x999999), 0);
 		bannerRow(inner, "1.  Visit 07flip.com/runelite and sign up",         Fonts.SM, new Color(0xDDDDDD), 3);
@@ -521,7 +521,7 @@ public class O7FlipPanel extends PluginPanel
 		bannerRow(inner, "     \u2192  Select \u201CView API Key\u201D",      Fonts.SM, new Color(0xFF981F), 0);
 		bannerRow(inner, "4.  Copy the key shown on screen",                  Fonts.SM, new Color(0xDDDDDD), 1);
 
-		inner.add(Box.createRigidArea(new java.awt.Dimension(0, 9)));
+		inner.add(Box.createRigidArea(new Dimension(0, 9)));
 
 		bannerRow(inner, "ADD KEY IN RUNELITE:", Fonts.SM_BOLD, new Color(0x999999), 0);
 		bannerRow(inner, "1.  Open RuneLite plugin settings",                 Fonts.SM, new Color(0xDDDDDD), 3);
@@ -529,13 +529,13 @@ public class O7FlipPanel extends PluginPanel
 		bannerRow(inner, "3.  Paste key into the API Key field",              Fonts.SM, new Color(0xDDDDDD), 1);
 		bannerRow(inner, "4.  Press Enter \u2014 done!",                      Fonts.SM, new Color(0xDDDDDD), 1);
 
-		inner.add(Box.createRigidArea(new java.awt.Dimension(0, 10)));
+		inner.add(Box.createRigidArea(new Dimension(0, 10)));
 
 		JButton visitBtn = pillButton("Visit 07flip.com/runelite");
 		visitBtn.setBackground(ORANGE);
 		visitBtn.setForeground(Color.BLACK);
 		visitBtn.setAlignmentX(Component.LEFT_ALIGNMENT);
-		visitBtn.setMaximumSize(new java.awt.Dimension(Integer.MAX_VALUE, 24));
+		visitBtn.setMaximumSize(new Dimension(Integer.MAX_VALUE, 24));
 		visitBtn.addActionListener(e -> openUrl(RUNELITE_URL));
 		inner.add(visitBtn);
 
