@@ -100,7 +100,8 @@ public class O7FlipPanel extends PluginPanel
 	// -------------------------------------------------------------------------
 	private static final String WEBSITE_URL  = "https://07flip.com";
 	private static final String DISCORD_URL  = "https://discord.gg/xQaYM9TaMr";
-	private static final String PREMIUM_URL  = "https://07flip.com/premium";
+	private static final String RUNELITE_URL  = "https://07flip.com/runelite";
+	private static final String SUBSCRIBE_URL = "https://07flip.com/subscribe";
 	private static final Color  ORANGE       = new Color(0xFF981F);
 	private static final Color  GREEN        = new Color(0x00C27A);
 	private static final int    PAGE_SIZE    = 10;
@@ -176,6 +177,7 @@ public class O7FlipPanel extends PluginPanel
 	// -------------------------------------------------------------------------
 	private boolean isSignedIn = false;
 	private boolean isPremium  = false;
+	private boolean noKeyBannerExpanded = true;
 
 	// -------------------------------------------------------------------------
 	// Stored data
@@ -289,6 +291,11 @@ public class O7FlipPanel extends PluginPanel
 	// -------------------------------------------------------------------------
 	private JPanel invalidKeyBar;
 
+	// -------------------------------------------------------------------------
+	// North area (holds top panel, invalid-key bar, auth banner)
+	// -------------------------------------------------------------------------
+	private JPanel northArea;
+
 	// =========================================================================
 	// Constructor
 	// =========================================================================
@@ -334,7 +341,7 @@ public class O7FlipPanel extends PluginPanel
 		invalidKeyBar = new JPanel(new BorderLayout());
 		invalidKeyBar.setVisible(false);
 
-		JPanel northArea = new JPanel(new BorderLayout());
+		northArea = new JPanel(new BorderLayout());
 		northArea.setBackground(ColorScheme.DARK_GRAY_COLOR);
 		northArea.add(buildTopPanel(), BorderLayout.NORTH);
 		northArea.add(invalidKeyBar,   BorderLayout.CENTER);
@@ -396,7 +403,7 @@ public class O7FlipPanel extends PluginPanel
 			btn.setForeground(Color.BLACK);
 			btn.setAlignmentX(Component.LEFT_ALIGNMENT);
 			btn.setMaximumSize(new java.awt.Dimension(Integer.MAX_VALUE, 24));
-			btn.addActionListener(e -> openUrl(PREMIUM_URL));
+			btn.addActionListener(e -> openUrl(SUBSCRIBE_URL));
 			inner.add(btn);
 		}
 		else
@@ -1054,7 +1061,7 @@ public class O7FlipPanel extends PluginPanel
 		icon.setForeground(ORANGE);
 		icon.setAlignmentX(Component.LEFT_ALIGNMENT);
 
-		JLabel desc = new JLabel("<html>" + sub + "<br><br>Get premium at <b>07flip.com/premium</b>.</html>");
+		JLabel desc = new JLabel("<html>" + sub + "<br><br>Get premium at <b>07flip.com/subscribe</b>.</html>");
 		desc.setFont(Fonts.SM);
 		desc.setForeground(new Color(0x888888));
 		desc.setBorder(new EmptyBorder(6, 0, 14, 0));
@@ -1063,7 +1070,7 @@ public class O7FlipPanel extends PluginPanel
 		JButton btn = pillButton("Get Premium");
 		btn.setBackground(ORANGE);
 		btn.setForeground(Color.BLACK);
-		btn.addActionListener(e -> openUrl(PREMIUM_URL));
+		btn.addActionListener(e -> openUrl(SUBSCRIBE_URL));
 
 		inner.add(icon);
 		inner.add(desc);
