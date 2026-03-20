@@ -37,7 +37,9 @@ import net.runelite.api.gameval.VarPlayerID;
 import net.runelite.api.gameval.VarbitID;
 import net.runelite.api.widgets.ComponentID;
 import net.runelite.api.widgets.Widget;
+import net.runelite.api.widgets.WidgetType;
 import net.runelite.client.callback.ClientThread;
+import net.runelite.api.widgets.JavaScriptCallback;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.events.ConfigChanged;
@@ -290,19 +292,37 @@ public class O7FlipPlugin extends Plugin
 			return;
 		}
 
-		// Phase 3: chatbox input opened — write the price into the input field.
+		// Phase 3: chatbox input opened — show a clickable price button the user must click.
 		if (event.getScriptId() == SCRIPT_CHATBOX_INPUT_OPEN && pendingGeInputPrice != -1)
 		{
 			final long price = pendingGeInputPrice;
 			pendingGeInputPrice = -1;
 			clientThread.invokeLater(() ->
 			{
-				Widget chat = client.getWidget(InterfaceID.Chatbox.MES_TEXT2);
-				if (chat != null)
+				Widget chatbox = client.getWidget(ComponentID.CHATBOX_CONTAINER);
+				if (chatbox == null)
 				{
-					chat.setText(String.valueOf(price) + "*");
-					client.setVarcStrValue(VarClientID.MESLAYERINPUT, String.valueOf(price));
+					return;
 				}
+				Widget btn = chatbox.createChild(-1, WidgetType.TEXT);
+				btn.setOriginalX(0);
+				btn.setOriginalY(40);
+				btn.setOriginalWidth(chatbox.getWidth());
+				btn.setOriginalHeight(14);
+				btn.setText("07Flip: click to set " + String.format("%,d", price) + " gp");
+				btn.setTextColor(0xffd700);
+				btn.setAction(0, "Set price");
+				btn.setHasListener(true);
+				btn.setOnOpListener((JavaScriptCallback) e ->
+				{
+					Widget input = client.getWidget(ComponentID.CHATBOX_FULL_INPUT);
+					if (input != null)
+					{
+						input.setText(price + "*");
+						client.setVarcStrValue(VarClientID.MESLAYERINPUT, String.valueOf(price));
+					}
+				});
+				btn.revalidate();
 			});
 		}
 	}
