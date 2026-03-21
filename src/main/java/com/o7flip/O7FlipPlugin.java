@@ -26,8 +26,20 @@ package com.o7flip;
 
 import com.google.gson.JsonObject;
 import com.google.inject.Provides;
+import com.o7flip.model.AlertItem;
 import com.o7flip.model.BarrowsSet;
+import com.o7flip.model.DipItem;
+import com.o7flip.model.DumpItem;
+import com.o7flip.model.FlipItem;
+import com.o7flip.model.SpikeItem;
+import com.o7flip.model.TrackedItemData;
 import net.runelite.api.Client;
+import net.runelite.api.GrandExchangeOffer;
+import net.runelite.api.GrandExchangeOfferState;
+import net.runelite.api.InventoryID;
+import net.runelite.api.Item;
+import net.runelite.api.events.GrandExchangeOfferChanged;
+import net.runelite.api.events.ItemContainerChanged;
 import net.runelite.api.ScriptID;
 import net.runelite.api.events.GameTick;
 import net.runelite.api.events.ScriptPostFired;
@@ -55,6 +67,13 @@ import org.slf4j.LoggerFactory;
 import javax.inject.Inject;
 import javax.swing.SwingUtilities;
 import java.awt.image.BufferedImage;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
@@ -121,6 +140,26 @@ public class O7FlipPlugin extends Plugin
 	volatile long   pendingGeSetPrice  = -1;
 	// Phase 3: price to input once the chatbox opens (script 108)
 	volatile long   pendingGeInputPrice = -1;
+
+	// -------------------------------------------------------------------------
+	// GE integration — shared volatile state
+	// -------------------------------------------------------------------------
+
+	/** Per-tab last-fetched lists. Written on executor thread only. */
+	private List<FlipItem>  lastFlips  = Collections.emptyList();
+	private List<AlertItem> lastAlerts = Collections.emptyList();
+	private List<DipItem>   lastDips   = Collections.emptyList();
+	private List<DumpItem>  lastDumps  = Collections.emptyList();
+	private List<SpikeItem> lastSpikes = Collections.emptyList();
+
+	/** Aggregated lookup map by item ID. Volatile reference swap on each rebuild. */
+	volatile Map<Integer, TrackedItemData> trackedItems = Collections.emptyMap();
+
+	/** Item IDs currently in the player's inventory. Volatile reference swap. */
+	volatile Set<Integer> inventoryItemIds = Collections.emptySet();
+
+	/** Active GE offers keyed by slot index. Volatile reference swap. */
+	volatile Map<Integer, GrandExchangeOffer> activeOffers = Collections.emptyMap();
 
 	/** Called by item panels on right-click to queue a GE buy pre-fill. */
 	public void queueGeBuy(int itemId, long price, String name)
@@ -557,6 +596,132 @@ public class O7FlipPlugin extends Plugin
 			config.showDecant()  ? decants -> SwingUtilities.invokeLater(() -> panel.updateDecanting(decants)) : null,
 			null
 		);
+	}
+
+	// -------------------------------------------------------------------------
+	// TrackedItems rebuild — called on executor thread after every API fetch
+	// -------------------------------------------------------------------------
+
+	private void rebuildTrackedItems()
+	{
+		Map<Integer, TrackedItemData> map = new HashMap<>();
+
+		for (FlipItem f : lastFlips)
+		{
+			TrackedItemData d = map.computeIfAbsent(f.itemId, id ->
+			{
+				TrackedItemData t = new TrackedItemData();
+				t.itemId = id;
+				t.name = f.name;
+				return t;
+			});
+			d.flipBuyPrice  = f.buyPrice;
+			d.flipSellPrice = f.sellPrice;
+			d.flipProfit    = f.profit;
+			d.flipRoiPct    = f.roiPct;
+			d.presentIn.add("Flips");
+		}
+
+		for (AlertItem a : lastAlerts)
+		{
+			TrackedItemData d = map.computeIfAbsent(a.itemId, id ->
+			{
+				TrackedItemData t = new TrackedItemData();
+				t.itemId = id;
+				t.name = a.name;
+				return t;
+			});
+			d.alertCurrentPrice = a.currentPrice;
+			d.alertSellTarget   = a.sellTarget;
+			d.alertUpsidePct    = a.upsidePct;
+			d.presentIn.add("Alerts");
+		}
+
+		for (DipItem di : lastDips)
+		{
+			TrackedItemData d = map.computeIfAbsent(di.itemId, id ->
+			{
+				TrackedItemData t = new TrackedItemData();
+				t.itemId = id;
+				t.name = di.name;
+				return t;
+			});
+			d.dipBuyPrice = di.buyPrice;
+			d.dipPct      = di.dipPct;
+			d.presentIn.add("Dips");
+		}
+
+		for (DumpItem du : lastDumps)
+		{
+			TrackedItemData d = map.computeIfAbsent(du.itemId, id ->
+			{
+				TrackedItemData t = new TrackedItemData();
+				t.itemId = id;
+				t.name = du.name;
+				return t;
+			});
+			d.dumpBuyPrice  = du.buyPrice;
+			d.dumpSellPrice = du.sellPrice;
+			d.dumpPct       = du.dumpPct;
+			d.presentIn.add("Dumps");
+		}
+
+		for (SpikeItem s : lastSpikes)
+		{
+			TrackedItemData d = map.computeIfAbsent(s.itemId, id ->
+			{
+				TrackedItemData t = new TrackedItemData();
+				t.itemId = id;
+				t.name = s.name;
+				return t;
+			});
+			d.spikeBuyPrice = s.buyPrice;
+			d.presentIn.add("Spikes");
+		}
+
+		trackedItems = Collections.unmodifiableMap(map);
+	}
+
+	// -------------------------------------------------------------------------
+	// Inventory tracking — keeps inventoryItemIds in sync
+	// -------------------------------------------------------------------------
+
+	@Subscribe
+	public void onItemContainerChanged(ItemContainerChanged event)
+	{
+		if (event.getContainerId() != InventoryID.INVENTORY.getId())
+		{
+			return;
+		}
+		Set<Integer> next = new HashSet<>();
+		for (Item item : event.getItemContainer().getItems())
+		{
+			if (item.getId() >= 0)
+			{
+				next.add(item.getId());
+			}
+		}
+		inventoryItemIds = Collections.unmodifiableSet(next);
+	}
+
+	// -------------------------------------------------------------------------
+	// GE offer tracking — keeps activeOffers in sync
+	// -------------------------------------------------------------------------
+
+	@Subscribe
+	public void onGrandExchangeOfferChanged(GrandExchangeOfferChanged event)
+	{
+		GrandExchangeOffer offer = event.getOffer();
+		Map<Integer, GrandExchangeOffer> next = new HashMap<>(activeOffers);
+		if (offer.getState() == GrandExchangeOfferState.EMPTY)
+		{
+			next.remove(event.getSlot());
+		}
+		else
+		{
+			next.put(event.getSlot(), offer);
+		}
+		activeOffers = Collections.unmodifiableMap(next);
 	}
 
 	// -------------------------------------------------------------------------
