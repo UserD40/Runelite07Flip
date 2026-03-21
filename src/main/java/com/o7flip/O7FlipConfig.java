@@ -157,4 +157,50 @@ public interface O7FlipConfig extends Config
 	{
 		return true;
 	}
+
+	// ── GE integration features ────────────────────────────────────────────
+
+	@ConfigItem(
+		keyName = "showGePriceColouring",
+		name = "GE Slot Price Colouring",
+		description = "Colour GE slot prices green/red based on 07Flip recommended buy/sell prices.",
+		position = 11
+	)
+	default boolean showGePriceColouring()
+	{
+		return true;
+	}
+
+	@ConfigItem(
+		keyName = "showGeOfferOverlay",
+		name = "GE Offer Data Overlay",
+		description = "Show a data card with 07Flip info when you open a GE slot for a tracked item.",
+		position = 12
+	)
+	default boolean showGeOfferOverlay()
+	{
+		return true;
+	}
+
+	@ConfigItem(
+		keyName = "inventoryCheckOnSell",
+		name = "Inventory Check on Sell",
+		description = "Hide the Sell on GE right-click option if the item is not in your inventory.",
+		position = 13
+	)
+	default boolean inventoryCheckOnSell()
+	{
+		return true;
+	}
+
+	@ConfigItem(
+		keyName = "autoSwitchTabOnGe",
+		name = "Auto-Switch Tab on GE Open",
+		description = "Automatically switch the 07Flip panel to the relevant tab when you open a GE slot for a tracked item.",
+		position = 14
+	)
+	default boolean autoSwitchTabOnGe()
+	{
+		return true;
+	}
 }
