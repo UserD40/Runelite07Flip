@@ -153,13 +153,13 @@ public class O7FlipPlugin extends Plugin
 	private List<SpikeItem> lastSpikes = Collections.emptyList();
 
 	/** Aggregated lookup map by item ID. Volatile reference swap on each rebuild. */
-	volatile Map<Integer, TrackedItemData> trackedItems = Collections.emptyMap();
+	public volatile Map<Integer, TrackedItemData> trackedItems = Collections.emptyMap();
 
 	/** Item IDs currently in the player's inventory. Volatile reference swap. */
-	volatile Set<Integer> inventoryItemIds = Collections.emptySet();
+	public volatile Set<Integer> inventoryItemIds = Collections.emptySet();
 
 	/** Active GE offers keyed by slot index. Volatile reference swap. */
-	volatile Map<Integer, GrandExchangeOffer> activeOffers = Collections.emptyMap();
+	public volatile Map<Integer, GrandExchangeOffer> activeOffers = Collections.emptyMap();
 
 	/** Called by item panels on right-click to queue a GE buy pre-fill. */
 	public void queueGeBuy(int itemId, long price, String name)
@@ -918,6 +918,11 @@ public class O7FlipPlugin extends Plugin
 	{
 		apiClient.fetchSearch(query,
 			items -> SwingUtilities.invokeLater(() -> panel.showSearchResults(items, query)));
+	}
+
+	public O7FlipConfig getConfig()
+	{
+		return config;
 	}
 
 	@Provides

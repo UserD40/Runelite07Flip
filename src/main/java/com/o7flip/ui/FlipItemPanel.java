@@ -129,9 +129,13 @@ public class FlipItemPanel extends JPanel
 					JMenuItem buyItem = new JMenuItem("Buy on GE \u2014 " + formatGp(flip.sellPrice));
 					buyItem.addActionListener(ae -> plugin.queueGeBuy(flip.itemId, flip.sellPrice, flip.name));
 					menu.add(buyItem);
-					JMenuItem sellItem = new JMenuItem("Sell on GE \u2014 " + formatGp(flip.buyPrice));
-					sellItem.addActionListener(ae -> plugin.queueGeSell(flip.itemId, flip.buyPrice, flip.name));
-					menu.add(sellItem);
+					boolean inInventory = plugin.inventoryItemIds.contains(flip.itemId);
+					if (!plugin.getConfig().inventoryCheckOnSell() || inInventory)
+					{
+						JMenuItem sellItem = new JMenuItem("Sell on GE \u2014 " + formatGp(flip.buyPrice));
+						sellItem.addActionListener(ae -> plugin.queueGeSell(flip.itemId, flip.buyPrice, flip.name));
+						menu.add(sellItem);
+					}
 					menu.show(e.getComponent(), e.getX(), e.getY());
 				}
 			}
