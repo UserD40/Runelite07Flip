@@ -112,6 +112,9 @@ public class O7FlipPlugin extends Plugin
 	@Inject
 	private O7FlipOverlay geOverlay;
 
+	@Inject
+	private O7FlipOfferOverlay offerOverlay;
+
 	private O7FlipPanel panel;
 	private NavigationButton navButton;
 	private ScheduledExecutorService executor;
@@ -208,6 +211,7 @@ public class O7FlipPlugin extends Plugin
 
 		clientToolbar.addNavigation(navButton);
 		overlayManager.add(geOverlay);
+		overlayManager.add(offerOverlay);
 
 		executor = Executors.newSingleThreadScheduledExecutor();
 		fetchAuthStatus();
@@ -232,6 +236,7 @@ public class O7FlipPlugin extends Plugin
 		{
 			executor.shutdown();
 		}
+		overlayManager.remove(offerOverlay);
 		overlayManager.remove(geOverlay);
 		clientToolbar.removeNavigation(navButton);
 		log.info("[07Flip] Stopped");
@@ -327,6 +332,13 @@ public class O7FlipPlugin extends Plugin
 			if (price != -1)
 			{
 				pendingGeInputPrice = price;
+			}
+
+			// Feature 2: set offer overlay data
+			if (config.showGeOfferOverlay())
+			{
+				int overlayItemId = client.getVarpValue(VarPlayerID.TRADINGPOST_SEARCH);
+				offerOverlay.activeOfferData = trackedItems.get(overlayItemId);
 			}
 
 			// Feature 4: auto-switch panel tab if this item is tracked
