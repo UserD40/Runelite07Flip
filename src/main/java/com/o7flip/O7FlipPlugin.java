@@ -328,6 +328,28 @@ public class O7FlipPlugin extends Plugin
 			{
 				pendingGeInputPrice = price;
 			}
+
+			// Feature 4: auto-switch panel tab if this item is tracked
+			if (config.autoSwitchTabOnGe())
+			{
+				int currentItemId = client.getVarpValue(VarPlayerID.TRADINGPOST_SEARCH);
+				TrackedItemData tracked = trackedItems.get(currentItemId);
+				if (tracked != null && !tracked.presentIn.isEmpty())
+				{
+					LinkedHashSet<String> tabs = tracked.presentIn;
+					SwingUtilities.invokeLater(() ->
+					{
+						for (String tab : tabs)
+						{
+							if (panel.selectTab(tab))
+							{
+								break;
+							}
+						}
+					});
+				}
+			}
+
 			return;
 		}
 
