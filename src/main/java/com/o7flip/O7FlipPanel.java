@@ -1431,6 +1431,34 @@ public class O7FlipPanel extends PluginPanel
 		return tabs;
 	}
 
+	/**
+	 * Switches to the named tab if it is currently visible.
+	 * Returns true if the tab was found and selected, false otherwise.
+	 * Must be called on the EDT.
+	 */
+	public boolean selectTab(String tabName)
+	{
+		if (tabsWrapper.getComponentCount() == 0)
+		{
+			return false;
+		}
+		java.awt.Component c = tabsWrapper.getComponent(0);
+		if (!(c instanceof JTabbedPane))
+		{
+			return false;
+		}
+		JTabbedPane pane = (JTabbedPane) c;
+		for (int i = 0; i < pane.getTabCount(); i++)
+		{
+			if (tabName.equals(pane.getTitleAt(i)))
+			{
+				pane.setSelectedIndex(i);
+				return true;
+			}
+		}
+		return false;
+	}
+
 	public void rebuildTabs()
 	{
 		tabsWrapper.removeAll();
