@@ -550,11 +550,36 @@ public class O7FlipPlugin extends Plugin
 
 		apiClient.fetchBundle(
 			sections,
-			config.showFlips()   ? (items, total) -> SwingUtilities.invokeLater(() -> panel.updateFlips(items, total, flipsPage))   : null,
-			config.showSpikes()  ? (items, total) -> SwingUtilities.invokeLater(() -> panel.updateSpikes(items, total, spikesPage)) : null,
-			config.showDips()    ? (items, total) -> SwingUtilities.invokeLater(() -> panel.updateDips(items, total, dipsPage))     : null,
-			config.showDumps()   ? (items, total) -> SwingUtilities.invokeLater(() -> panel.updateDumps(items, total, dumpsPage))   : null,
-			config.showAlerts()  ? (items, total) -> SwingUtilities.invokeLater(() -> panel.updateAlerts(items, total, alertsPage)) : null,
+			config.showFlips() ? (items, total) ->
+			{
+				lastFlips = items;
+				rebuildTrackedItems();
+				SwingUtilities.invokeLater(() -> panel.updateFlips(items, total, flipsPage));
+			} : null,
+			config.showSpikes() ? (items, total) ->
+			{
+				lastSpikes = items;
+				rebuildTrackedItems();
+				SwingUtilities.invokeLater(() -> panel.updateSpikes(items, total, spikesPage));
+			} : null,
+			config.showDips() ? (items, total) ->
+			{
+				lastDips = items;
+				rebuildTrackedItems();
+				SwingUtilities.invokeLater(() -> panel.updateDips(items, total, dipsPage));
+			} : null,
+			config.showDumps() ? (items, total) ->
+			{
+				lastDumps = items;
+				rebuildTrackedItems();
+				SwingUtilities.invokeLater(() -> panel.updateDumps(items, total, dumpsPage));
+			} : null,
+			config.showAlerts() ? (items, total) ->
+			{
+				lastAlerts = items;
+				rebuildTrackedItems();
+				SwingUtilities.invokeLater(() -> panel.updateAlerts(items, total, alertsPage));
+			} : null,
 			(config.showBarrows() && includeSlow) ? sets    -> SwingUtilities.invokeLater(() -> panel.updateBarrows(sets))    : null,
 			(config.showMoon()    && includeSlow) ? sets    -> SwingUtilities.invokeLater(() -> panel.updateMoon(sets))       : null,
 			(config.showDecant()  && includeSlow) ? decants -> SwingUtilities.invokeLater(() -> panel.updateDecanting(decants)) : null,
@@ -734,28 +759,48 @@ public class O7FlipPlugin extends Plugin
 			apiClient.fetchFlips(panel.getSelectedPreset(),
 				panel.getFlipsMinProfit(), panel.getFlipsPriceMin(), panel.getFlipsPriceMax(),
 				page,
-				(items, total) -> SwingUtilities.invokeLater(() -> panel.updateFlips(items, total, page))));
+				(items, total) ->
+				{
+					lastFlips = items;
+					rebuildTrackedItems();
+					SwingUtilities.invokeLater(() -> panel.updateFlips(items, total, page));
+				}));
 	}
 
 	void onSpikesPageChanged(int page)
 	{
 		executor.execute(() ->
 			apiClient.fetchSpikes(panel.getSpikesSortKey(), page,
-				(items, total) -> SwingUtilities.invokeLater(() -> panel.updateSpikes(items, total, page))));
+				(items, total) ->
+				{
+					lastSpikes = items;
+					rebuildTrackedItems();
+					SwingUtilities.invokeLater(() -> panel.updateSpikes(items, total, page));
+				}));
 	}
 
 	void onDipsPageChanged(int page)
 	{
 		executor.execute(() ->
 			apiClient.fetchDips(panel.getDipsSortKey(), page,
-				(items, total) -> SwingUtilities.invokeLater(() -> panel.updateDips(items, total, page))));
+				(items, total) ->
+				{
+					lastDips = items;
+					rebuildTrackedItems();
+					SwingUtilities.invokeLater(() -> panel.updateDips(items, total, page));
+				}));
 	}
 
 	void onDipsSortChanged(String sort)
 	{
 		executor.execute(() ->
 			apiClient.fetchDips(sort, 0,
-				(items, total) -> SwingUtilities.invokeLater(() -> panel.updateDips(items, total, 0))));
+				(items, total) ->
+				{
+					lastDips = items;
+					rebuildTrackedItems();
+					SwingUtilities.invokeLater(() -> panel.updateDips(items, total, 0));
+				}));
 	}
 
 	void onDumpsPageChanged(int page)
@@ -764,14 +809,24 @@ public class O7FlipPlugin extends Plugin
 			apiClient.fetchDumps(panel.getDumpsSortKey(),
 				panel.getDumpsMinProfit(), panel.getDumpsPriceMin(), panel.getDumpsPriceMax(),
 				page,
-				(items, total) -> SwingUtilities.invokeLater(() -> panel.updateDumps(items, total, page))));
+				(items, total) ->
+				{
+					lastDumps = items;
+					rebuildTrackedItems();
+					SwingUtilities.invokeLater(() -> panel.updateDumps(items, total, page));
+				}));
 	}
 
 	void onAlertsPageChanged(int page)
 	{
 		executor.execute(() ->
 			apiClient.fetchAlerts(page,
-				(items, total) -> SwingUtilities.invokeLater(() -> panel.updateAlerts(items, total, page))));
+				(items, total) ->
+				{
+					lastAlerts = items;
+					rebuildTrackedItems();
+					SwingUtilities.invokeLater(() -> panel.updateAlerts(items, total, page));
+				}));
 	}
 
 	// -------------------------------------------------------------------------
@@ -782,7 +837,12 @@ public class O7FlipPlugin extends Plugin
 	{
 		executor.execute(() ->
 			apiClient.fetchSpikes(sort, 0,
-				(items, total) -> SwingUtilities.invokeLater(() -> panel.updateSpikes(items, total, 0))));
+				(items, total) ->
+				{
+					lastSpikes = items;
+					rebuildTrackedItems();
+					SwingUtilities.invokeLater(() -> panel.updateSpikes(items, total, 0));
+				}));
 	}
 
 	void onDumpsSortChanged(String sort)
@@ -791,7 +851,12 @@ public class O7FlipPlugin extends Plugin
 			apiClient.fetchDumps(sort,
 				panel.getDumpsMinProfit(), panel.getDumpsPriceMin(), panel.getDumpsPriceMax(),
 				0,
-				(items, total) -> SwingUtilities.invokeLater(() -> panel.updateDumps(items, total, 0))));
+				(items, total) ->
+				{
+					lastDumps = items;
+					rebuildTrackedItems();
+					SwingUtilities.invokeLater(() -> panel.updateDumps(items, total, 0));
+				}));
 	}
 
 	void onFlipsFilterChanged()
@@ -800,7 +865,12 @@ public class O7FlipPlugin extends Plugin
 			apiClient.fetchFlips(panel.getSelectedPreset(),
 				panel.getFlipsMinProfit(), panel.getFlipsPriceMin(), panel.getFlipsPriceMax(),
 				0,
-				(items, total) -> SwingUtilities.invokeLater(() -> panel.updateFlips(items, total, 0))));
+				(items, total) ->
+				{
+					lastFlips = items;
+					rebuildTrackedItems();
+					SwingUtilities.invokeLater(() -> panel.updateFlips(items, total, 0));
+				}));
 	}
 
 	void onDumpsFilterChanged()
@@ -809,7 +879,12 @@ public class O7FlipPlugin extends Plugin
 			apiClient.fetchDumps(panel.getDumpsSortKey(),
 				panel.getDumpsMinProfit(), panel.getDumpsPriceMin(), panel.getDumpsPriceMax(),
 				0,
-				(items, total) -> SwingUtilities.invokeLater(() -> panel.updateDumps(items, total, 0))));
+				(items, total) ->
+				{
+					lastDumps = items;
+					rebuildTrackedItems();
+					SwingUtilities.invokeLater(() -> panel.updateDumps(items, total, 0));
+				}));
 	}
 
 	void onPresetChanged()
@@ -818,7 +893,12 @@ public class O7FlipPlugin extends Plugin
 			apiClient.fetchFlips(panel.getSelectedPreset(),
 				panel.getFlipsMinProfit(), panel.getFlipsPriceMin(), panel.getFlipsPriceMax(),
 				0,
-				(items, total) -> SwingUtilities.invokeLater(() -> panel.updateFlips(items, total, 0))));
+				(items, total) ->
+				{
+					lastFlips = items;
+					rebuildTrackedItems();
+					SwingUtilities.invokeLater(() -> panel.updateFlips(items, total, 0));
+				}));
 	}
 
 	void onBarrowsSetClicked(BarrowsSet set)
