@@ -33,6 +33,7 @@ import com.o7flip.model.FlipItem;
 import com.o7flip.model.MoonSet;
 import com.o7flip.model.SearchResultItem;
 import com.o7flip.model.SpikeItem;
+import com.o7flip.model.TradeRecord;
 import com.o7flip.ui.AlertItemPanel;
 import com.o7flip.ui.BarrowsItemPanel;
 import com.o7flip.ui.BarrowsSetPanel;
@@ -43,6 +44,7 @@ import com.o7flip.ui.FlipItemPanel;
 import com.o7flip.ui.MoonSetPanel;
 import com.o7flip.ui.SearchResultPanel;
 import com.o7flip.ui.SpikeItemPanel;
+import com.o7flip.ui.TradeRecordPanel;
 import com.o7flip.util.Fonts;
 import net.runelite.client.game.ItemManager;
 import net.runelite.client.ui.ColorScheme;
@@ -88,6 +90,7 @@ import java.awt.RenderingHints;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -190,6 +193,7 @@ public class O7FlipPanel extends PluginPanel
 	private List<MoonSet>     allMoon    = new ArrayList<>();
 	private List<DecantItem>  allDecants = new ArrayList<>();
 	private List<AlertItem>   allAlerts  = new ArrayList<>();
+	private List<TradeRecord> allMyFlips = new ArrayList<>();
 
 	// -------------------------------------------------------------------------
 	// Sort state
@@ -229,6 +233,7 @@ public class O7FlipPanel extends PluginPanel
 	private JPanel moonListPanel;
 	private JPanel decantListPanel;
 	private JPanel alertsListPanel;
+	private JPanel myFlipsListPanel;
 	private JPanel searchResultsPanel;
 	private JScrollPane searchScrollPane;
 
@@ -720,6 +725,12 @@ public class O7FlipPanel extends PluginPanel
 		setLoading(false);
 	}
 
+	public void updateMyFlips(List<TradeRecord> records)
+	{
+		allMyFlips = new ArrayList<>(records);
+		renderMyFlips();
+	}
+
 	public void updateBarrows(List<BarrowsSet> i)
 	{
 		allBarrows = i;
@@ -1088,6 +1099,31 @@ public class O7FlipPanel extends PluginPanel
 		hilite(alertsSortBtns, alertsSortIdx);
 	}
 
+	private void renderMyFlips()
+	{
+		if (myFlipsListPanel == null)
+		{
+			return;
+		}
+		myFlipsListPanel.removeAll();
+		if (allMyFlips.isEmpty())
+		{
+			myFlipsListPanel.add(emptyLabel("No trades recorded yet", "Completed GE buys and sells appear here"));
+		}
+		else
+		{
+			List<TradeRecord> reversed = new ArrayList<>(allMyFlips);
+			Collections.reverse(reversed);
+			for (int i = 0; i < reversed.size(); i++)
+			{
+				myFlipsListPanel.add(new TradeRecordPanel(reversed.get(i), itemManager, i % 2 != 0));
+				myFlipsListPanel.add(sep());
+			}
+		}
+		myFlipsListPanel.revalidate();
+		myFlipsListPanel.repaint();
+	}
+
 	/** Shows a plain status/placeholder message in the search panel. */
 	private void renderSearchMessage(String message)
 	{
@@ -1410,25 +1446,53 @@ public class O7FlipPanel extends PluginPanel
 
 		// Always build all tab content to initialise list-panel fields,
 		// then conditionally add each tab based on config + auth state.
-		JPanel flipsContent   = buildFlipsTab();
-		JPanel dumpsContent   = buildDumpsTab();
-		JPanel spikesContent  = buildSpikesTab();
-		JPanel dipsContent    = buildDipsTab();
-		JPanel alertsContent  = buildGenericTab("Merch");
-		JPanel moonContent    = buildMoonTab();
-		JPanel barrowsContent = buildGenericTab("Barrows");
-		JPanel decantContent  = buildGenericTab("Decant");
+		JPanel flipsContent    = buildFlipsTab();
+		JPanel dumpsContent    = buildDumpsTab();
+		JPanel spikesContent   = buildSpikesTab();
+		JPanel dipsContent     = buildDipsTab();
+		JPanel alertsContent   = buildGenericTab("Merch");
+		JPanel moonContent     = buildMoonTab();
+		JPanel barrowsContent  = buildGenericTab("Barrows");
+		JPanel decantContent   = buildGenericTab("Decant");
+		JPanel myFlipsContent  = buildMyFlipsTab();
 
-		if (config == null || config.showFlips())                          tabs.addTab("Flips",   flipsContent);
-		if (config == null || config.showDumps())                          tabs.addTab("Dumps",   dumpsContent);
-		if (config == null || config.showSpikes())                         tabs.addTab("Spikes",  spikesContent);
-		if (config == null || config.showDips())                           tabs.addTab("Dips",    dipsContent);
-		if ((config == null || config.showAlerts()) && isPremium)          tabs.addTab("Alerts",  alertsContent);
-		if ((config == null || config.showMoon()) && isSignedIn)           tabs.addTab("Moon",    moonContent);
-		if ((config == null || config.showBarrows()) && isSignedIn)        tabs.addTab("Barrows", barrowsContent);
-		if (config == null || config.showDecant())                         tabs.addTab("Decant",  decantContent);
+		if (config == null || config.showFlips())                          tabs.addTab("Flips",     flipsContent);
+		if (config == null || config.showDumps())                          tabs.addTab("Dumps",     dumpsContent);
+		if (config == null || config.showSpikes())                         tabs.addTab("Spikes",    spikesContent);
+		if (config == null || config.showDips())                           tabs.addTab("Dips",      dipsContent);
+		if ((config == null || config.showAlerts()) && isPremium)          tabs.addTab("Alerts",    alertsContent);
+		if ((config == null || config.showMoon()) && isSignedIn)           tabs.addTab("Moon",      moonContent);
+		if ((config == null || config.showBarrows()) && isSignedIn)        tabs.addTab("Barrows",   barrowsContent);
+		if (config == null || config.showDecant())                         tabs.addTab("Decant",    decantContent);
+		if (config == null || config.showMyFlips())                        tabs.addTab("My Trades", myFlipsContent);
 
 		return tabs;
+	}
+
+	private JPanel buildMyFlipsTab()
+	{
+		myFlipsListPanel = listPanel();
+
+		JButton clearBtn = pillButton("Clear History");
+		clearBtn.addActionListener(e ->
+		{
+			if (plugin != null)
+			{
+				plugin.clearTradeHistory();
+			}
+		});
+
+		JPanel topBar = new JPanel(new BorderLayout());
+		topBar.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+		topBar.setBorder(new EmptyBorder(6, 10, 6, 10));
+		topBar.add(clearBtn, BorderLayout.EAST);
+
+		renderMyFlips();
+
+		JPanel footer = new JPanel();
+		footer.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+
+		return assembleTab(topBar, myFlipsListPanel, footer);
 	}
 
 	/**

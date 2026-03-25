@@ -40,6 +40,7 @@ import com.o7flip.model.MoonItem;
 import com.o7flip.model.MoonSet;
 import com.o7flip.model.SearchResultItem;
 import com.o7flip.model.SpikeItem;
+import com.o7flip.model.TradeRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import okhttp3.Call;
@@ -152,6 +153,59 @@ public class O7FlipApiClient
 			log.warn("[07Flip] fetchSearch encode error: {}", e.getMessage());
 			callback.accept(new ArrayList<>());
 		}
+	}
+
+	// -------------------------------------------------------------------------
+	// Trade Tracker
+	// -------------------------------------------------------------------------
+
+	public void postTradeRecord(TradeRecord trade, Runnable onSuccess)
+	{
+		JsonObject body = new JsonObject();
+		body.addProperty("item_id",   trade.itemId);
+		body.addProperty("name",      trade.name);
+		body.addProperty("is_buy",    trade.isBuy);
+		body.addProperty("quantity",  trade.quantity);
+		body.addProperty("price_each", trade.priceEach);
+		body.addProperty("total_gp",  trade.totalGp);
+		body.addProperty("timestamp", trade.timestamp);
+		body.addProperty("partial",   trade.partial);
+
+		RequestBody requestBody = RequestBody.create(MEDIA_TYPE_JSON, gson.toJson(body));
+		Request.Builder builder = new Request.Builder()
+			.url(BASE_URL + "/tracker")
+			.post(requestBody)
+			.header("User-Agent", USER_AGENT);
+		String key = config != null ? config.apiKey() : null;
+		if (key != null && !key.trim().isEmpty())
+		{
+			builder.header("Authorization", "Bearer " + key.trim());
+		}
+		okHttpClient.newCall(builder.build()).enqueue(new Callback()
+		{
+			@Override
+			public void onFailure(Call call, IOException e)
+			{
+				log.warn("[07Flip] postTradeRecord failed: {}", e.getMessage());
+			}
+
+			@Override
+			public void onResponse(Call call, Response response) throws IOException
+			{
+				response.close();
+				if (response.isSuccessful())
+				{
+					if (onSuccess != null)
+					{
+						onSuccess.run();
+					}
+				}
+				else
+				{
+					log.warn("[07Flip] postTradeRecord HTTP {}", response.code());
+				}
+			}
+		});
 	}
 
 	// -------------------------------------------------------------------------

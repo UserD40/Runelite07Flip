@@ -203,4 +203,30 @@ public interface O7FlipConfig extends Config
 	{
 		return true;
 	}
+
+	// ── Trade Tracker ───────────────────────────────────────────────────────
+
+	@ConfigItem(
+		keyName = "showMyFlips",
+		name = "Show My Trades tab",
+		description = "Show the My Trades tab in the panel. Records completed GE buys and sells locally.",
+		position = 15
+	)
+	default boolean showMyFlips()
+	{
+		return true;
+	}
+
+	@ConfigItem(
+		keyName = "shareTradeData",
+		name = "Share trade data with 07flip.com",
+		description = "<html>Send your completed GE trades to 07flip.com so you can view your history<br>"
+			+ "on the website under the Tracker feature. Requires an API key.<br>"
+			+ "<b>Only item ID, quantity, and price are sent \u2014 your account name is never included.</b></html>",
+		position = 16
+	)
+	default boolean shareTradeData()
+	{
+		return false;
+	}
 }

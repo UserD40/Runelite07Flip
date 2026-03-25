@@ -24,6 +24,8 @@
  */
 package com.o7flip;
 
+import com.google.gson.Gson;
+import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.inject.Provides;
 import com.o7flip.model.AlertItem;
@@ -33,6 +35,7 @@ import com.o7flip.model.DumpItem;
 import com.o7flip.model.FlipItem;
 import com.o7flip.model.SpikeItem;
 import com.o7flip.model.TrackedItemData;
+import com.o7flip.model.TradeRecord;
 import net.runelite.api.Client;
 import net.runelite.api.GrandExchangeOffer;
 import net.runelite.api.GrandExchangeOfferState;
@@ -67,6 +70,7 @@ import org.slf4j.LoggerFactory;
 import javax.inject.Inject;
 import javax.swing.SwingUtilities;
 import java.awt.image.BufferedImage;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -114,6 +118,12 @@ public class O7FlipPlugin extends Plugin
 
 	@Inject
 	private O7FlipOfferOverlay offerOverlay;
+
+	@Inject
+	private Gson gson;
+
+	@Inject
+	private net.runelite.client.config.ConfigManager configManager;
 
 	private O7FlipPanel panel;
 	private NavigationButton navButton;
@@ -164,6 +174,15 @@ public class O7FlipPlugin extends Plugin
 	/** Active GE offers keyed by slot index. Volatile reference swap. */
 	public volatile Map<Integer, GrandExchangeOffer> activeOffers = Collections.emptyMap();
 
+	/** Previous offer state per slot — used to detect buy/sell completions. Game-thread only. */
+	private final Map<Integer, GrandExchangeOfferState> prevSlotStates = new HashMap<>();
+
+	/** Completed trade history (oldest first). Volatile reference swap. */
+	public volatile List<TradeRecord> tradeHistory = Collections.emptyList();
+
+	private static final int MAX_TRADE_HISTORY = 200;
+	private static final String TRADE_HISTORY_KEY = "tradeHistory";
+
 	/** Called by item panels on right-click to queue a GE buy pre-fill. */
 	public void queueGeBuy(int itemId, long price, String name)
 	{
@@ -212,6 +231,8 @@ public class O7FlipPlugin extends Plugin
 		clientToolbar.addNavigation(navButton);
 		overlayManager.add(geOverlay);
 		overlayManager.add(offerOverlay);
+
+		loadTradeHistory();
 
 		executor = Executors.newSingleThreadScheduledExecutor();
 		fetchAuthStatus();
@@ -764,23 +785,140 @@ public class O7FlipPlugin extends Plugin
 	}
 
 	// -------------------------------------------------------------------------
-	// GE offer tracking — keeps activeOffers in sync
+	// GE offer tracking — keeps activeOffers in sync and records completions
 	// -------------------------------------------------------------------------
 
 	@Subscribe
 	public void onGrandExchangeOfferChanged(GrandExchangeOfferChanged event)
 	{
 		GrandExchangeOffer offer = event.getOffer();
+		int slot = event.getSlot();
+		GrandExchangeOfferState state = offer.getState();
+
+		// Keep activeOffers map in sync.
 		Map<Integer, GrandExchangeOffer> next = new HashMap<>(activeOffers);
-		if (offer.getState() == GrandExchangeOfferState.EMPTY)
+		if (state == GrandExchangeOfferState.EMPTY)
 		{
-			next.remove(event.getSlot());
+			next.remove(slot);
 		}
 		else
 		{
-			next.put(event.getSlot(), offer);
+			next.put(slot, offer);
 		}
 		activeOffers = Collections.unmodifiableMap(next);
+
+		// Detect completed or partially-filled transactions by comparing to the previous state.
+		GrandExchangeOfferState prev = prevSlotStates.get(slot);
+		if (prev == GrandExchangeOfferState.BUYING && state == GrandExchangeOfferState.BOUGHT)
+		{
+			recordTrade(offer, true, false);
+		}
+		else if (prev == GrandExchangeOfferState.SELLING && state == GrandExchangeOfferState.SOLD)
+		{
+			recordTrade(offer, false, false);
+		}
+		else if (prev == GrandExchangeOfferState.BUYING && state == GrandExchangeOfferState.CANCELLED_BUY
+			&& offer.getQuantitySold() > 0)
+		{
+			recordTrade(offer, true, true);
+		}
+		else if (prev == GrandExchangeOfferState.SELLING && state == GrandExchangeOfferState.CANCELLED_SELL
+			&& offer.getQuantitySold() > 0)
+		{
+			recordTrade(offer, false, true);
+		}
+
+		if (state == GrandExchangeOfferState.EMPTY)
+		{
+			prevSlotStates.remove(slot);
+		}
+		else
+		{
+			prevSlotStates.put(slot, state);
+		}
+	}
+
+	private void recordTrade(GrandExchangeOffer offer, boolean isBuy, boolean partial)
+	{
+		TradeRecord trade = new TradeRecord();
+		trade.itemId    = offer.getItemId();
+		trade.name      = client.getItemDefinition(offer.getItemId()).getName();
+		trade.isBuy     = isBuy;
+		trade.quantity  = offer.getQuantitySold();
+		trade.totalGp   = offer.getSpent();
+		trade.priceEach = trade.quantity > 0 ? trade.totalGp / trade.quantity : offer.getPrice();
+		trade.timestamp = System.currentTimeMillis();
+		trade.partial   = partial;
+
+		List<TradeRecord> updated = new ArrayList<>(tradeHistory);
+		updated.add(trade);
+		if (updated.size() > MAX_TRADE_HISTORY)
+		{
+			updated = updated.subList(updated.size() - MAX_TRADE_HISTORY, updated.size());
+		}
+		tradeHistory = Collections.unmodifiableList(updated);
+
+		saveTradeHistory();
+
+		final List<TradeRecord> snapshot = tradeHistory;
+		SwingUtilities.invokeLater(() -> panel.updateMyFlips(snapshot));
+
+		if (config.shareTradeData() && config.apiKey() != null && !config.apiKey().trim().isEmpty())
+		{
+			apiClient.postTradeRecord(trade, null);
+		}
+	}
+
+	private void loadTradeHistory()
+	{
+		String json = configManager.getConfiguration("o7flip", TRADE_HISTORY_KEY);
+		if (json == null || json.trim().isEmpty())
+		{
+			tradeHistory = Collections.emptyList();
+		}
+		else
+		{
+			try
+			{
+				TradeRecord[] records = gson.fromJson(json, TradeRecord[].class);
+				List<TradeRecord> list = new ArrayList<>();
+				if (records != null)
+				{
+					for (TradeRecord r : records)
+					{
+						list.add(r);
+					}
+				}
+				tradeHistory = Collections.unmodifiableList(list);
+			}
+			catch (Exception e)
+			{
+				log.warn("[07Flip] Failed to load trade history: {}", e.getMessage());
+				tradeHistory = Collections.emptyList();
+			}
+		}
+		final List<TradeRecord> snapshot = tradeHistory;
+		SwingUtilities.invokeLater(() -> panel.updateMyFlips(snapshot));
+	}
+
+	private void saveTradeHistory()
+	{
+		try
+		{
+			String json = gson.toJson(tradeHistory);
+			configManager.setConfiguration("o7flip", TRADE_HISTORY_KEY, json);
+		}
+		catch (Exception e)
+		{
+			log.warn("[07Flip] Failed to save trade history: {}", e.getMessage());
+		}
+	}
+
+	public void clearTradeHistory()
+	{
+		tradeHistory = Collections.emptyList();
+		configManager.unsetConfiguration("o7flip", TRADE_HISTORY_KEY);
+		SwingUtilities.invokeLater(() -> panel.updateMyFlips(Collections.emptyList()));
 	}
 
 	// -------------------------------------------------------------------------
