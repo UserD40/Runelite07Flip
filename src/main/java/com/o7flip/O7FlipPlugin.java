@@ -117,9 +117,6 @@ public class O7FlipPlugin extends Plugin
 	private O7FlipOverlay geOverlay;
 
 	@Inject
-	private O7FlipOfferOverlay offerOverlay;
-
-	@Inject
 	private Gson gson;
 
 	@Inject
@@ -149,8 +146,11 @@ public class O7FlipPlugin extends Plugin
 	volatile long   pendingGeSellPrice  = -1;
 	volatile String pendingGeSellName   = null;
 
-	// Phase 2: price to highlight once GE_OFFERS_SETUP_BUILD fires (buy or sell)
+	// Phase 2: price to highlight once GE_OFFERS_SETUP_BUILD fires (buy or sell).
+	// pendingGeSetItemId guards against the user selecting a different item from search —
+	// we only arm the highlight if GE_OFFERS_SETUP_BUILD reports the item we queued.
 	volatile long   pendingGeSetPrice  = -1;
+	volatile int    pendingGeSetItemId = -1;
 	// Phase 3: price to input once the chatbox opens (script 108)
 	volatile long   pendingGeInputPrice = -1;
 
@@ -230,7 +230,6 @@ public class O7FlipPlugin extends Plugin
 
 		clientToolbar.addNavigation(navButton);
 		overlayManager.add(geOverlay);
-		overlayManager.add(offerOverlay);
 
 		loadTradeHistory();
 
@@ -257,7 +256,6 @@ public class O7FlipPlugin extends Plugin
 		{
 			executor.shutdown();
 		}
-		overlayManager.remove(offerOverlay);
 		overlayManager.remove(geOverlay);
 		clientToolbar.removeNavigation(navButton);
 		log.info("[07Flip] Stopped");
@@ -313,9 +311,11 @@ public class O7FlipPlugin extends Plugin
 			log.debug("[07Flip] GE search box has no key listener");
 			return;
 		}
-		// Store the price so onScriptPostFired(GE_OFFERS_SETUP_BUILD) can highlight it
-		// once the user selects the item from search results.
-		pendingGeSetPrice = price;
+		// Store the price + itemId so onScriptPostFired(GE_OFFERS_SETUP_BUILD) can arm the
+		// highlight only if the user ends up selecting the item we searched for. Without
+		// the itemId guard, any item chosen from search would trigger the highlight.
+		pendingGeSetPrice  = price;
+		pendingGeSetItemId = itemId;
 		client.runScript(scriptArgs);
 	}
 
@@ -328,20 +328,26 @@ public class O7FlipPlugin extends Plugin
 		// Phase 2: item was selected in GE search — highlight the "Enter price" button.
 		if (event.getScriptId() == ScriptID.GE_OFFERS_SETUP_BUILD)
 		{
+			int currentItemId = client.getVarpValue(VarPlayerID.TRADINGPOST_SEARCH);
 			long price = -1;
 
 			if (pendingGeSetPrice != -1)
 			{
-				// Buy flow: price was stored when we triggered the item search.
-				price = pendingGeSetPrice;
-				pendingGeSetPrice = -1;
+				// Buy flow: only arm the highlight if the user actually selected the
+				// item we queued — otherwise the yellow highlight would show on any
+				// item they pick from search.
+				if (pendingGeSetItemId == -1 || currentItemId == pendingGeSetItemId)
+				{
+					price = pendingGeSetPrice;
+				}
+				pendingGeSetPrice  = -1;
+				pendingGeSetItemId = -1;
 			}
 			else if (pendingGeSellItemId != -1)
 			{
 				// Sell flow: check that the item and offer type match.
-				int offerType   = client.getVarbitValue(VarbitID.GE_NEWOFFER_TYPE);
-				int currentItem = client.getVarpValue(VarPlayerID.TRADINGPOST_SEARCH);
-				if (offerType == 0 && currentItem == pendingGeSellItemId)
+				int offerType = client.getVarbitValue(VarbitID.GE_NEWOFFER_TYPE);
+				if (offerType == 0 && currentItemId == pendingGeSellItemId)
 				{
 					price = pendingGeSellPrice;
 					pendingGeSellItemId = -1;
@@ -355,17 +361,9 @@ public class O7FlipPlugin extends Plugin
 				pendingGeInputPrice = price;
 			}
 
-			// Feature 2: set offer overlay data
-			if (config.showGeOfferOverlay())
-			{
-				int overlayItemId = client.getVarpValue(VarPlayerID.TRADINGPOST_SEARCH);
-				offerOverlay.activeOfferData = trackedItems.get(overlayItemId);
-			}
-
-			// Feature 4: auto-switch panel tab if this item is tracked
+			// Auto-switch panel tab if this item is tracked
 			if (config.autoSwitchTabOnGe())
 			{
-				int currentItemId = client.getVarpValue(VarPlayerID.TRADINGPOST_SEARCH);
 				TrackedItemData tracked = trackedItems.get(currentItemId);
 				if (tracked != null && !tracked.presentIn.isEmpty())
 				{
@@ -386,39 +384,192 @@ public class O7FlipPlugin extends Plugin
 			return;
 		}
 
-		// Phase 3: chatbox input opened — show a clickable price button the user must click.
-		if (event.getScriptId() == SCRIPT_CHATBOX_INPUT_OPEN && pendingGeInputPrice != -1)
+		// Phase 3: chatbox input opened for a GE price entry — render a clickable
+		// 07Flip price card inside the chatbox for the tracked item. The user
+		// clicks any price row to fill the input field.
+		if (event.getScriptId() == SCRIPT_CHATBOX_INPUT_OPEN)
 		{
-			final long price = pendingGeInputPrice;
-			pendingGeInputPrice = -1;
-			clientThread.invokeLater(() ->
+			Widget setup = client.getWidget(InterfaceID.GeOffers.SETUP);
+			if (setup == null || setup.isHidden())
 			{
-				Widget chatbox = client.getWidget(ComponentID.CHATBOX_CONTAINER);
-				if (chatbox == null)
-				{
-					return;
-				}
-				Widget btn = chatbox.createChild(-1, WidgetType.TEXT);
-				btn.setOriginalX(0);
-				btn.setOriginalY(40);
-				btn.setOriginalWidth(chatbox.getWidth());
-				btn.setOriginalHeight(14);
-				btn.setText("07Flip: click to set " + String.format("%,d", price) + " gp");
-				btn.setTextColor(0xffd700);
-				btn.setAction(0, "Set price");
-				btn.setHasListener(true);
-				btn.setOnOpListener((JavaScriptCallback) e ->
+				pendingGeInputPrice = -1;
+				return;
+			}
+
+			final int currentItemId = client.getVarpValue(VarPlayerID.TRADINGPOST_SEARCH);
+			final TrackedItemData data = trackedItems.get(currentItemId);
+			final long queuedPrice = pendingGeInputPrice;
+			pendingGeInputPrice = -1;
+
+			// Offer type governs which prices are relevant: buyers want the lowest
+			// buy price, sellers want the highest sell price. Sell == 0, buy == 1.
+			final boolean isBuy = client.getVarbitValue(VarbitID.GE_NEWOFFER_TYPE) != 0;
+
+			// Skip if the user has disabled the card AND there's no queued price to honour.
+			if (!config.showGeOfferOverlay() && queuedPrice == -1)
+			{
+				return;
+			}
+			// Nothing to show if the item isn't tracked and nothing was queued.
+			if (data == null && queuedPrice == -1)
+			{
+				return;
+			}
+
+			clientThread.invokeLater(() -> renderChatboxPriceCard(data, queuedPrice, isBuy));
+		}
+	}
+
+	// -------------------------------------------------------------------------
+	// Chatbox price card — rendered inside the GE "Enter price" chatbox input
+	// -------------------------------------------------------------------------
+
+	private static final int CHAT_ROW_H       = 14;
+	private static final int COLOR_HEADER     = 0xffd700;
+	private static final int COLOR_BUY        = 0xff7070;
+	private static final int COLOR_SELL       = 0x00c27a;
+	private static final int COLOR_INFO       = 0xc0c0c0;
+	private static final int COLOR_QUEUED     = 0xffd700;
+
+	private void renderChatboxPriceCard(TrackedItemData data, long queuedPrice, boolean isBuy)
+	{
+		Widget chatbox = client.getWidget(ComponentID.CHATBOX_CONTAINER);
+		if (chatbox == null)
+		{
+			return;
+		}
+
+		List<String[]> rows = buildChatboxRows(data, queuedPrice, isBuy);
+		if (rows.isEmpty())
+		{
+			return;
+		}
+
+		int chatWidth = chatbox.getWidth();
+		int y = 4;
+		for (String[] row : rows)
+		{
+			// row[0]=text, row[1]=color hex, row[2]=click price ("" = not clickable)
+			Widget w = chatbox.createChild(-1, WidgetType.TEXT);
+			w.setOriginalX(0);
+			w.setOriginalY(y);
+			w.setOriginalWidth(chatWidth);
+			w.setOriginalHeight(CHAT_ROW_H);
+			w.setText(row[0]);
+			w.setTextColor(Integer.parseInt(row[1], 16));
+			w.setXTextAlignment(1); // centered
+			if (row[2] != null && !row[2].isEmpty())
+			{
+				final long clickPrice = Long.parseLong(row[2]);
+				w.setAction(0, "Set price");
+				w.setHasListener(true);
+				w.setOnOpListener((JavaScriptCallback) e ->
 				{
 					Widget input = client.getWidget(ComponentID.CHATBOX_FULL_INPUT);
 					if (input != null)
 					{
-						input.setText(price + "*");
-						client.setVarcStrValue(VarClientID.MESLAYERINPUT, String.valueOf(price));
+						input.setText(clickPrice + "*");
+						client.setVarcStrValue(VarClientID.MESLAYERINPUT, String.valueOf(clickPrice));
 					}
 				});
-				btn.revalidate();
+			}
+			w.revalidate();
+			y += CHAT_ROW_H;
+		}
+	}
+
+	private List<String[]> buildChatboxRows(TrackedItemData data, long queuedPrice, boolean isBuy)
+	{
+		List<String[]> rows = new ArrayList<>();
+
+		String header = "07Flip" + (data != null ? " — " + data.name : "")
+			+ (isBuy ? " (buy)" : " (sell)");
+		rows.add(new String[]{header, hex(COLOR_HEADER), ""});
+
+		// Queued price from the right-click flow gets its own emphasised row.
+		if (queuedPrice != -1)
+		{
+			rows.add(new String[]{
+				"Click to set " + String.format("%,d", queuedPrice) + " gp",
+				hex(COLOR_QUEUED),
+				String.valueOf(queuedPrice)
 			});
 		}
+
+		if (data != null)
+		{
+			if (isBuy)
+			{
+				// Only buy-relevant prices: the user is paying, so they want the lowest.
+				if (data.flipBuyPrice != null)
+				{
+					rows.add(new String[]{
+						"Buy: " + String.format("%,d", data.flipBuyPrice) + " gp",
+						hex(COLOR_BUY),
+						String.valueOf(data.flipBuyPrice)
+					});
+				}
+				if (data.dipBuyPrice != null)
+				{
+					rows.add(new String[]{
+						"Dip: " + String.format("%,d", data.dipBuyPrice) + " gp",
+						hex(COLOR_BUY),
+						String.valueOf(data.dipBuyPrice)
+					});
+				}
+				if (data.spikeBuyPrice != null)
+				{
+					rows.add(new String[]{
+						"Spike: " + String.format("%,d", data.spikeBuyPrice) + " gp",
+						hex(COLOR_BUY),
+						String.valueOf(data.spikeBuyPrice)
+					});
+				}
+				if (data.flipRoiPct != null)
+				{
+					rows.add(new String[]{
+						String.format("ROI: %.2f%%", data.flipRoiPct),
+						hex(COLOR_INFO),
+						""
+					});
+				}
+			}
+			else
+			{
+				// Only sell-relevant prices: the user wants the highest.
+				if (data.flipSellPrice != null)
+				{
+					rows.add(new String[]{
+						"Sell: " + String.format("%,d", data.flipSellPrice) + " gp",
+						hex(COLOR_SELL),
+						String.valueOf(data.flipSellPrice)
+					});
+				}
+				if (data.alertSellTarget != null)
+				{
+					rows.add(new String[]{
+						"Alert target: " + String.format("%,d", data.alertSellTarget) + " gp",
+						hex(COLOR_SELL),
+						String.valueOf(data.alertSellTarget)
+					});
+				}
+				if (data.dumpSellPrice != null)
+				{
+					rows.add(new String[]{
+						"Dump sell: " + String.format("%,d", data.dumpSellPrice) + " gp",
+						hex(COLOR_SELL),
+						String.valueOf(data.dumpSellPrice)
+					});
+				}
+			}
+		}
+
+		return rows;
+	}
+
+	private static String hex(int color)
+	{
+		return Integer.toHexString(color);
 	}
 
 	// -------------------------------------------------------------------------

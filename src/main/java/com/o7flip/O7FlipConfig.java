@@ -27,16 +27,50 @@ package com.o7flip;
 import net.runelite.client.config.Config;
 import net.runelite.client.config.ConfigGroup;
 import net.runelite.client.config.ConfigItem;
+import net.runelite.client.config.ConfigSection;
 import net.runelite.client.config.Range;
 
 @ConfigGroup("o7flip")
 public interface O7FlipConfig extends Config
 {
+	// ── Sections ────────────────────────────────────────────────────────────
+
+	@ConfigSection(
+		name = "General",
+		description = "API key, refresh interval and skill settings.",
+		position = 0
+	)
+	String generalSection = "general";
+
+	@ConfigSection(
+		name = "Panel tabs",
+		description = "Show or hide tabs in the 07Flip sidebar panel.",
+		position = 1
+	)
+	String tabsSection = "tabs";
+
+	@ConfigSection(
+		name = "Grand Exchange integration",
+		description = "Overlays and helpers shown inside the Grand Exchange interface.",
+		position = 2
+	)
+	String geSection = "ge";
+
+	@ConfigSection(
+		name = "Trade tracker",
+		description = "Options for the local trade history and sharing it with 07flip.com.",
+		position = 3
+	)
+	String trackerSection = "tracker";
+
+	// ── General ─────────────────────────────────────────────────────────────
+
 	@ConfigItem(
 		keyName = "apiKey",
-		name = "API Key",
+		name = "API key",
 		description = "Your 07flip.com API key. To get it: sign up at 07flip.com, log in with Discord, then click your Discord user icon (top-right) and select 'View API Key'. No player data is sent to external servers.",
 		secret = true,
+		section = generalSection,
 		position = 0
 	)
 	default String apiKey()
@@ -46,8 +80,9 @@ public interface O7FlipConfig extends Config
 
 	@ConfigItem(
 		keyName = "refreshInterval",
-		name = "Refresh Interval (seconds)",
+		name = "Refresh interval (seconds)",
 		description = "How often to fetch data from 07flip.com. Minimum 60 seconds.",
+		section = generalSection,
 		position = 1
 	)
 	@Range(min = 60, max = 600)
@@ -58,8 +93,9 @@ public interface O7FlipConfig extends Config
 
 	@ConfigItem(
 		keyName = "smithingLevel",
-		name = "Smithing Level",
+		name = "Smithing level",
 		description = "Your Smithing level, used to calculate PoH repair costs for Barrows and Moon.",
+		section = generalSection,
 		position = 2
 	)
 	@Range(min = 1, max = 99)
@@ -68,13 +104,14 @@ public interface O7FlipConfig extends Config
 		return 99;
 	}
 
-	// ── Tab visibility ─────────────────────────────────────────────────────
+	// ── Panel tabs ──────────────────────────────────────────────────────────
 
 	@ConfigItem(
 		keyName = "showFlips",
 		name = "Show Flips tab",
 		description = "Show the Flips tab in the panel.",
-		position = 3
+		section = tabsSection,
+		position = 0
 	)
 	default boolean showFlips()
 	{
@@ -85,7 +122,8 @@ public interface O7FlipConfig extends Config
 		keyName = "showDumps",
 		name = "Show Dumps tab",
 		description = "Show the Dumps tab in the panel.",
-		position = 4
+		section = tabsSection,
+		position = 1
 	)
 	default boolean showDumps()
 	{
@@ -96,7 +134,8 @@ public interface O7FlipConfig extends Config
 		keyName = "showSpikes",
 		name = "Show Spikes tab",
 		description = "Show the Spikes tab in the panel.",
-		position = 5
+		section = tabsSection,
+		position = 2
 	)
 	default boolean showSpikes()
 	{
@@ -107,7 +146,8 @@ public interface O7FlipConfig extends Config
 		keyName = "showDips",
 		name = "Show Dips tab",
 		description = "Show the Dips tab in the panel.",
-		position = 6
+		section = tabsSection,
+		position = 3
 	)
 	default boolean showDips()
 	{
@@ -118,7 +158,8 @@ public interface O7FlipConfig extends Config
 		keyName = "showAlerts",
 		name = "Show Alerts tab",
 		description = "Show the Alerts tab in the panel. Requires a premium 07flip.com subscription.",
-		position = 7
+		section = tabsSection,
+		position = 4
 	)
 	default boolean showAlerts()
 	{
@@ -129,7 +170,8 @@ public interface O7FlipConfig extends Config
 		keyName = "showMoon",
 		name = "Show Moon tab",
 		description = "Show the Moon armour tab in the panel. Requires an 07flip.com API key.",
-		position = 8
+		section = tabsSection,
+		position = 5
 	)
 	default boolean showMoon()
 	{
@@ -140,7 +182,8 @@ public interface O7FlipConfig extends Config
 		keyName = "showBarrows",
 		name = "Show Barrows tab",
 		description = "Show the Barrows tab in the panel. Requires an 07flip.com API key.",
-		position = 9
+		section = tabsSection,
+		position = 6
 	)
 	default boolean showBarrows()
 	{
@@ -151,20 +194,34 @@ public interface O7FlipConfig extends Config
 		keyName = "showDecant",
 		name = "Show Decant tab",
 		description = "Show the Decanting tab in the panel.",
-		position = 10
+		section = tabsSection,
+		position = 7
 	)
 	default boolean showDecant()
 	{
 		return true;
 	}
 
-	// ── GE integration features ────────────────────────────────────────────
+	@ConfigItem(
+		keyName = "showMyFlips",
+		name = "Show My Trades tab",
+		description = "Show the My Trades tab in the panel. Records completed GE buys and sells locally.",
+		section = tabsSection,
+		position = 8
+	)
+	default boolean showMyFlips()
+	{
+		return true;
+	}
+
+	// ── Grand Exchange integration ─────────────────────────────────────────
 
 	@ConfigItem(
 		keyName = "showGePriceColouring",
-		name = "GE Slot Price Colouring",
+		name = "Slot price colouring",
 		description = "Colour GE slot prices green/red based on 07Flip recommended buy/sell prices.",
-		position = 11
+		section = geSection,
+		position = 0
 	)
 	default boolean showGePriceColouring()
 	{
@@ -173,9 +230,10 @@ public interface O7FlipConfig extends Config
 
 	@ConfigItem(
 		keyName = "showGeOfferOverlay",
-		name = "GE Offer Data Overlay",
-		description = "Show a data card with 07Flip info when you open a GE slot for a tracked item.",
-		position = 12
+		name = "Show prices in price chatbox",
+		description = "When you click 'Enter price' for a tracked item, show 07Flip buy/sell prices inside the chatbox. Click any row to auto-fill that price.",
+		section = geSection,
+		position = 1
 	)
 	default boolean showGeOfferOverlay()
 	{
@@ -183,10 +241,23 @@ public interface O7FlipConfig extends Config
 	}
 
 	@ConfigItem(
+		keyName = "showGePriceHint",
+		name = "Highlight 'Enter price' button",
+		description = "Show the yellow highlight around the Enter price button after you right-click a flip in the panel.",
+		section = geSection,
+		position = 2
+	)
+	default boolean showGePriceHint()
+	{
+		return true;
+	}
+
+	@ConfigItem(
 		keyName = "inventoryCheckOnSell",
-		name = "Inventory Check on Sell",
+		name = "Hide 'Sell on GE' when not carrying item",
 		description = "Hide the Sell on GE right-click option if the item is not in your inventory.",
-		position = 13
+		section = geSection,
+		position = 3
 	)
 	default boolean inventoryCheckOnSell()
 	{
@@ -195,35 +266,26 @@ public interface O7FlipConfig extends Config
 
 	@ConfigItem(
 		keyName = "autoSwitchTabOnGe",
-		name = "Auto-Switch Tab on GE Open",
+		name = "Auto-switch panel tab on GE open",
 		description = "Automatically switch the 07Flip panel to the relevant tab when you open a GE slot for a tracked item.",
-		position = 14
+		section = geSection,
+		position = 4
 	)
 	default boolean autoSwitchTabOnGe()
 	{
 		return true;
 	}
 
-	// ── Trade Tracker ───────────────────────────────────────────────────────
-
-	@ConfigItem(
-		keyName = "showMyFlips",
-		name = "Show My Trades tab",
-		description = "Show the My Trades tab in the panel. Records completed GE buys and sells locally.",
-		position = 15
-	)
-	default boolean showMyFlips()
-	{
-		return true;
-	}
+	// ── Trade tracker ───────────────────────────────────────────────────────
 
 	@ConfigItem(
 		keyName = "shareTradeData",
 		name = "Share trade data with 07flip.com",
 		description = "<html>Send your completed GE trades to 07flip.com so you can view your history<br>"
 			+ "on the website under the Tracker feature. Requires an API key.<br>"
-			+ "<b>Only item ID, quantity, and price are sent \u2014 your account name is never included.</b></html>",
-		position = 16
+			+ "<b>Only item ID, quantity, and price are sent — your account name is never included.</b></html>",
+		section = trackerSection,
+		position = 0
 	)
 	default boolean shareTradeData()
 	{

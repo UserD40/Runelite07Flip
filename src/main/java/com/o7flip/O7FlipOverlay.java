@@ -73,7 +73,7 @@ public class O7FlipOverlay extends Overlay
 		}
 
 		// Pass 2 — highlight "Enter price" button when pre-fill pending
-		if (plugin.pendingGeInputPrice == -1)
+		if (plugin.pendingGeInputPrice == -1 || !plugin.getConfig().showGePriceHint())
 		{
 			return null;
 		}
