@@ -424,19 +424,23 @@ public class O7FlipPlugin extends Plugin
 			return;
 		}
 
-		int chatWidth = chatbox.getWidth();
-		int y = 4;
+		// Bottom-left corner of the chatbox — empty space in the "Enter price"
+		// prompt that doesn't collide with GE Tracker (which anchors top-left).
+		int cardWidth  = 180;
+		int cardX      = 6;
+		int totalH     = rows.size() * CHAT_ROW_H;
+		int y          = chatbox.getHeight() - totalH - 6;
 		for (String[] row : rows)
 		{
 			// row[0]=text, row[1]=color hex, row[2]=click price ("" = not clickable)
 			Widget w = chatbox.createChild(-1, WidgetType.TEXT);
-			w.setOriginalX(0);
+			w.setOriginalX(cardX);
 			w.setOriginalY(y);
-			w.setOriginalWidth(chatWidth);
+			w.setOriginalWidth(cardWidth);
 			w.setOriginalHeight(CHAT_ROW_H);
 			w.setText(row[0]);
 			w.setTextColor(Integer.parseInt(row[1], 16));
-			w.setXTextAlignment(1); // centered
+			w.setXTextAlignment(0); // left-aligned
 			if (row[2] != null && !row[2].isEmpty())
 			{
 				final long clickPrice = Long.parseLong(row[2]);
