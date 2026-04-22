@@ -264,18 +264,6 @@ public interface O7FlipConfig extends Config
 		return true;
 	}
 
-	@ConfigItem(
-		keyName = "autoSwitchTabOnGe",
-		name = "Auto-switch panel tab on GE open",
-		description = "Automatically switch the 07Flip panel to the relevant tab when you open a GE slot for a tracked item.",
-		section = geSection,
-		position = 4
-	)
-	default boolean autoSwitchTabOnGe()
-	{
-		return true;
-	}
-
 	// ── Trade tracker ───────────────────────────────────────────────────────
 
 	@ConfigItem(

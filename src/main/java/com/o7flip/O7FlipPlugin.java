@@ -74,7 +74,6 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -359,26 +358,6 @@ public class O7FlipPlugin extends Plugin
 			if (price != -1)
 			{
 				pendingGeInputPrice = price;
-			}
-
-			// Auto-switch panel tab if this item is tracked
-			if (config.autoSwitchTabOnGe())
-			{
-				TrackedItemData tracked = trackedItems.get(currentItemId);
-				if (tracked != null && !tracked.presentIn.isEmpty())
-				{
-					LinkedHashSet<String> tabs = tracked.presentIn;
-					SwingUtilities.invokeLater(() ->
-					{
-						for (String tab : tabs)
-						{
-							if (panel.selectTab(tab))
-							{
-								break;
-							}
-						}
-					});
-				}
 			}
 
 			return;
