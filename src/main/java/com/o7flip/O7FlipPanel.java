@@ -180,6 +180,7 @@ public class O7FlipPanel extends PluginPanel
 	// -------------------------------------------------------------------------
 	private boolean isSignedIn = false;
 	private boolean isPremium  = false;
+	private boolean authChecked = false;
 	private boolean noKeyBannerExpanded = true;
 
 	// -------------------------------------------------------------------------
@@ -363,8 +364,9 @@ public class O7FlipPanel extends PluginPanel
 
 	public void updateAuthStatus(boolean signedIn, boolean premium)
 	{
-		this.isSignedIn = signedIn;
-		this.isPremium  = premium;
+		this.isSignedIn  = signedIn;
+		this.isPremium   = premium;
+		this.authChecked = true;
 		presetSelector.repaint();
 		updateAuthBanner();
 		rebuildTabs();
@@ -427,9 +429,44 @@ public class O7FlipPanel extends PluginPanel
 
 		if (!noKey)
 		{
-			// State D — key is set but auth hasn't completed or failed.
-			// The invalidKeyBar handles reconnection if the key is invalid.
-			authBanner.setVisible(false);
+			if (!authChecked)
+			{
+				// Auth call in flight — keep banner hidden until we know the outcome.
+				authBanner.setVisible(false);
+				authBanner.revalidate();
+				authBanner.repaint();
+				northArea.revalidate();
+				northArea.repaint();
+				return;
+			}
+
+			// Server returned authenticated:false for the configured key.
+			// Most common cause: stray characters pasted with the key.
+			authBanner.setBackground(new Color(0x2A0D0D));
+			authBanner.setBorder(BorderFactory.createCompoundBorder(
+				new MatteBorder(1, 0, 1, 0, new Color(0x663333)),
+				new EmptyBorder(9, 10, 9, 10)));
+
+			JPanel notConnectedInner = new JPanel();
+			notConnectedInner.setLayout(new BoxLayout(notConnectedInner, BoxLayout.Y_AXIS));
+			notConnectedInner.setOpaque(false);
+
+			bannerRow(notConnectedInner, "⚠ Not Connected",                          Fonts.BOLD, new Color(0xFF6B6B), 0);
+			bannerRow(notConnectedInner, "Your API key wasn't recognised.",               Fonts.SM,   new Color(0xBBBBBB), 4);
+			bannerRow(notConnectedInner, "Check for stray spaces or quotes when pasting.", Fonts.SM,   new Color(0xBBBBBB), 1);
+
+			notConnectedInner.add(Box.createRigidArea(new Dimension(0, 9)));
+
+			JButton fixBtn = pillButton("Get a new key at 07flip.com/runelite");
+			fixBtn.setBackground(ORANGE);
+			fixBtn.setForeground(Color.BLACK);
+			fixBtn.setAlignmentX(Component.LEFT_ALIGNMENT);
+			fixBtn.setMaximumSize(new Dimension(Integer.MAX_VALUE, 24));
+			fixBtn.addActionListener(e -> openUrl(RUNELITE_URL));
+			notConnectedInner.add(fixBtn);
+
+			authBanner.add(notConnectedInner, BorderLayout.CENTER);
+			authBanner.setVisible(true);
 			authBanner.revalidate();
 			authBanner.repaint();
 			northArea.revalidate();

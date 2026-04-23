@@ -80,6 +80,9 @@ public class O7FlipApiClient
 	/** Epoch ms until which all requests should be skipped after a 429 response. */
 	private volatile long backoffUntil = 0;
 
+	/** One-shot log guard so we only report sanitisation once per plugin session. */
+	private volatile boolean loggedKeySanitisation = false;
+
 	/** Returns true if the client is currently in a rate-limit backoff window. */
 	boolean isRateLimited()
 	{
@@ -92,15 +95,38 @@ public class O7FlipApiClient
 		log.warn("[07Flip] Rate limited (429) — pausing all requests for 60s");
 	}
 
+	/**
+	 * Strips anything that isn't alphanumeric or a hyphen — defeats whitespace,
+	 * quote characters, smart quotes, and trailing newlines that can sneak in
+	 * when pasting from a "Copy API key" button. Returns null when the result
+	 * is empty (no key configured).
+	 */
+	private String sanitizedApiKey()
+	{
+		String raw = config != null ? config.apiKey() : null;
+		if (raw == null)
+		{
+			return null;
+		}
+		String cleaned = raw.replaceAll("[^A-Za-z0-9-]", "");
+		if (!loggedKeySanitisation && raw.length() != cleaned.length())
+		{
+			log.info("[07Flip] API key sanitised: raw length {} -> cleaned length {}",
+				raw.length(), cleaned.length());
+			loggedKeySanitisation = true;
+		}
+		return cleaned.isEmpty() ? null : cleaned;
+	}
+
 	private void fetch(String url, Callback callback)
 	{
 		Request.Builder builder = new Request.Builder()
 			.url(url)
 			.header("User-Agent", USER_AGENT);
-		String key = config != null ? config.apiKey() : null;
-		if (key != null && !key.trim().isEmpty())
+		String key = sanitizedApiKey();
+		if (key != null)
 		{
-			builder.header("Authorization", "Bearer " + key.trim());
+			builder.header("Authorization", "Bearer " + key);
 		}
 		okHttpClient.newCall(builder.build()).enqueue(callback);
 	}
@@ -176,10 +202,10 @@ public class O7FlipApiClient
 			.url(BASE_URL + "/tracker")
 			.post(requestBody)
 			.header("User-Agent", USER_AGENT);
-		String key = config != null ? config.apiKey() : null;
-		if (key != null && !key.trim().isEmpty())
+		String key = sanitizedApiKey();
+		if (key != null)
 		{
-			builder.header("Authorization", "Bearer " + key.trim());
+			builder.header("Authorization", "Bearer " + key);
 		}
 		okHttpClient.newCall(builder.build()).enqueue(new Callback()
 		{
@@ -424,10 +450,10 @@ public class O7FlipApiClient
 			.url(BASE_URL + "/bundle")
 			.post(requestBody)
 			.header("User-Agent", USER_AGENT);
-		String key = config != null ? config.apiKey() : null;
-		if (key != null && !key.trim().isEmpty())
+		String key = sanitizedApiKey();
+		if (key != null)
 		{
-			builder.header("Authorization", "Bearer " + key.trim());
+			builder.header("Authorization", "Bearer " + key);
 		}
 
 		okHttpClient.newCall(builder.build()).enqueue(new Callback()
