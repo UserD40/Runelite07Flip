@@ -41,6 +41,7 @@ import net.runelite.api.GrandExchangeOffer;
 import net.runelite.api.GrandExchangeOfferState;
 import net.runelite.api.InventoryID;
 import net.runelite.api.Item;
+import net.runelite.api.MenuAction;
 import net.runelite.api.events.GrandExchangeOfferChanged;
 import net.runelite.api.events.ItemContainerChanged;
 import net.runelite.api.ScriptID;
@@ -52,18 +53,18 @@ import net.runelite.api.gameval.VarPlayerID;
 import net.runelite.api.gameval.VarbitID;
 import net.runelite.api.widgets.ComponentID;
 import net.runelite.api.widgets.Widget;
-import net.runelite.api.widgets.WidgetType;
 import net.runelite.client.callback.ClientThread;
-import net.runelite.api.widgets.JavaScriptCallback;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.events.ConfigChanged;
+import net.runelite.client.events.OverlayMenuClicked;
 import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
 import net.runelite.client.Notifier;
 import net.runelite.client.ui.ClientToolbar;
 import net.runelite.client.ui.NavigationButton;
 import net.runelite.client.ui.overlay.OverlayManager;
+import net.runelite.client.ui.overlay.OverlayMenuEntry;
 import net.runelite.client.util.ImageUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -116,6 +117,9 @@ public class O7FlipPlugin extends Plugin
 	private O7FlipOverlay geOverlay;
 
 	@Inject
+	private GePriceOverlay priceOverlay;
+
+	@Inject
 	private Gson gson;
 
 	@Inject
@@ -154,6 +158,19 @@ public class O7FlipPlugin extends Plugin
 	volatile long   pendingGeInputPrice = -1;
 
 	// -------------------------------------------------------------------------
+	// Long-lived right-click queue used by the movable GE price overlay.
+	// Outlives the per-phase pendingGe* fields above so the overlay can show the
+	// queued price across the full GE flow (search → setup → price input).
+	// Cleared on offer placement, manual cancel, or TTL expiry.
+	// -------------------------------------------------------------------------
+	private static final long OVERLAY_QUEUE_TTL_MS = 10L * 60L * 1000L;
+
+	private volatile int    overlayQueueItemId   = -1;
+	private volatile long   overlayQueuePrice    = -1;
+	private volatile boolean overlayQueueIsBuy   = false;
+	private volatile long   overlayQueueExpiresAt = 0L;
+
+	// -------------------------------------------------------------------------
 	// GE integration — shared volatile state
 	// -------------------------------------------------------------------------
 
@@ -186,6 +203,7 @@ public class O7FlipPlugin extends Plugin
 	public void queueGeBuy(int itemId, long price, String name)
 	{
 		log.debug("[07Flip] GE buy queued: {} ({}) @ {}", name, itemId, price);
+		setOverlayQueue(itemId, price, true);
 		clientThread.invokeLater(() ->
 		{
 			// GE_ITEM_SEARCH only works when a buy slot is active (offer container visible).
@@ -208,10 +226,48 @@ public class O7FlipPlugin extends Plugin
 	public void queueGeSell(int itemId, long price, String name)
 	{
 		log.debug("[07Flip] GE sell queued: {} ({}) @ {}", name, itemId, price);
+		setOverlayQueue(itemId, price, false);
 		pendingGeSellItemId = itemId;
 		pendingGeSellPrice  = price;
 		pendingGeSellName   = name;
-		notifier.notify("Open GE \u2192 click a sell slot \u2192 select " + name + " from inventory \u2014 click the highlighted price button");
+		notifier.notify("Open GE \u2192 click a sell slot \u2192 select " + name + " from inventory \u2014 use the 07Flip overlay to set the price");
+	}
+
+	// -------------------------------------------------------------------------
+	// Overlay queue helpers \u2014 read by GePriceOverlay and O7FlipOverlay
+	// -------------------------------------------------------------------------
+
+	private void setOverlayQueue(int itemId, long price, boolean isBuy)
+	{
+		overlayQueueItemId = itemId;
+		overlayQueuePrice = price;
+		overlayQueueIsBuy = isBuy;
+		overlayQueueExpiresAt = System.currentTimeMillis() + OVERLAY_QUEUE_TTL_MS;
+	}
+
+	private void clearOverlayQueue()
+	{
+		overlayQueueItemId = -1;
+		overlayQueuePrice = -1;
+		overlayQueueExpiresAt = 0L;
+	}
+
+	/** True when a panel right-click is still awaiting the user picking a slot. */
+	public boolean hasOverlayQueue()
+	{
+		return overlayQueueItemId != -1
+			&& System.currentTimeMillis() < overlayQueueExpiresAt;
+	}
+
+	/** Returns the queued price for the given (itemId, direction) pair, or -1 if none. */
+	public long queuedPriceFor(int itemId, boolean isBuy)
+	{
+		if (!hasOverlayQueue()) return -1L;
+		if (overlayQueueItemId == itemId && overlayQueueIsBuy == isBuy)
+		{
+			return overlayQueuePrice;
+		}
+		return -1L;
 	}
 
 	@Override
@@ -229,6 +285,7 @@ public class O7FlipPlugin extends Plugin
 
 		clientToolbar.addNavigation(navButton);
 		overlayManager.add(geOverlay);
+		overlayManager.add(priceOverlay);
 
 		loadTradeHistory();
 
@@ -256,6 +313,7 @@ public class O7FlipPlugin extends Plugin
 			executor.shutdown();
 		}
 		overlayManager.remove(geOverlay);
+		overlayManager.remove(priceOverlay);
 		clientToolbar.removeNavigation(navButton);
 		log.info("[07Flip] Stopped");
 	}
@@ -363,196 +421,116 @@ public class O7FlipPlugin extends Plugin
 			return;
 		}
 
-		// Phase 3: chatbox input opened for a GE price entry — render a clickable
-		// 07Flip price card inside the chatbox for the tracked item. The user
-		// clicks any price row to fill the input field.
+		// Phase 3: chatbox input opened. Auto-fill the custom price input if one
+		// has been armed by the right-click queue or the GePriceOverlay menu.
 		if (event.getScriptId() == SCRIPT_CHATBOX_INPUT_OPEN)
 		{
+			if (pendingGeInputPrice == -1)
+			{
+				return;
+			}
 			Widget setup = client.getWidget(InterfaceID.GeOffers.SETUP);
 			if (setup == null || setup.isHidden())
 			{
 				pendingGeInputPrice = -1;
 				return;
 			}
-
-			final int currentItemId = client.getVarpValue(VarPlayerID.TRADINGPOST_SEARCH);
-			final TrackedItemData data = trackedItems.get(currentItemId);
-			final long queuedPrice = pendingGeInputPrice;
+			final long price = pendingGeInputPrice;
 			pendingGeInputPrice = -1;
-
-			// Offer type governs which prices are relevant: buyers want the lowest
-			// buy price, sellers want the highest sell price. Sell == 0, buy == 1.
-			final boolean isBuy = client.getVarbitValue(VarbitID.GE_NEWOFFER_TYPE) != 0;
-
-			// Skip if the user has disabled the card AND there's no queued price to honour.
-			if (!config.showGeOfferOverlay() && queuedPrice == -1)
-			{
-				return;
-			}
-			// Nothing to show if the item isn't tracked and nothing was queued.
-			if (data == null && queuedPrice == -1)
-			{
-				return;
-			}
-
-			clientThread.invokeLater(() -> renderChatboxPriceCard(data, queuedPrice, isBuy));
+			clientThread.invokeLater(() -> autoFillPriceInput(price));
 		}
 	}
 
 	// -------------------------------------------------------------------------
-	// Chatbox price card — rendered inside the GE "Enter price" chatbox input
+	// Custom price input — sets the chatbox text + Jagex's MESLAYERINPUT var
+	// so the value is committed when the user presses Enter or clicks Confirm.
 	// -------------------------------------------------------------------------
 
-	private static final int CHAT_ROW_H       = 14;
-	private static final int COLOR_HEADER     = 0xffd700;
-	private static final int COLOR_BUY        = 0xff7070;
-	private static final int COLOR_SELL       = 0x00c27a;
-	private static final int COLOR_INFO       = 0xc0c0c0;
-	private static final int COLOR_QUEUED     = 0xffd700;
-
-	private void renderChatboxPriceCard(TrackedItemData data, long queuedPrice, boolean isBuy)
+	private void autoFillPriceInput(long price)
 	{
-		Widget chatbox = client.getWidget(ComponentID.CHATBOX_CONTAINER);
-		if (chatbox == null)
+		Widget input = client.getWidget(ComponentID.CHATBOX_FULL_INPUT);
+		if (input == null)
 		{
 			return;
 		}
+		input.setText(price + "*");
+		client.setVarcStrValue(VarClientID.MESLAYERINPUT, String.valueOf(price));
+	}
 
-		List<String[]> rows = buildChatboxRows(data, queuedPrice, isBuy);
-		if (rows.isEmpty())
+	// -------------------------------------------------------------------------
+	// GePriceOverlay action — right-click "Set <label> (<price> gp)"
+	// -------------------------------------------------------------------------
+
+	@Subscribe
+	public void onOverlayMenuClicked(OverlayMenuClicked event)
+	{
+		if (event.getOverlay() != priceOverlay)
 		{
 			return;
 		}
-
-		// Bottom-left corner of the chatbox — empty space in the "Enter price"
-		// prompt that doesn't collide with GE Tracker (which anchors top-left).
-		int cardWidth  = 180;
-		int cardX      = 6;
-		int totalH     = rows.size() * CHAT_ROW_H;
-		int y          = chatbox.getHeight() - totalH - 6;
-		for (String[] row : rows)
+		OverlayMenuEntry entry = event.getEntry();
+		if (entry == null || !GePriceOverlay.TARGET.equals(entry.getTarget()))
 		{
-			// row[0]=text, row[1]=color hex, row[2]=click price ("" = not clickable)
-			Widget w = chatbox.createChild(-1, WidgetType.TEXT);
-			w.setOriginalX(cardX);
-			w.setOriginalY(y);
-			w.setOriginalWidth(cardWidth);
-			w.setOriginalHeight(CHAT_ROW_H);
-			w.setText(row[0]);
-			w.setTextColor(Integer.parseInt(row[1], 16));
-			w.setXTextAlignment(0); // left-aligned
-			if (row[2] != null && !row[2].isEmpty())
+			return;
+		}
+		long price = priceOverlay.priceForMenuOption(entry.getOption());
+		if (price <= 0)
+		{
+			return;
+		}
+		invokePriceFill(price);
+	}
+
+	/**
+	 * Sets the GE custom price input to {@code price}. If the chatbox is already
+	 * open, fills directly. Otherwise programmatically clicks "Enter price" on
+	 * the GE setup widget — the chatbox-open handler will then auto-fill.
+	 */
+	public void invokePriceFill(long price)
+	{
+		if (price <= 0)
+		{
+			return;
+		}
+		clientThread.invokeLater(() ->
+		{
+			Widget input = client.getWidget(ComponentID.CHATBOX_FULL_INPUT);
+			if (input != null && !input.isHidden())
 			{
-				final long clickPrice = Long.parseLong(row[2]);
-				w.setAction(0, "Set price");
-				w.setHasListener(true);
-				w.setOnOpListener((JavaScriptCallback) e ->
+				autoFillPriceInput(price);
+				return;
+			}
+			Widget setup = client.getWidget(InterfaceID.GeOffers.SETUP);
+			if (setup == null || setup.isHidden())
+			{
+				return;
+			}
+			Widget[] children = setup.getDynamicChildren();
+			if (children == null)
+			{
+				return;
+			}
+			for (Widget w : children)
+			{
+				String[] actions = w.getActions();
+				if (actions == null)
 				{
-					Widget input = client.getWidget(ComponentID.CHATBOX_FULL_INPUT);
-					if (input != null)
+					continue;
+				}
+				for (int i = 0; i < actions.length; i++)
+				{
+					if ("Enter price".equalsIgnoreCase(actions[i]))
 					{
-						input.setText(clickPrice + "*");
-						client.setVarcStrValue(VarClientID.MESLAYERINPUT, String.valueOf(clickPrice));
+						pendingGeInputPrice = price;
+						client.menuAction(
+							w.getIndex(), w.getId(),
+							MenuAction.CC_OP, i + 1, -1,
+							actions[i], "");
+						return;
 					}
-				});
-			}
-			w.revalidate();
-			y += CHAT_ROW_H;
-		}
-	}
-
-	private List<String[]> buildChatboxRows(TrackedItemData data, long queuedPrice, boolean isBuy)
-	{
-		List<String[]> rows = new ArrayList<>();
-
-		String header = "07Flip" + (data != null ? " — " + data.name : "")
-			+ (isBuy ? " (buy)" : " (sell)");
-		rows.add(new String[]{header, hex(COLOR_HEADER), ""});
-
-		// Queued price from the right-click flow gets its own emphasised row.
-		if (queuedPrice != -1)
-		{
-			rows.add(new String[]{
-				"Click to set " + String.format("%,d", queuedPrice) + " gp",
-				hex(COLOR_QUEUED),
-				String.valueOf(queuedPrice)
-			});
-		}
-
-		if (data != null)
-		{
-			if (isBuy)
-			{
-				// Only buy-relevant prices: the user is paying, so they want the lowest.
-				if (data.flipBuyPrice != null)
-				{
-					rows.add(new String[]{
-						"Buy: " + String.format("%,d", data.flipBuyPrice) + " gp",
-						hex(COLOR_BUY),
-						String.valueOf(data.flipBuyPrice)
-					});
-				}
-				if (data.dipBuyPrice != null)
-				{
-					rows.add(new String[]{
-						"Dip: " + String.format("%,d", data.dipBuyPrice) + " gp",
-						hex(COLOR_BUY),
-						String.valueOf(data.dipBuyPrice)
-					});
-				}
-				if (data.spikeBuyPrice != null)
-				{
-					rows.add(new String[]{
-						"Spike: " + String.format("%,d", data.spikeBuyPrice) + " gp",
-						hex(COLOR_BUY),
-						String.valueOf(data.spikeBuyPrice)
-					});
-				}
-				if (data.flipRoiPct != null)
-				{
-					rows.add(new String[]{
-						String.format("ROI: %.2f%%", data.flipRoiPct),
-						hex(COLOR_INFO),
-						""
-					});
 				}
 			}
-			else
-			{
-				// Only sell-relevant prices: the user wants the highest.
-				if (data.flipSellPrice != null)
-				{
-					rows.add(new String[]{
-						"Sell: " + String.format("%,d", data.flipSellPrice) + " gp",
-						hex(COLOR_SELL),
-						String.valueOf(data.flipSellPrice)
-					});
-				}
-				if (data.alertSellTarget != null)
-				{
-					rows.add(new String[]{
-						"Alert target: " + String.format("%,d", data.alertSellTarget) + " gp",
-						hex(COLOR_SELL),
-						String.valueOf(data.alertSellTarget)
-					});
-				}
-				if (data.dumpSellPrice != null)
-				{
-					rows.add(new String[]{
-						"Dump sell: " + String.format("%,d", data.dumpSellPrice) + " gp",
-						hex(COLOR_SELL),
-						String.valueOf(data.dumpSellPrice)
-					});
-				}
-			}
-		}
-
-		return rows;
-	}
-
-	private static String hex(int color)
-	{
-		return Integer.toHexString(color);
+		});
 	}
 
 	// -------------------------------------------------------------------------
@@ -940,6 +918,14 @@ public class O7FlipPlugin extends Plugin
 			next.put(slot, offer);
 		}
 		activeOffers = Collections.unmodifiableMap(next);
+
+		// Clear the overlay queue once the queued offer is actually placed —
+		// stops the empty-slot hints from continuing to cyan-flash.
+		if ((state == GrandExchangeOfferState.BUYING || state == GrandExchangeOfferState.SELLING)
+			&& offer.getItemId() == overlayQueueItemId)
+		{
+			clearOverlayQueue();
+		}
 
 		// Detect completed or partially-filled transactions by comparing to the previous state.
 		GrandExchangeOfferState prev = prevSlotStates.get(slot);

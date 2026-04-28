@@ -230,8 +230,8 @@ public interface O7FlipConfig extends Config
 
 	@ConfigItem(
 		keyName = "showGeOfferOverlay",
-		name = "Show prices in price chatbox",
-		description = "When you click 'Enter price' for a tracked item, show 07Flip buy/sell prices inside the chatbox. Click any row to auto-fill that price.",
+		name = "Show price overlay on GE setup",
+		description = "Show a movable 07Flip overlay on the GE setup screen with recommended buy/sell prices for the current item. Right-click the overlay and pick a price to auto-fill the custom price input.",
 		section = geSection,
 		position = 1
 	)

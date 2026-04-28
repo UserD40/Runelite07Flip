@@ -51,6 +51,9 @@ public class O7FlipOverlay extends Overlay
 	private static final Color RED_FILL     = new Color(255, 0,  0,  50);
 	private static final Color RED_BORDER   = new Color(200, 0,  0, 180);
 
+	private static final Color QUEUE_HINT_FILL   = new Color(0, 200, 255, 60);
+	private static final Color QUEUE_HINT_BORDER = new Color(0, 200, 255, 200);
+
 	private final Client client;
 	private final O7FlipPlugin plugin;
 
@@ -66,29 +69,40 @@ public class O7FlipOverlay extends Overlay
 	@Override
 	public Dimension render(Graphics2D graphics)
 	{
-		// Pass 1 — Feature 1: GE slot price colouring
+		// Pass 1 — slot price colouring on existing offers.
 		if (plugin.getConfig().showGePriceColouring())
 		{
 			renderSlotColouring(graphics);
 		}
 
-		// Pass 2 — highlight "Enter price" button when pre-fill pending
-		if (plugin.pendingGeInputPrice == -1 || !plugin.getConfig().showGePriceHint())
+		// Pass 2 — empty-slot hint when a panel right-click is awaiting a slot pick.
+		if (plugin.hasOverlayQueue())
 		{
-			return null;
+			renderEmptySlotHints(graphics);
 		}
 
+		// Pass 3 — yellow highlight on the "Enter price" button when an auto-fill is armed.
+		if (plugin.pendingGeInputPrice != -1 && plugin.getConfig().showGePriceHint())
+		{
+			renderEnterPriceHighlight(graphics);
+		}
+
+		return null;
+	}
+
+	private void renderEnterPriceHighlight(Graphics2D graphics)
+	{
 		Widget geSetup = client.getWidget(InterfaceID.GeOffers.SETUP);
 		if (geSetup == null || geSetup.isHidden())
 		{
 			plugin.pendingGeInputPrice = -1;
-			return null;
+			return;
 		}
 
 		Widget[] children = geSetup.getDynamicChildren();
 		if (children == null)
 		{
-			return null;
+			return;
 		}
 
 		for (Widget w : children)
@@ -107,12 +121,45 @@ public class O7FlipOverlay extends Overlay
 					graphics.fill(bounds);
 					graphics.setColor(HIGHLIGHT_BORDER);
 					graphics.draw(bounds);
-					return null;
+					return;
 				}
 			}
 		}
+	}
 
-		return null;
+	private void renderEmptySlotHints(Graphics2D graphics)
+	{
+		// Only highlight when the GE main view is showing (not the setup screen).
+		Widget setup = client.getWidget(InterfaceID.GeOffers.SETUP);
+		if (setup != null && !setup.isHidden())
+		{
+			return;
+		}
+		Widget firstSlot = client.getWidget(InterfaceID.GeOffers.INDEX_0);
+		if (firstSlot == null || firstSlot.isHidden())
+		{
+			return;
+		}
+
+		Map<Integer, GrandExchangeOffer> offers = plugin.activeOffers;
+		int baseId = InterfaceID.GeOffers.INDEX_0;
+		for (int i = 0; i < 8; i++)
+		{
+			if (offers.containsKey(i))
+			{
+				continue;
+			}
+			Widget slot = client.getWidget(baseId + i);
+			if (slot == null || slot.isHidden())
+			{
+				continue;
+			}
+			Rectangle bounds = slot.getBounds();
+			graphics.setColor(QUEUE_HINT_FILL);
+			graphics.fill(bounds);
+			graphics.setColor(QUEUE_HINT_BORDER);
+			graphics.draw(bounds);
+		}
 	}
 
 	private void renderSlotColouring(Graphics2D graphics)
