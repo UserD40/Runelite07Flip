@@ -41,7 +41,6 @@ import net.runelite.api.GrandExchangeOffer;
 import net.runelite.api.GrandExchangeOfferState;
 import net.runelite.api.InventoryID;
 import net.runelite.api.Item;
-import net.runelite.api.MenuAction;
 import net.runelite.api.events.GrandExchangeOfferChanged;
 import net.runelite.api.events.ItemContainerChanged;
 import net.runelite.api.ScriptID;
@@ -483,8 +482,9 @@ public class O7FlipPlugin extends Plugin
 
 	/**
 	 * Sets the GE custom price input to {@code price}. If the chatbox is already
-	 * open, fills directly. Otherwise programmatically clicks "Enter price" on
-	 * the GE setup widget — the chatbox-open handler will then auto-fill.
+	 * open, fills directly. Otherwise arms pendingGeInputPrice so the chatbox-open
+	 * handler will fill it once the user clicks "Enter price" themselves
+	 * (O7FlipOverlay highlights the button in yellow as a hint).
 	 */
 	public void invokePriceFill(long price)
 	{
@@ -505,31 +505,7 @@ public class O7FlipPlugin extends Plugin
 			{
 				return;
 			}
-			Widget[] children = setup.getDynamicChildren();
-			if (children == null)
-			{
-				return;
-			}
-			for (Widget w : children)
-			{
-				String[] actions = w.getActions();
-				if (actions == null)
-				{
-					continue;
-				}
-				for (int i = 0; i < actions.length; i++)
-				{
-					if ("Enter price".equalsIgnoreCase(actions[i]))
-					{
-						pendingGeInputPrice = price;
-						client.menuAction(
-							w.getIndex(), w.getId(),
-							MenuAction.CC_OP, i + 1, -1,
-							actions[i], "");
-						return;
-					}
-				}
-			}
+			pendingGeInputPrice = price;
 		});
 	}
 
