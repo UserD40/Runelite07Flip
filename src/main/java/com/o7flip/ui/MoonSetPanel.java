@@ -173,7 +173,15 @@ public class MoonSetPanel extends JPanel
 	{
 		boolean isWeapon = item.itemIdBroken == 0;
 
-		JPanel row = new JPanel(new BorderLayout(6, 0));
+		JPanel row = new JPanel(new BorderLayout(6, 0))
+		{
+			@Override
+			public Dimension getMaximumSize()
+			{
+				Dimension pref = getPreferredSize();
+				return new Dimension(Integer.MAX_VALUE, pref.height);
+			}
+		};
 		row.setBackground(bg);
 		row.setAlignmentX(Component.LEFT_ALIGNMENT);
 		row.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
@@ -236,7 +244,6 @@ public class MoonSetPanel extends JPanel
 		text.add(profitLbl);
 
 		row.add(text, BorderLayout.CENTER);
-		row.setMaximumSize(new Dimension(Integer.MAX_VALUE, row.getPreferredSize().height));
 
 		row.addMouseListener(new MouseAdapter()
 		{
