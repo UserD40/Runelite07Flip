@@ -38,7 +38,6 @@ import java.awt.Color;
 import java.awt.Dimension;
 import java.awt.Graphics2D;
 import java.awt.Rectangle;
-import java.util.Collections;
 import java.util.Map;
 
 public class O7FlipOverlay extends Overlay
@@ -219,15 +218,13 @@ public class O7FlipOverlay extends Overlay
 			return;
 		}
 
-		// Check if GE is open — if the INDEX_0 slot widget is null/hidden, GE is closed.
-		// Clear stale offer data if so.
+		// Don't paint when the main GE view isn't showing. Do NOT wipe activeOffers
+		// here — offers persist in-game across UI close/open, and GrandExchangeOfferChanged
+		// only fires on state changes, so wiping would leave us empty until the next change
+		// and falsely treat occupied slots as free.
 		Widget firstSlot = client.getWidget(InterfaceID.GeOffers.INDEX_0);
 		if (firstSlot == null || firstSlot.isHidden())
 		{
-			if (!offers.isEmpty())
-			{
-				plugin.activeOffers = Collections.emptyMap();
-			}
 			return;
 		}
 

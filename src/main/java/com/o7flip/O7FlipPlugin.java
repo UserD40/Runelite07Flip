@@ -402,6 +402,11 @@ public class O7FlipPlugin extends Plugin
 		// Phase 2: item was selected in GE search — highlight the "Enter price" button.
 		if (event.getScriptId() == ScriptID.GE_OFFERS_SETUP_BUILD)
 		{
+			// Once the user has reached any setup screen, the empty-slot guidance hints
+			// have served their purpose. Clear the queue so the cyan boxes don't linger
+			// after the user backs out without placing the offer.
+			clearOverlayQueue();
+
 			int currentItemId = client.getVarpValue(VarPlayerID.TRADINGPOST_SEARCH);
 			long price = -1;
 
