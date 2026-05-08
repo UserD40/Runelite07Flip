@@ -46,3 +46,7 @@ docs/
 
 # Git worktrees (local dev only)
 .worktrees/
+
+# Image source files / scratch (PNG exports are committed, sources stay local)
+*.psd
+images/Untitled-*
