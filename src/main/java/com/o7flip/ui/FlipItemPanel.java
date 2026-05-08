@@ -136,6 +136,8 @@ public class FlipItemPanel extends JPanel
 						sellItem.addActionListener(ae -> plugin.queueGeSell(flip.itemId, flip.buyPrice, flip.name));
 						menu.add(sellItem);
 					}
+					menu.addSeparator();
+					addHideMenuItem(menu, plugin, flip.itemId, flip.name);
 					menu.show(e.getComponent(), e.getX(), e.getY());
 				}
 			}
@@ -147,7 +149,7 @@ public class FlipItemPanel extends JPanel
 	// Static helpers shared by all item panels
 	// =========================================================================
 
-	static JLabel buildIcon(int itemId, ItemManager itemManager)
+	public static JLabel buildIcon(int itemId, ItemManager itemManager)
 	{
 		JLabel lbl = new JLabel();
 		lbl.setPreferredSize(new Dimension(32, 32));
@@ -168,5 +170,21 @@ public class FlipItemPanel extends JPanel
 	static void openUrl(String url)
 	{
 		LinkBrowser.browse(url);
+	}
+
+	/**
+	 * Appends a "Hide" menu item to a row's right-click popup. Shared by
+	 * every panel that lists 07flip.com items (Flips, Dumps, Spikes, Dips,
+	 * Alerts) so users can hide unwanted items consistently across tabs.
+	 */
+	public static void addHideMenuItem(JPopupMenu menu, com.o7flip.O7FlipPlugin plugin, int itemId, String name)
+	{
+		if (plugin == null || itemId <= 0)
+		{
+			return;
+		}
+		JMenuItem hide = new JMenuItem("Hide — " + name);
+		hide.addActionListener(ae -> plugin.addToBlocklist(itemId));
+		menu.add(hide);
 	}
 }

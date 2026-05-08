@@ -66,6 +66,7 @@ import javax.swing.JTextField;
 import javax.swing.ListCellRenderer;
 import javax.swing.Scrollable;
 import javax.swing.SwingConstants;
+import javax.swing.SwingUtilities;
 import javax.swing.Timer;
 import javax.swing.Box;
 import javax.swing.border.EmptyBorder;
@@ -271,6 +272,7 @@ public class O7FlipPanel extends PluginPanel
 	private JTextField searchField;
 	private JLabel statusLabel;
 	private JLabel pauseToggle;
+	private JLabel hiddenCountLabel;
 	private JLabel lastUpdatedLabel;
 	private JPanel mainArea;
 	private Timer  searchDebounce;
@@ -868,24 +870,41 @@ public class O7FlipPanel extends PluginPanel
 	}
 
 	// Per-tab filter helpers
+	private boolean notBlocked(int itemId)
+	{
+		return plugin == null || !plugin.isBlocked(itemId);
+	}
+
 	private List<FlipItem>   fFlips(String q)
 	{
-		return q.isEmpty() ? allFlips : allFlips.stream().filter(i -> matches(i.name, q)).collect(Collectors.toList());
+		return allFlips.stream()
+			.filter(i -> notBlocked(i.itemId))
+			.filter(i -> q.isEmpty() || matches(i.name, q))
+			.collect(Collectors.toList());
 	}
 
 	private List<SpikeItem>  fSpikes(String q)
 	{
-		return q.isEmpty() ? allSpikes : allSpikes.stream().filter(i -> matches(i.name, q)).collect(Collectors.toList());
+		return allSpikes.stream()
+			.filter(i -> notBlocked(i.itemId))
+			.filter(i -> q.isEmpty() || matches(i.name, q))
+			.collect(Collectors.toList());
 	}
 
 	private List<DipItem>    fDips(String q)
 	{
-		return q.isEmpty() ? allDips : allDips.stream().filter(i -> matches(i.name, q)).collect(Collectors.toList());
+		return allDips.stream()
+			.filter(i -> notBlocked(i.itemId))
+			.filter(i -> q.isEmpty() || matches(i.name, q))
+			.collect(Collectors.toList());
 	}
 
 	private List<DumpItem>   fDumps(String q)
 	{
-		return q.isEmpty() ? allDumps : allDumps.stream().filter(i -> matches(i.name, q)).collect(Collectors.toList());
+		return allDumps.stream()
+			.filter(i -> notBlocked(i.itemId))
+			.filter(i -> q.isEmpty() || matches(i.name, q))
+			.collect(Collectors.toList());
 	}
 
 	private List<BarrowsSet> fBarrows(String q)
@@ -922,7 +941,10 @@ public class O7FlipPanel extends PluginPanel
 
 	private List<AlertItem>  fAlerts(String q)
 	{
-		return q.isEmpty() ? allAlerts : allAlerts.stream().filter(i -> matches(i.name, q)).collect(Collectors.toList());
+		return allAlerts.stream()
+			.filter(i -> notBlocked(i.itemId))
+			.filter(i -> q.isEmpty() || matches(i.name, q))
+			.collect(Collectors.toList());
 	}
 
 	// =========================================================================
@@ -1658,6 +1680,108 @@ public class O7FlipPanel extends PluginPanel
 		renderMoon(q);
 		renderDecants(q);
 		renderAlerts(q);
+		refreshBlocklistFooter();
+	}
+
+	public void refreshBlocklistFooter()
+	{
+		if (hiddenCountLabel == null)
+		{
+			return;
+		}
+		int n = plugin != null ? plugin.blocklist.size() : 0;
+		if (n == 0)
+		{
+			hiddenCountLabel.setText(" ");
+			hiddenCountLabel.setVisible(false);
+		}
+		else
+		{
+			hiddenCountLabel.setText(n + " item" + (n == 1 ? "" : "s") + " hidden — manage");
+			hiddenCountLabel.setVisible(true);
+		}
+	}
+
+	private void showBlocklistDialog()
+	{
+		if (plugin == null || plugin.blocklist.isEmpty())
+		{
+			return;
+		}
+		java.util.List<Integer> ids = new java.util.ArrayList<>(plugin.blocklist);
+		ids.sort(Integer::compareTo);
+
+		JPanel content = new JPanel();
+		content.setLayout(new BoxLayout(content, BoxLayout.Y_AXIS));
+		content.setBackground(ColorScheme.DARK_GRAY_COLOR);
+		content.setBorder(new EmptyBorder(8, 8, 8, 8));
+
+		for (Integer id : ids)
+		{
+			String name;
+			try
+			{
+				name = itemManager != null ? itemManager.getItemComposition(id).getName() : ("Item " + id);
+			}
+			catch (Exception ex)
+			{
+				name = "Item " + id;
+			}
+
+			JLabel nameLbl = new JLabel(name);
+			nameLbl.setFont(Fonts.SM);
+			nameLbl.setForeground(Color.WHITE);
+
+			JButton remove = pillButton("Unhide");
+			remove.addActionListener(ev ->
+			{
+				plugin.removeFromBlocklist(id);
+				java.awt.Window w = SwingUtilities.getWindowAncestor(remove);
+				if (w != null)
+				{
+					w.dispose();
+				}
+				if (!plugin.blocklist.isEmpty())
+				{
+					showBlocklistDialog();
+				}
+			});
+
+			JPanel row = new JPanel(new BorderLayout(8, 0));
+			row.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+			row.setBorder(new EmptyBorder(4, 6, 4, 6));
+			row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 28));
+			row.add(FlipItemPanel.buildIcon(id, itemManager), BorderLayout.WEST);
+			row.add(nameLbl, BorderLayout.CENTER);
+			row.add(remove,  BorderLayout.EAST);
+			content.add(row);
+			content.add(Box.createVerticalStrut(4));
+		}
+
+		JButton clearAll = pillButton("Unhide all");
+		clearAll.setBackground(ORANGE);
+		clearAll.setForeground(Color.BLACK);
+		clearAll.addActionListener(ev ->
+		{
+			plugin.clearBlocklist();
+			java.awt.Window w = SwingUtilities.getWindowAncestor(clearAll);
+			if (w != null)
+			{
+				w.dispose();
+			}
+		});
+		content.add(Box.createVerticalStrut(8));
+		content.add(clearAll);
+
+		JScrollPane sp = new JScrollPane(content);
+		sp.setPreferredSize(new Dimension(280, Math.min(360, 60 + ids.size() * 36)));
+		sp.setBorder(BorderFactory.createEmptyBorder());
+
+		javax.swing.JDialog dialog = new javax.swing.JDialog(SwingUtilities.getWindowAncestor(this), "Hidden items");
+		dialog.setContentPane(sp);
+		dialog.pack();
+		dialog.setLocationRelativeTo(this);
+		dialog.setVisible(true);
 	}
 
 	private JPanel buildFlipsTab()
@@ -2298,9 +2422,26 @@ public class O7FlipPanel extends PluginPanel
 		btns.add(wb);
 		btns.add(db);
 
+		hiddenCountLabel = new JLabel(" ");
+		hiddenCountLabel.setFont(Fonts.SM);
+		hiddenCountLabel.setForeground(new Color(0x888888));
+		hiddenCountLabel.setHorizontalAlignment(SwingConstants.CENTER);
+		hiddenCountLabel.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+		hiddenCountLabel.setBorder(new EmptyBorder(0, 0, 2, 0));
+		hiddenCountLabel.setVisible(false);
+		hiddenCountLabel.addMouseListener(new java.awt.event.MouseAdapter()
+		{
+			@Override
+			public void mouseClicked(java.awt.event.MouseEvent e)
+			{
+				showBlocklistDialog();
+			}
+		});
+
 		JPanel footer = new JPanel(new BorderLayout());
 		footer.setBackground(ColorScheme.DARKER_GRAY_COLOR);
 		footer.setBorder(new MatteBorder(1, 0, 0, 0, new Color(0x3A3A3A)));
+		footer.add(hiddenCountLabel, BorderLayout.NORTH);
 		footer.add(btns,             BorderLayout.CENTER);
 		footer.add(lastUpdatedLabel, BorderLayout.SOUTH);
 		return footer;

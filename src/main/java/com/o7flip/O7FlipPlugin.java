@@ -199,6 +199,10 @@ public class O7FlipPlugin extends Plugin
 	private static final int MAX_TRADE_HISTORY = 200;
 	private static final String TRADE_HISTORY_KEY = "tradeHistory";
 	private static final String LAST_TRACKER_SYNC_KEY = "lastTrackerSync";
+	private static final String BLOCKLIST_KEY = "blocklistItemIds";
+
+	/** Item IDs the user has hidden from Flips/Dumps/Spikes/Dips/Alerts panels. */
+	public volatile Set<Integer> blocklist = Collections.emptySet();
 
 	/** Called by item panels on right-click to queue a GE buy pre-fill. */
 	public void queueGeBuy(int itemId, long price, String name)
@@ -300,6 +304,7 @@ public class O7FlipPlugin extends Plugin
 		overlayManager.add(priceOverlay);
 
 		loadTradeHistory();
+		loadBlocklist();
 
 		executor = Executors.newSingleThreadScheduledExecutor();
 		fetchAuthStatus();
@@ -1042,6 +1047,94 @@ public class O7FlipPlugin extends Plugin
 		configManager.unsetConfiguration("o7flip", TRADE_HISTORY_KEY);
 		configManager.unsetConfiguration("o7flip", LAST_TRACKER_SYNC_KEY);
 		SwingUtilities.invokeLater(() -> panel.updateMyFlips(Collections.emptyList()));
+	}
+
+	// -------------------------------------------------------------------------
+	// Item blocklist — IDs hidden from Flips/Dumps/Spikes/Dips/Alerts panels
+	// -------------------------------------------------------------------------
+
+	public boolean isBlocked(int itemId)
+	{
+		return blocklist.contains(itemId);
+	}
+
+	public void addToBlocklist(int itemId)
+	{
+		Set<Integer> next = new HashSet<>(blocklist);
+		if (next.add(itemId))
+		{
+			blocklist = Collections.unmodifiableSet(next);
+			saveBlocklist();
+			SwingUtilities.invokeLater(() -> panel.rebuildTabs());
+		}
+	}
+
+	public void removeFromBlocklist(int itemId)
+	{
+		Set<Integer> next = new HashSet<>(blocklist);
+		if (next.remove(itemId))
+		{
+			blocklist = Collections.unmodifiableSet(next);
+			saveBlocklist();
+			SwingUtilities.invokeLater(() -> panel.rebuildTabs());
+		}
+	}
+
+	public void clearBlocklist()
+	{
+		blocklist = Collections.emptySet();
+		configManager.unsetConfiguration("o7flip", BLOCKLIST_KEY);
+		SwingUtilities.invokeLater(() -> panel.rebuildTabs());
+	}
+
+	private void loadBlocklist()
+	{
+		String csv = configManager.getConfiguration("o7flip", BLOCKLIST_KEY);
+		if (csv == null || csv.trim().isEmpty())
+		{
+			blocklist = Collections.emptySet();
+			return;
+		}
+		Set<Integer> ids = new HashSet<>();
+		for (String token : csv.split(","))
+		{
+			try
+			{
+				ids.add(Integer.parseInt(token.trim()));
+			}
+			catch (NumberFormatException ignored)
+			{
+			}
+		}
+		blocklist = Collections.unmodifiableSet(ids);
+		SwingUtilities.invokeLater(() ->
+		{
+			if (panel != null)
+			{
+				panel.refreshBlocklistFooter();
+			}
+		});
+	}
+
+	private void saveBlocklist()
+	{
+		if (blocklist.isEmpty())
+		{
+			configManager.unsetConfiguration("o7flip", BLOCKLIST_KEY);
+			return;
+		}
+		StringBuilder sb = new StringBuilder();
+		boolean first = true;
+		for (Integer id : blocklist)
+		{
+			if (!first)
+			{
+				sb.append(',');
+			}
+			sb.append(id);
+			first = false;
+		}
+		configManager.setConfiguration("o7flip", BLOCKLIST_KEY, sb.toString());
 	}
 
 	// -------------------------------------------------------------------------

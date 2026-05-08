@@ -178,6 +178,8 @@ public class AlertItemPanel extends JPanel
 						sellItem.addActionListener(ae -> plugin.queueGeSell(alert.itemId, alert.sellTarget, alert.name));
 						menu.add(sellItem);
 					}
+					menu.addSeparator();
+					FlipItemPanel.addHideMenuItem(menu, plugin, alert.itemId, alert.name);
 					menu.show(e.getComponent(), e.getX(), e.getY());
 				}
 			}

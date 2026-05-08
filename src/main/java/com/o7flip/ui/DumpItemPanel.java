@@ -196,6 +196,8 @@ public class DumpItemPanel extends JPanel
 					JMenuItem hint = new JMenuItem("Open GE \u2192 click a buy slot first");
 					hint.setEnabled(false);
 					menu.add(hint);
+					menu.addSeparator();
+					FlipItemPanel.addHideMenuItem(menu, plugin, item.itemId, item.name);
 					menu.show(e.getComponent(), e.getX(), e.getY());
 				}
 			}
