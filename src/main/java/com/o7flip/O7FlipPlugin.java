@@ -197,6 +197,7 @@ public class O7FlipPlugin extends Plugin
 
 	private static final int MAX_TRADE_HISTORY = 200;
 	private static final String TRADE_HISTORY_KEY = "tradeHistory";
+	private static final String LAST_TRACKER_SYNC_KEY = "lastTrackerSync";
 
 	/** Called by item panels on right-click to queue a GE buy pre-fill. */
 	public void queueGeBuy(int itemId, long price, String name)
@@ -302,6 +303,7 @@ public class O7FlipPlugin extends Plugin
 		executor = Executors.newSingleThreadScheduledExecutor();
 		fetchAuthStatus();
 		executor.execute(() -> fetchAll(true)); // forced — panel not yet visible at startup
+		executor.execute(this::doSyncTrackerHistory);
 		refreshTask = executor.scheduleAtFixedRate(
 			() -> fetchAll(false),
 			config.refreshIntervalSeconds(),
@@ -1037,7 +1039,132 @@ public class O7FlipPlugin extends Plugin
 	{
 		tradeHistory = Collections.emptyList();
 		configManager.unsetConfiguration("o7flip", TRADE_HISTORY_KEY);
+		configManager.unsetConfiguration("o7flip", LAST_TRACKER_SYNC_KEY);
 		SwingUtilities.invokeLater(() -> panel.updateMyFlips(Collections.emptyList()));
+	}
+
+	// -------------------------------------------------------------------------
+	// Cross-device tracker sync — pulls server history and merges with local
+	// -------------------------------------------------------------------------
+
+	/** Public entry point used by the My Trades "Sync from server" button. */
+	public void syncTrackerHistory()
+	{
+		if (executor == null || executor.isShutdown())
+		{
+			return;
+		}
+		executor.execute(this::doSyncTrackerHistory);
+	}
+
+	private void doSyncTrackerHistory()
+	{
+		String key = config.apiKey();
+		if (key == null || key.trim().isEmpty())
+		{
+			return;
+		}
+		if (!config.shareTradeData())
+		{
+			return;
+		}
+		Long since = readLastSyncTimestamp();
+		apiClient.fetchTrackerHistory(since, MAX_TRADE_HISTORY, (serverTrades, hasMore) ->
+		{
+			if (serverTrades == null || serverTrades.isEmpty())
+			{
+				return;
+			}
+			mergeServerTrades(serverTrades);
+		});
+	}
+
+	private Long readLastSyncTimestamp()
+	{
+		String s = configManager.getConfiguration("o7flip", LAST_TRACKER_SYNC_KEY);
+		if (s == null || s.trim().isEmpty())
+		{
+			return null;
+		}
+		try
+		{
+			return Long.parseLong(s.trim());
+		}
+		catch (NumberFormatException e)
+		{
+			return null;
+		}
+	}
+
+	private void writeLastSyncTimestamp(long ts)
+	{
+		configManager.setConfiguration("o7flip", LAST_TRACKER_SYNC_KEY, String.valueOf(ts));
+	}
+
+	private void mergeServerTrades(List<TradeRecord> serverTrades)
+	{
+		List<TradeRecord> snapshot = new ArrayList<>(tradeHistory);
+		Map<Long, TradeRecord> byTradeId = new HashMap<>();
+		Map<String, TradeRecord> byFingerprint = new HashMap<>();
+		for (TradeRecord r : snapshot)
+		{
+			if (r.tradeId != null)
+			{
+				byTradeId.put(r.tradeId, r);
+			}
+			byFingerprint.put(r.fingerprint(), r);
+		}
+
+		Long lastSync = readLastSyncTimestamp();
+		long maxTs = lastSync != null ? lastSync : 0L;
+		int added = 0;
+		int reconciled = 0;
+		for (TradeRecord srv : serverTrades)
+		{
+			if (srv.tradeId != null && byTradeId.containsKey(srv.tradeId))
+			{
+				// Already known by ID — skip
+			}
+			else
+			{
+				TradeRecord local = byFingerprint.get(srv.fingerprint());
+				if (local != null)
+				{
+					if (local.tradeId == null && srv.tradeId != null)
+					{
+						local.tradeId = srv.tradeId;
+						reconciled++;
+					}
+				}
+				else
+				{
+					snapshot.add(srv);
+					added++;
+				}
+			}
+			if (srv.timestamp > maxTs)
+			{
+				maxTs = srv.timestamp;
+			}
+		}
+
+		snapshot.sort(java.util.Comparator.comparingLong(t -> t.timestamp));
+		if (snapshot.size() > MAX_TRADE_HISTORY)
+		{
+			snapshot = new ArrayList<>(snapshot.subList(snapshot.size() - MAX_TRADE_HISTORY, snapshot.size()));
+		}
+
+		tradeHistory = Collections.unmodifiableList(snapshot);
+		saveTradeHistory();
+		if (maxTs > 0L)
+		{
+			writeLastSyncTimestamp(maxTs);
+		}
+
+		log.info("[07Flip] Tracker sync: +{} new, {} reconciled, total {}", added, reconciled, snapshot.size());
+
+		final List<TradeRecord> snap = tradeHistory;
+		SwingUtilities.invokeLater(() -> panel.updateMyFlips(snap));
 	}
 
 	// -------------------------------------------------------------------------

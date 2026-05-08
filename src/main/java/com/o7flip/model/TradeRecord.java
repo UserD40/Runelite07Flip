@@ -34,4 +34,20 @@ public class TradeRecord
 	public long   totalGp;    // total gp spent (buy) or received (sell)
 	public long   timestamp;  // System.currentTimeMillis() when recorded
 	public boolean partial;   // true when CANCELLED with a non-zero partial fill
+
+	// Server-issued ID once this trade has been synced or fetched from
+	// 07flip.com. Null for trades recorded locally that have not been
+	// reconciled with the server yet. Backwards-compatible with serialised
+	// TradeRecord JSON written before this field existed.
+	public Long tradeId;
+
+	/**
+	 * Stable fingerprint used for de-duplication when merging server-fetched
+	 * trades with locally-recorded ones that pre-date the {@code tradeId}
+	 * field. Mirrors the server's composite uniqueness key.
+	 */
+	public String fingerprint()
+	{
+		return itemId + "|" + (isBuy ? "B" : "S") + "|" + quantity + "|" + totalGp + "|" + timestamp;
+	}
 }

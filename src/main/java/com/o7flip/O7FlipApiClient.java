@@ -234,6 +234,81 @@ public class O7FlipApiClient
 		});
 	}
 
+	/**
+	 * Fetches the user's stored trade history from 07flip.com. Requires an
+	 * API key — without one the callback receives an empty list and false.
+	 *
+	 * Callback receives (trades, hasMore). Called once with an empty list
+	 * on any failure (network, 401, parse error, no key).
+	 */
+	public void fetchTrackerHistory(Long since, int limit, BiConsumer<List<TradeRecord>, Boolean> callback)
+	{
+		String key = sanitizedApiKey();
+		if (key == null)
+		{
+			callback.accept(new ArrayList<>(), false);
+			return;
+		}
+		StringBuilder url = new StringBuilder(BASE_URL).append("/tracker/history?limit=").append(limit);
+		if (since != null && since > 0L)
+		{
+			url.append("&since=").append(since);
+		}
+		fetch(url.toString(), new Callback()
+		{
+			@Override
+			public void onFailure(Call call, IOException e)
+			{
+				log.warn("[07Flip] fetchTrackerHistory failed: {}", e.getMessage());
+				callback.accept(new ArrayList<>(), false);
+			}
+
+			@Override
+			public void onResponse(Call call, Response response) throws IOException
+			{
+				try
+				{
+					if (response.code() == 429)
+					{
+						markRateLimited();
+					}
+					if (!response.isSuccessful() || response.body() == null)
+					{
+						log.warn("[07Flip] fetchTrackerHistory HTTP {}", response.code());
+						callback.accept(new ArrayList<>(), false);
+						return;
+					}
+					JsonObject json = gson.fromJson(response.body().string(), JsonObject.class);
+					List<TradeRecord> trades = parseArray(json, "trades", obj ->
+					{
+						TradeRecord t = new TradeRecord();
+						t.tradeId   = getLongOrNull(obj, "trade_id");
+						t.itemId    = getInt(obj, "item_id", 0);
+						t.name      = getString(obj, "name", "");
+						t.isBuy     = getBool(obj, "is_buy", false);
+						t.quantity  = getInt(obj, "quantity", 0);
+						t.totalGp   = getLong(obj, "total_gp", 0L);
+						t.priceEach = getLong(obj, "price_each", 0L);
+						t.timestamp = getLong(obj, "timestamp", 0L);
+						t.partial   = getBool(obj, "partial", false);
+						return t;
+					});
+					boolean hasMore = getBool(json, "has_more", false);
+					callback.accept(trades, hasMore);
+				}
+				catch (Exception e)
+				{
+					log.warn("[07Flip] fetchTrackerHistory parse error: {}", e.getMessage());
+					callback.accept(new ArrayList<>(), false);
+				}
+				finally
+				{
+					response.close();
+				}
+			}
+		});
+	}
+
 	// -------------------------------------------------------------------------
 	// Auth
 	// -------------------------------------------------------------------------

@@ -1523,7 +1523,22 @@ public class O7FlipPanel extends PluginPanel
 		myFlipsListPanel = listPanel();
 		myFlipsStatsPanel = new com.o7flip.ui.MyTradesStatsPanel();
 
-		JButton clearBtn = pillButton("Clear History");
+		JButton syncBtn = pillButton("Sync");
+		syncBtn.setToolTipText("Pull your trade history from 07flip.com (requires API key + share trade data enabled)");
+		syncBtn.addActionListener(e ->
+		{
+			if (plugin != null)
+			{
+				plugin.syncTrackerHistory();
+			}
+		});
+
+		JButton viewWebsiteBtn = pillButton("Web");
+		viewWebsiteBtn.setToolTipText("Open your full trade history on 07flip.com (Discord login may be required)");
+		viewWebsiteBtn.addActionListener(e -> LinkBrowser.browse("https://07flip.com/tracker?tab=ge-log"));
+
+		JButton clearBtn = pillButton("Clear");
+		clearBtn.setToolTipText("Erase the local trade history stored on this machine");
 		clearBtn.addActionListener(e ->
 		{
 			if (plugin != null)
@@ -1532,10 +1547,16 @@ public class O7FlipPanel extends PluginPanel
 			}
 		});
 
+		JPanel leftButtons = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 4, 0));
+		leftButtons.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+		leftButtons.add(syncBtn);
+		leftButtons.add(viewWebsiteBtn);
+
 		JPanel topBar = new JPanel(new BorderLayout());
 		topBar.setBackground(ColorScheme.DARKER_GRAY_COLOR);
 		topBar.setBorder(new EmptyBorder(6, 10, 6, 10));
-		topBar.add(clearBtn, BorderLayout.EAST);
+		topBar.add(leftButtons, BorderLayout.WEST);
+		topBar.add(clearBtn,    BorderLayout.EAST);
 
 		renderMyFlips();
 
