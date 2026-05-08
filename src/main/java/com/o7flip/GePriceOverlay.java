@@ -29,7 +29,6 @@ import net.runelite.api.Client;
 import net.runelite.api.MenuAction;
 import net.runelite.api.gameval.InterfaceID;
 import net.runelite.api.gameval.VarPlayerID;
-import net.runelite.api.gameval.VarbitID;
 import net.runelite.api.widgets.Widget;
 import net.runelite.client.ui.overlay.Overlay;
 import net.runelite.client.ui.overlay.OverlayLayer;
@@ -42,16 +41,16 @@ import javax.inject.Inject;
 import java.awt.Color;
 import java.awt.Dimension;
 import java.awt.Graphics2D;
-import java.util.ArrayList;
 import java.util.LinkedHashMap;
-import java.util.List;
 import java.util.Map;
 
 /**
- * Movable overlay that surfaces 07Flip's recommended buy/sell prices for the
- * item currently open in the GE setup screen. Right-click → menu of "Set X gp"
- * options; clicking one fills the in-game custom price input (opening the
- * chatbox first if it isn't already).
+ * Movable overlay that surfaces 07Flip's recommended buy and sell prices for
+ * the item currently open in the GE setup screen. Always shows two rows when
+ * data is available: Buy (the lower price you place a buy offer at) and Sell
+ * (the higher price you place a sell offer at). Right-click → menu entry
+ * fills the in-game custom price input if open, or arms it for the next time
+ * "Enter price" is clicked.
  */
 public class GePriceOverlay extends Overlay
 {
@@ -99,112 +98,136 @@ public class GePriceOverlay extends Overlay
 			return null;
 		}
 
-		// Visible only while the GE qty/price setup screen is open with an item selected.
 		Widget setup = client.getWidget(InterfaceID.GeOffers.SETUP);
 		if (setup == null || setup.isHidden())
 		{
 			return null;
 		}
 
-		int currentItemId = client.getVarpValue(VarPlayerID.TRADINGPOST_SEARCH);
+		int currentItemId = resolveCurrentItemId(setup);
 		if (currentItemId <= 0)
 		{
 			return null;
 		}
 
 		TrackedItemData data = plugin.trackedItems.get(currentItemId);
-		boolean isBuy = client.getVarbitValue(VarbitID.GE_NEWOFFER_TYPE) != 0;
-
-		// Carry over any right-click-queued price for this item + direction.
-		long queuedPrice = plugin.queuedPriceFor(currentItemId, isBuy);
-
-		List<PriceOption> options = collectOptions(data, queuedPrice, isBuy);
-		if (options.isEmpty())
+		if (data == null)
 		{
 			return null;
 		}
 
-		// Refresh menu entries — one "Set <label> (<price> gp)" per available option.
-		menuPrices.clear();
-		getMenuEntries().clear();
-		for (PriceOption opt : options)
+		// Buy = lower side (price to place a buy offer at).
+		// Sell = higher side (price to place a sell offer at).
+		Long buyPrice  = firstNonNull(data.flipBuyPrice,  data.dipBuyPrice,  data.spikeBuyPrice, data.dumpBuyPrice);
+		Long sellPrice = firstNonNull(data.flipSellPrice, data.dumpSellPrice);
+
+		if (buyPrice == null && sellPrice == null)
 		{
-			String optionText = "Set " + opt.label + " (" + formatGp(opt.price) + " gp)";
-			getMenuEntries().add(new OverlayMenuEntry(MenuAction.RUNELITE_OVERLAY, optionText, TARGET));
-			menuPrices.put(optionText, opt.price);
+			return null;
 		}
 
-		// Draw the visible card.
+		// Refresh menu entries — at most one Buy and one Sell entry.
+		menuPrices.clear();
+		getMenuEntries().clear();
+
 		panel.getChildren().clear();
 		panel.setPreferredSize(new Dimension(180, 0));
 
-		String title = data != null ? truncate(data.name, 24) : "07Flip";
+		String title = data.name != null ? truncate(data.name, 24) : "07Flip";
 		panel.getChildren().add(TitleComponent.builder()
 			.text(title)
 			.color(HEADER)
 			.build());
 
-		for (PriceOption opt : options)
+		if (buyPrice != null)
 		{
+			String optionText = "Set buy price (" + formatGp(buyPrice) + " gp)";
+			getMenuEntries().add(new OverlayMenuEntry(MenuAction.RUNELITE_OVERLAY, optionText, TARGET));
+			menuPrices.put(optionText, buyPrice);
+
 			panel.getChildren().add(LineComponent.builder()
-				.left(opt.label)
-				.leftColor(INFO_GRAY)
-				.right(formatGp(opt.price))
-				.rightColor(opt.color)
+				.left("Buy")
+				.leftColor(BUY_RED)
+				.right(formatGp(buyPrice))
+				.rightColor(INFO_GRAY)
 				.build());
 		}
 
-		panel.getChildren().add(LineComponent.builder()
-			.left(isBuy ? "BUY" : "SELL")
-			.leftColor(isBuy ? BUY_RED : SELL_GREEN)
-			.right("right-click")
-			.rightColor(INFO_GRAY)
-			.build());
+		if (sellPrice != null)
+		{
+			String optionText = "Set sell price (" + formatGp(sellPrice) + " gp)";
+			getMenuEntries().add(new OverlayMenuEntry(MenuAction.RUNELITE_OVERLAY, optionText, TARGET));
+			menuPrices.put(optionText, sellPrice);
+
+			panel.getChildren().add(LineComponent.builder()
+				.left("Sell")
+				.leftColor(SELL_GREEN)
+				.right(formatGp(sellPrice))
+				.rightColor(INFO_GRAY)
+				.build());
+		}
 
 		return panel.render(graphics);
 	}
 
-	private static List<PriceOption> collectOptions(TrackedItemData data, long queuedPrice, boolean isBuy)
+	/**
+	 * Resolves the item ID currently shown on the GE setup screen.
+	 * Tries TRADINGPOST_SEARCH first (set when the user picks an item from search),
+	 * then falls back to scanning the setup widget's item icon child (covers the
+	 * drag-from-inventory-to-sell-slot path where the search varplayer is not set).
+	 */
+	private int resolveCurrentItemId(Widget setup)
 	{
-		List<PriceOption> result = new ArrayList<>();
-
-		// Queued price (from panel right-click) shown first when present and not duplicated below.
-		if (queuedPrice > 0)
+		int searchItemId = client.getVarpValue(VarPlayerID.TRADINGPOST_SEARCH);
+		if (searchItemId > 0)
 		{
-			result.add(new PriceOption("Queued", queuedPrice, HEADER));
+			return searchItemId;
 		}
-
-		if (data == null)
+		Widget[] children = setup.getDynamicChildren();
+		if (children != null)
 		{
-			return result;
-		}
-
-		if (isBuy)
-		{
-			if (data.flipBuyPrice  != null) addUnique(result, "Flip",  data.flipBuyPrice,  BUY_RED);
-			if (data.dipBuyPrice   != null) addUnique(result, "Dip",   data.dipBuyPrice,   BUY_RED);
-			if (data.spikeBuyPrice != null) addUnique(result, "Spike", data.spikeBuyPrice, BUY_RED);
-		}
-		else
-		{
-			if (data.flipSellPrice   != null) addUnique(result, "Flip",  data.flipSellPrice,   SELL_GREEN);
-			if (data.alertSellTarget != null) addUnique(result, "Alert", data.alertSellTarget, SELL_GREEN);
-			if (data.dumpSellPrice   != null) addUnique(result, "Dump",  data.dumpSellPrice,   SELL_GREEN);
-		}
-
-		return result;
-	}
-
-	private static void addUnique(List<PriceOption> list, String label, long price, Color color)
-	{
-		for (PriceOption existing : list)
-		{
-			if (existing.price == price)
+			for (Widget w : children)
 			{
-				return;
+				int id = w.getItemId();
+				if (id > 0)
+				{
+					return id;
+				}
 			}
 		}
-		list.add(new PriceOption(label, price, color));
+		Widget[] staticChildren = setup.getStaticChildren();
+		if (staticChildren != null)
+		{
+			for (Widget w : staticChildren)
+			{
+				int id = w.getItemId();
+				if (id > 0)
+				{
+					return id;
+				}
+				Widget[] grand = w.getDynamicChildren();
+				if (grand == null) continue;
+				for (Widget g : grand)
+				{
+					int gid = g.getItemId();
+					if (gid > 0)
+					{
+						return gid;
+					}
+				}
+			}
+		}
+		return -1;
+	}
+
+	@SafeVarargs
+	private static <T> T firstNonNull(T... values)
+	{
+		for (T v : values)
+		{
+			if (v != null) return v;
+		}
+		return null;
 	}
 
 	private static String formatGp(long amount)
@@ -215,19 +238,5 @@ public class GePriceOverlay extends Overlay
 	private static String truncate(String s, int max)
 	{
 		return s.length() <= max ? s : s.substring(0, max - 1) + "…";
-	}
-
-	private static final class PriceOption
-	{
-		final String label;
-		final long   price;
-		final Color  color;
-
-		PriceOption(String label, long price, Color color)
-		{
-			this.label = label;
-			this.price = price;
-			this.color = color;
-		}
 	}
 }

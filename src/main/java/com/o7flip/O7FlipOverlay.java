@@ -154,12 +154,61 @@ public class O7FlipOverlay extends Overlay
 			{
 				continue;
 			}
+			if (!isSlotActionable(slot))
+			{
+				continue;
+			}
 			Rectangle bounds = slot.getBounds();
 			graphics.setColor(QUEUE_HINT_FILL);
 			graphics.fill(bounds);
 			graphics.setColor(QUEUE_HINT_BORDER);
 			graphics.draw(bounds);
 		}
+	}
+
+	/**
+	 * A GE slot is actionable when one of its children exposes a
+	 * "Create ... Offer" menu action — locked F2P slots are visible widgets but
+	 * have no such action, so we skip them.
+	 */
+	private static boolean isSlotActionable(Widget slot)
+	{
+		if (hasCreateOfferAction(slot)) return true;
+		Widget[] dyn = slot.getDynamicChildren();
+		if (dyn != null)
+		{
+			for (Widget c : dyn)
+			{
+				if (c == null || c.isHidden()) continue;
+				if (hasCreateOfferAction(c)) return true;
+			}
+		}
+		Widget[] stat = slot.getStaticChildren();
+		if (stat != null)
+		{
+			for (Widget c : stat)
+			{
+				if (c == null || c.isHidden()) continue;
+				if (hasCreateOfferAction(c)) return true;
+			}
+		}
+		return false;
+	}
+
+	private static boolean hasCreateOfferAction(Widget w)
+	{
+		String[] actions = w.getActions();
+		if (actions == null) return false;
+		for (String a : actions)
+		{
+			if (a == null) continue;
+			String lower = a.toLowerCase();
+			if (lower.contains("create") && lower.contains("offer"))
+			{
+				return true;
+			}
+		}
+		return false;
 	}
 
 	private void renderSlotColouring(Graphics2D graphics)
