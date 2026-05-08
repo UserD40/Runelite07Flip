@@ -119,6 +119,12 @@ public class O7FlipPlugin extends Plugin
 	private GePriceOverlay priceOverlay;
 
 	@Inject
+	private GpDropOverlay gpDropOverlay;
+
+	@Inject
+	private InventoryTooltipOverlay inventoryTooltipOverlay;
+
+	@Inject
 	private Gson gson;
 
 	@Inject
@@ -156,6 +162,11 @@ public class O7FlipPlugin extends Plugin
 	volatile int    pendingGeSetItemId = -1;
 	// Phase 3: price to input once the chatbox opens (script 108)
 	volatile long   pendingGeInputPrice = -1;
+
+	// Phase 4: after auto-fill, highlight the Confirm button for ~3s so the
+	// user knows the offer is queued and ready. Cleared once the deadline
+	// passes or the GE setup screen closes.
+	public volatile long confirmHighlightUntilMs = 0L;
 
 	// -------------------------------------------------------------------------
 	// Long-lived right-click queue used by the movable GE price overlay.
@@ -302,6 +313,8 @@ public class O7FlipPlugin extends Plugin
 		clientToolbar.addNavigation(navButton);
 		overlayManager.add(geOverlay);
 		overlayManager.add(priceOverlay);
+		overlayManager.add(gpDropOverlay);
+		overlayManager.add(inventoryTooltipOverlay);
 
 		loadTradeHistory();
 		loadBlocklist();
@@ -332,6 +345,8 @@ public class O7FlipPlugin extends Plugin
 		}
 		overlayManager.remove(geOverlay);
 		overlayManager.remove(priceOverlay);
+		overlayManager.remove(gpDropOverlay);
+		overlayManager.remove(inventoryTooltipOverlay);
 		clientToolbar.removeNavigation(navButton);
 		log.info("[07Flip] Stopped");
 	}
@@ -485,6 +500,9 @@ public class O7FlipPlugin extends Plugin
 		}
 		input.setText(price + "*");
 		client.setVarcStrValue(VarClientID.MESLAYERINPUT, String.valueOf(price));
+		// Arm the Confirm-button highlight for the next 3 seconds so the user
+		// can see exactly which button completes the auto-filled offer.
+		confirmHighlightUntilMs = System.currentTimeMillis() + 3000L;
 	}
 
 	// -------------------------------------------------------------------------
@@ -990,10 +1008,36 @@ public class O7FlipPlugin extends Plugin
 		final List<TradeRecord> snapshot = tradeHistory;
 		SwingUtilities.invokeLater(() -> panel.updateMyFlips(snapshot));
 
+		if (!isBuy && config.showGpDropOverlay())
+		{
+			long profit = computeProfitForSell(trade.timestamp);
+			gpDropOverlay.queue(profit);
+		}
+
 		if (config.shareTradeData() && config.apiKey() != null && !config.apiKey().trim().isEmpty())
 		{
 			apiClient.postTradeRecord(trade, null);
 		}
+	}
+
+	/**
+	 * Sums the FIFO-matched profit of every completed flip whose sell happened
+	 * at the given timestamp. A single sell can consume multiple buy lots,
+	 * producing several CompletedFlip records — they all share the same
+	 * sellTimestamp and we want to add them up for the drop animation.
+	 */
+	private long computeProfitForSell(long sellTimestamp)
+	{
+		com.o7flip.util.ProfitCalculator.Result r = com.o7flip.util.ProfitCalculator.compute(tradeHistory);
+		long total = 0L;
+		for (com.o7flip.util.ProfitCalculator.CompletedFlip f : r.completedFlips)
+		{
+			if (f.sellTimestamp == sellTimestamp)
+			{
+				total += f.profit;
+			}
+		}
+		return total;
 	}
 
 	private void loadTradeHistory()

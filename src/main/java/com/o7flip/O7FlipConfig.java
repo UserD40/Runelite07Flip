@@ -264,6 +264,30 @@ public interface O7FlipConfig extends Config
 		return true;
 	}
 
+	@ConfigItem(
+		keyName = "showGpDropOverlay",
+		name = "Show GP drop animation on completed sells",
+		description = "Show a fading +X gp / -X gp drop near the GE interface each time a flip completes.",
+		section = geSection,
+		position = 4
+	)
+	default boolean showGpDropOverlay()
+	{
+		return true;
+	}
+
+	@ConfigItem(
+		keyName = "showInventoryTooltip",
+		name = "Show inventory tooltip with cost basis",
+		description = "Hover an item in inventory to see your cost basis and 07Flip's recommended sell price.",
+		section = geSection,
+		position = 5
+	)
+	default boolean showInventoryTooltip()
+	{
+		return true;
+	}
+
 	// ── Trade tracker ───────────────────────────────────────────────────────
 
 	@ConfigItem(

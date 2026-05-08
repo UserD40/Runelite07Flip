@@ -25,6 +25,7 @@
 package com.o7flip;
 
 import com.o7flip.model.TrackedItemData;
+import com.o7flip.util.ProfitCalculator;
 import net.runelite.api.Client;
 import net.runelite.api.GrandExchangeOffer;
 import net.runelite.api.GrandExchangeOfferState;
@@ -86,7 +87,49 @@ public class O7FlipOverlay extends Overlay
 			renderEnterPriceHighlight(graphics);
 		}
 
+		// Pass 4 — yellow highlight on the "Confirm offer" button right after auto-fill.
+		if (plugin.confirmHighlightUntilMs > System.currentTimeMillis()
+			&& plugin.getConfig().showGePriceHint())
+		{
+			renderConfirmHighlight(graphics);
+		}
+
 		return null;
+	}
+
+	private void renderConfirmHighlight(Graphics2D graphics)
+	{
+		Widget geSetup = client.getWidget(InterfaceID.GeOffers.SETUP);
+		if (geSetup == null || geSetup.isHidden())
+		{
+			plugin.confirmHighlightUntilMs = 0L;
+			return;
+		}
+		Widget[] children = geSetup.getDynamicChildren();
+		if (children == null)
+		{
+			return;
+		}
+		for (Widget w : children)
+		{
+			String[] actions = w.getActions();
+			if (actions == null)
+			{
+				continue;
+			}
+			for (String action : actions)
+			{
+				if (action != null && action.toLowerCase().contains("confirm"))
+				{
+					Rectangle bounds = w.getBounds();
+					graphics.setColor(HIGHLIGHT_FILL);
+					graphics.fill(bounds);
+					graphics.setColor(HIGHLIGHT_BORDER);
+					graphics.draw(bounds);
+					return;
+				}
+			}
+		}
 	}
 
 	private void renderEnterPriceHighlight(Graphics2D graphics)
@@ -228,6 +271,10 @@ public class O7FlipOverlay extends Overlay
 			return;
 		}
 
+		// Compute cost-basis once per render (single ProfitCalculator pass) so all
+		// 8 slots can share the open-position lookup.
+		ProfitCalculator.Result fifo = ProfitCalculator.compute(plugin.tradeHistory);
+
 		// Slot widgets INDEX_0 through INDEX_7 are sequential integers.
 		int baseId = InterfaceID.GeOffers.INDEX_0;
 
@@ -241,24 +288,30 @@ public class O7FlipOverlay extends Overlay
 
 			GrandExchangeOffer offer = entry.getValue();
 			TrackedItemData tracked = plugin.trackedItems.get(offer.getItemId());
-			if (tracked == null)
-			{
-				continue;
-			}
 
 			boolean isBuy = offer.getState() == GrandExchangeOfferState.BUYING
 				|| offer.getState() == GrandExchangeOfferState.BOUGHT;
 
-			Long comparePrice;
-			if (isBuy)
+			Long comparePrice = null;
+			if (!isBuy)
+			{
+				// Sells: prefer cost-basis from the user's actual trade history. This
+				// turns the slot colour into "is this offer profitable for me?"
+				ProfitCalculator.OpenPosition pos = fifo.openPositions.get(offer.getItemId());
+				if (pos != null && pos.remainingQty > 0)
+				{
+					comparePrice = pos.remainingCostBasis / pos.remainingQty;
+				}
+				else if (tracked != null)
+				{
+					comparePrice = tracked.flipSellPrice;
+				}
+			}
+			else if (tracked != null)
 			{
 				comparePrice = tracked.flipBuyPrice != null ? tracked.flipBuyPrice
 					: tracked.spikeBuyPrice != null ? tracked.spikeBuyPrice
 					: tracked.dipBuyPrice;
-			}
-			else
-			{
-				comparePrice = tracked.flipSellPrice;
 			}
 
 			if (comparePrice == null)
