@@ -153,6 +153,18 @@ public class BarrowsSetPanel extends JPanel
 				}
 			}
 		});
-		setMaximumSize(new Dimension(Integer.MAX_VALUE, getPreferredSize().height));
+	}
+
+	/**
+	 * Computed lazily so HTML labels' preferred heights are correct at the
+	 * point BoxLayout queries us. Setting this in the constructor with a
+	 * static getPreferredSize() captures a stale height and truncates the
+	 * card at the bottom.
+	 */
+	@Override
+	public Dimension getMaximumSize()
+	{
+		Dimension pref = getPreferredSize();
+		return new Dimension(Integer.MAX_VALUE, pref.height);
 	}
 }
