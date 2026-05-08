@@ -235,6 +235,7 @@ public class O7FlipPanel extends PluginPanel
 	private JPanel decantListPanel;
 	private JPanel alertsListPanel;
 	private JPanel myFlipsListPanel;
+	private com.o7flip.ui.MyTradesStatsPanel myFlipsStatsPanel;
 	private JPanel searchResultsPanel;
 	private JScrollPane searchScrollPane;
 
@@ -1143,6 +1144,17 @@ public class O7FlipPanel extends PluginPanel
 			return;
 		}
 		myFlipsListPanel.removeAll();
+
+		if (myFlipsStatsPanel != null)
+		{
+			myFlipsStatsPanel.update(com.o7flip.util.ProfitCalculator.compute(allMyFlips));
+			if (myFlipsStatsPanel.isVisible())
+			{
+				myFlipsListPanel.add(myFlipsStatsPanel);
+				myFlipsListPanel.add(sep());
+			}
+		}
+
 		if (allMyFlips.isEmpty())
 		{
 			myFlipsListPanel.add(emptyLabel("No trades recorded yet", "Completed GE buys and sells appear here"));
@@ -1509,6 +1521,7 @@ public class O7FlipPanel extends PluginPanel
 	private JPanel buildMyFlipsTab()
 	{
 		myFlipsListPanel = listPanel();
+		myFlipsStatsPanel = new com.o7flip.ui.MyTradesStatsPanel();
 
 		JButton clearBtn = pillButton("Clear History");
 		clearBtn.addActionListener(e ->
