@@ -80,6 +80,7 @@ import java.awt.Component;
 import java.awt.Cursor;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
+import java.awt.Font;
 import java.awt.FontMetrics;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
@@ -269,6 +270,7 @@ public class O7FlipPanel extends PluginPanel
 	private final JComboBox<String> presetSelector;
 	private JTextField searchField;
 	private JLabel statusLabel;
+	private JLabel pauseToggle;
 	private JLabel lastUpdatedLabel;
 	private JPanel mainArea;
 	private Timer  searchDebounce;
@@ -1376,8 +1378,31 @@ public class O7FlipPanel extends PluginPanel
 		statusLabel.setFont(Fonts.SM);
 		statusLabel.setForeground(new Color(0xFFAA00));
 
-		header.add(title,       BorderLayout.WEST);
-		header.add(statusLabel, BorderLayout.EAST);
+		pauseToggle = new JLabel("\u23F8");
+		pauseToggle.setFont(new Font("Dialog", Font.PLAIN, 14));
+		pauseToggle.setForeground(new Color(0x888888));
+		pauseToggle.setToolTipText("Pause auto-refresh of all data");
+		pauseToggle.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+		pauseToggle.setBorder(new EmptyBorder(0, 0, 0, 0));
+		pauseToggle.addMouseListener(new java.awt.event.MouseAdapter()
+		{
+			@Override
+			public void mouseClicked(java.awt.event.MouseEvent e)
+			{
+				if (plugin != null)
+				{
+					plugin.togglePaused();
+				}
+			}
+		});
+
+		JPanel rightCluster = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.RIGHT, 8, 0));
+		rightCluster.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+		rightCluster.add(statusLabel);
+		rightCluster.add(pauseToggle);
+
+		header.add(title,        BorderLayout.WEST);
+		header.add(rightCluster, BorderLayout.EAST);
 
 		// Search field with placeholder
 		searchField = new JTextField()
@@ -1568,6 +1593,30 @@ public class O7FlipPanel extends PluginPanel
 
 	/**
 	 * Switches to the named tab if it is currently visible.
+	 * Updates the pause toggle icon to reflect the plugin's current paused
+	 * state. Called from {@link O7FlipPlugin#togglePaused()} on the EDT.
+	 */
+	public void setPaused(boolean paused)
+	{
+		if (pauseToggle == null)
+		{
+			return;
+		}
+		if (paused)
+		{
+			pauseToggle.setText("▶");
+			pauseToggle.setForeground(new Color(0xFFAA00));
+			pauseToggle.setToolTipText("Resume auto-refresh");
+		}
+		else
+		{
+			pauseToggle.setText("⏸");
+			pauseToggle.setForeground(new Color(0x888888));
+			pauseToggle.setToolTipText("Pause auto-refresh of all data");
+		}
+	}
+
+	/**
 	 * Returns true if the tab was found and selected, false otherwise.
 	 * Must be called on the EDT.
 	 */

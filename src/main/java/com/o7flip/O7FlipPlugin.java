@@ -128,6 +128,7 @@ public class O7FlipPlugin extends Plugin
 	private NavigationButton navButton;
 	private ScheduledExecutorService executor;
 	private ScheduledFuture<?> refreshTask;
+	private volatile boolean paused = false;
 
 	// Barrows/Moon/Decanting change with GE prices (hourly), not every minute.
 	// Only refresh them every SLOW_EVERY cycles to reduce server load.
@@ -1046,6 +1047,38 @@ public class O7FlipPlugin extends Plugin
 	// -------------------------------------------------------------------------
 	// Cross-device tracker sync — pulls server history and merges with local
 	// -------------------------------------------------------------------------
+
+	/**
+	 * Toggles the plugin's paused state. While paused, the scheduled auto-refresh
+	 * task is cancelled — manual refreshes via panel pagination/sort still work.
+	 * Re-creates the scheduled task on resume.
+	 */
+	public void togglePaused()
+	{
+		paused = !paused;
+		if (paused)
+		{
+			if (refreshTask != null)
+			{
+				refreshTask.cancel(false);
+				refreshTask = null;
+			}
+		}
+		else
+		{
+			if (executor != null && !executor.isShutdown() && refreshTask == null)
+			{
+				refreshTask = executor.scheduleAtFixedRate(
+					() -> fetchAll(false),
+					config.refreshIntervalSeconds(),
+					config.refreshIntervalSeconds(),
+					TimeUnit.SECONDS
+				);
+			}
+		}
+		final boolean p = paused;
+		SwingUtilities.invokeLater(() -> panel.setPaused(p));
+	}
 
 	/** Public entry point used by the My Trades "Sync from server" button. */
 	public void syncTrackerHistory()
