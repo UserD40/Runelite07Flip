@@ -205,17 +205,28 @@ public class O7FlipPlugin extends Plugin
 		setOverlayQueue(itemId, price, true);
 		clientThread.invokeLater(() ->
 		{
-			// GE_ITEM_SEARCH only works when a buy slot is active (offer container visible).
+			// GE_ITEM_SEARCH only works when a buy slot is active (offer container visible)
+			// AND the user is on the main GE screen. If the offer setup is open, firing the
+			// search would write into the price-input chatbox and corrupt the user's input —
+			// arm the queue instead and let onGameTick fire once they back out to main GE.
 			Widget offerContainer = client.getWidget(ComponentID.GRAND_EXCHANGE_OFFER_CONTAINER);
-			if (offerContainer != null && !offerContainer.isHidden())
+			Widget setup = client.getWidget(InterfaceID.GeOffers.SETUP);
+			boolean geOpen = offerContainer != null && !offerContainer.isHidden();
+			boolean setupOpen = setup != null && !setup.isHidden();
+			if (geOpen && !setupOpen)
 			{
 				fillGeBuyOffer(itemId, price, name);
+				return;
+			}
+			pendingGeBuyItemId = itemId;
+			pendingGeBuyPrice  = price;
+			pendingGeBuyName   = name;
+			if (setupOpen)
+			{
+				notifier.notify("Close the current offer first — your buy for " + name + " is queued");
 			}
 			else
 			{
-				pendingGeBuyItemId = itemId;
-				pendingGeBuyPrice  = price;
-				pendingGeBuyName   = name;
 				notifier.notify("Open the Grand Exchange, click an empty buy slot, then your offer will pre-fill for " + name);
 			}
 		});
@@ -334,6 +345,13 @@ public class O7FlipPlugin extends Plugin
 		}
 		Widget offerContainer = client.getWidget(ComponentID.GRAND_EXCHANGE_OFFER_CONTAINER);
 		if (offerContainer == null || offerContainer.isHidden())
+		{
+			return;
+		}
+		// Wait until the user has backed out of any in-progress offer setup —
+		// firing the search into the price-input chatbox would clobber their entry.
+		Widget setup = client.getWidget(InterfaceID.GeOffers.SETUP);
+		if (setup != null && !setup.isHidden())
 		{
 			return;
 		}
