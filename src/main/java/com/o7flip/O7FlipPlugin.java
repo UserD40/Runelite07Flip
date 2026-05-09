@@ -199,6 +199,12 @@ public class O7FlipPlugin extends Plugin
 	/** Item IDs currently in the player's inventory. Volatile reference swap. */
 	public volatile Set<Integer> inventoryItemIds = Collections.emptySet();
 
+	/** Coin count in the player's inventory. Used by the cash-stack-aware
+	 *  Flips request when {@link O7FlipConfig#usePersonalisedFlips()} is on. */
+	public volatile long inventoryCoins = 0L;
+	private static final int COINS_ITEM_ID = 995;
+	private static final long CASH_BUCKET = 100_000L;
+
 	/**
 	 * Cache of {@code /recommended-prices} responses keyed by item ID.
 	 * Server caches 60s, so we cache locally for 60s too. Used by
@@ -719,6 +725,12 @@ public class O7FlipPlugin extends Plugin
 			{
 				p.addProperty("priceMax", priceMax);
 			}
+			long cashStack = cashStackBucketGp();
+			if (cashStack > 0)
+			{
+				p.addProperty("cashStack", cashStack);
+				p.addProperty("annotate", "affordableQty");
+			}
 			p.addProperty("page", panel.getFlipsPage());
 			sections.add("flips", p);
 		}
@@ -983,14 +995,21 @@ public class O7FlipPlugin extends Plugin
 			return;
 		}
 		Set<Integer> next = new HashSet<>();
+		long coins = 0L;
 		for (Item item : event.getItemContainer().getItems())
 		{
-			if (item.getId() >= 0)
+			if (item.getId() < 0)
 			{
-				next.add(item.getId());
+				continue;
+			}
+			next.add(item.getId());
+			if (item.getId() == COINS_ITEM_ID)
+			{
+				coins = item.getQuantity();
 			}
 		}
 		inventoryItemIds = Collections.unmodifiableSet(next);
+		inventoryCoins   = coins;
 	}
 
 	// -------------------------------------------------------------------------
@@ -1461,7 +1480,7 @@ public class O7FlipPlugin extends Plugin
 			panel.getSelectedPreset(),
 			panel.getFlipsSortKey(),
 			panel.getFlipsMinProfit(), panel.getFlipsPriceMin(), panel.getFlipsPriceMax(),
-			0L,
+			cashStackBucketGp(),
 			page,
 			(items, total) ->
 			{
@@ -1471,6 +1490,21 @@ public class O7FlipPlugin extends Plugin
 			},
 			upgradeUrl -> SwingUtilities.invokeLater(() -> panel.showPremiumRequiredToast(upgradeUrl))
 		);
+	}
+
+	/**
+	 * Returns the player's cash floored to the nearest 100,000 gp when the
+	 * personalised-flips toggle is on, or 0 when the feature is disabled or
+	 * the player has no coins. The bucketed value (never the exact wealth)
+	 * is what we send to the server as ?cashStack=…
+	 */
+	private long cashStackBucketGp()
+	{
+		if (!config.usePersonalisedFlips() || inventoryCoins <= 0)
+		{
+			return 0L;
+		}
+		return (inventoryCoins / CASH_BUCKET) * CASH_BUCKET;
 	}
 
 	void onSpikesPageChanged(int page)

@@ -111,6 +111,20 @@ public interface O7FlipConfig extends Config
 		return 99;
 	}
 
+	@ConfigItem(
+		keyName = "usePersonalisedFlips",
+		name = "Personalised flips by cash stack",
+		description = "<html>Filter the Flips tab to items you can afford right now based on the coins<br>"
+			+ "in your inventory. The cash value is rounded down to the nearest 100,000 gp before<br>"
+			+ "it leaves your machine — exact wealth is never sent to 07flip.com.</html>",
+		section = generalSection,
+		position = 3
+	)
+	default boolean usePersonalisedFlips()
+	{
+		return false;
+	}
+
 	// ── Panel tabs ──────────────────────────────────────────────────────────
 
 	@ConfigItem(

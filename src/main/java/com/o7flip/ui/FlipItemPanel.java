@@ -99,10 +99,17 @@ public class FlipItemPanel extends JPanel
 
 		// ── PROFIT + ROI ───────────────────────────────────────────────────────
 		String limitText = flip.buyLimit > 0 ? "  \u00B7  Limit " + flip.buyLimit : "";
+		String affText   = (flip.affordableQty != null && flip.affordableQty > 0)
+			? "  \u00B7  Buy " + flip.affordableQty
+			: "";
 		JLabel profitLabel = new JLabel(
-			"+" + formatGp(flip.profit) + "  (" + String.format("%.1f", flip.roiPct) + "% ROI)" + limitText);
+			"+" + formatGp(flip.profit) + "  (" + String.format("%.1f", flip.roiPct) + "% ROI)" + limitText + affText);
 		profitLabel.setFont(Fonts.SM);
 		profitLabel.setForeground(GREEN);
+		if (flip.affordableQty != null)
+		{
+			profitLabel.setToolTipText("'Buy N' = how many you can afford with your current inventory cash (rounded to nearest 100k bucket).");
+		}
 
 		JPanel textPanel = new JPanel(new GridLayout(4, 1, 0, 2));
 		textPanel.setBackground(bg);
@@ -152,6 +159,10 @@ public class FlipItemPanel extends JPanel
 						sellItem.addActionListener(ae -> plugin.queueGeSell(flip.itemId, flip.buyPrice, flip.name));
 						menu.add(sellItem);
 					}
+					JMenuItem detailsItem = new JMenuItem("Details\u2026");
+					detailsItem.addActionListener(ae ->
+						ItemDetailDialog.show(FlipItemPanel.this, flip, plugin, itemManager));
+					menu.add(detailsItem);
 					menu.addSeparator();
 					addHideMenuItem(menu, plugin, flip.itemId, flip.name);
 					menu.show(e.getComponent(), e.getX(), e.getY());
