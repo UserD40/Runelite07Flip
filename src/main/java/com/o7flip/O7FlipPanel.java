@@ -199,6 +199,7 @@ public class O7FlipPanel extends PluginPanel
 	private String spikesSortKey = "recent";
 	private String dipsSortKey   = "recent";
 	private String dumpsSortKey  = "recent";
+	private boolean dumpsUseBotEndpoint = false;
 
 	// -------------------------------------------------------------------------
 	// Auth state
@@ -706,6 +707,17 @@ public class O7FlipPanel extends PluginPanel
 	public String getDipsSortKey()
 	{
 		return dipsSortKey;
+	}
+
+	/**
+	 * True when the Dumps tab is showing the bot-driven dump feed (from
+	 * {@code /api/runelite/bot-dumps}) instead of the general dump feed
+	 * (from {@code /api/runelite/dumps}). Driven by the source toggle in
+	 * the Dumps tab header.
+	 */
+	public boolean dumpsUsesBotEndpoint()
+	{
+		return dumpsUseBotEndpoint;
 	}
 
 	public String getDumpsSortKey()
@@ -2183,10 +2195,36 @@ public class O7FlipPanel extends PluginPanel
 		filterRow.add(minProfitCb);
 		filterRow.add(priceRangeCb);
 
-		JPanel topBar = new JPanel(new BorderLayout());
+		// Source toggle: switch between /dumps (all dumps) and /bot-dumps
+		// (machine-detected bot-driven dumps). Same response shape on the
+		// server side so both feeds render through the existing DumpItemPanel.
+		JComboBox<String> sourceCb = styledCombo(new String[]{"All Dumps", "Bot Dumps"});
+		sourceCb.setSelectedIndex(dumpsUseBotEndpoint ? 1 : 0);
+		sourceCb.addActionListener(e ->
+		{
+			boolean wantBot = sourceCb.getSelectedIndex() == 1;
+			if (wantBot == dumpsUseBotEndpoint)
+			{
+				return;
+			}
+			dumpsUseBotEndpoint = wantBot;
+			dumpsPage = 0;
+			if (plugin != null)
+			{
+				plugin.onDumpsFilterChanged();
+			}
+		});
+		JPanel sourceRow = new JPanel(new BorderLayout());
+		sourceRow.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+		sourceRow.setBorder(new EmptyBorder(4, 8, 0, 8));
+		sourceRow.add(sourceCb, BorderLayout.CENTER);
+
+		JPanel topBar = new JPanel();
+		topBar.setLayout(new BoxLayout(topBar, BoxLayout.Y_AXIS));
 		topBar.setBackground(ColorScheme.DARKER_GRAY_COLOR);
-		topBar.add(filterRow, BorderLayout.NORTH);
-		topBar.add(sortRow,   BorderLayout.SOUTH);
+		topBar.add(sourceRow);
+		topBar.add(filterRow);
+		topBar.add(sortRow);
 
 		dumpsListPanel = listPanel();
 		dumpsPageLabel = pageLabel();

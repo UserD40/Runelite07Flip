@@ -78,6 +78,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.Executors;
+import java.util.function.BiConsumer;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
@@ -759,7 +760,10 @@ public class O7FlipPlugin extends Plugin
 			sections.add("dips", p);
 		}
 
-		if (config.showDumps())
+		// Dumps: when the source toggle is on the bot-dumps feed we fetch
+		// it via a separate /bot-dumps call below the bundle, so skip the
+		// "dumps" bundle section entirely in that mode.
+		if (config.showDumps() && !panel.dumpsUsesBotEndpoint())
 		{
 			JsonObject p = new JsonObject();
 			String sort = panel.getDumpsSortKey();
@@ -866,6 +870,23 @@ public class O7FlipPlugin extends Plugin
 				SwingUtilities.invokeLater(() -> panel.updateInvalidKeyWarning(hasKey ? connectUrl : null));
 			}
 		);
+
+		// Bot-dumps lives on a dedicated endpoint outside the bundle. When
+		// the Dumps tab is in bot mode, fire the additional fetch in parallel.
+		if (config.showDumps() && panel.dumpsUsesBotEndpoint())
+		{
+			final int botDumpsPage = panel.getDumpsPage();
+			apiClient.fetchBotDumps(
+				panel.getDumpsSortKey(),
+				panel.getDumpsMinProfit(), panel.getDumpsPriceMin(), panel.getDumpsPriceMax(),
+				botDumpsPage,
+				(items, total) ->
+				{
+					lastDumps = items;
+					rebuildTrackedItems();
+					SwingUtilities.invokeLater(() -> panel.updateDumps(items, total, botDumpsPage));
+				});
+		}
 	}
 
 	// Called when smithingLevel config changes — fires a bundle with just the slow sections.
@@ -1545,16 +1566,35 @@ public class O7FlipPlugin extends Plugin
 
 	void onDumpsPageChanged(int page)
 	{
-		executor.execute(() ->
-			apiClient.fetchDumps(panel.getDumpsSortKey(),
+		executor.execute(() -> fetchDumpsAtPage(panel.getDumpsSortKey(), page));
+	}
+
+	/**
+	 * Single source-of-truth for fetching the Dumps tab. Routes to either
+	 * {@code /dumps} or {@code /bot-dumps} depending on the panel's source
+	 * toggle. Both endpoints return the same DumpItem shape so the panel
+	 * doesn't care which one served the data.
+	 */
+	private void fetchDumpsAtPage(String sort, int page)
+	{
+		BiConsumer<List<DumpItem>, Integer> cb = (items, total) ->
+		{
+			lastDumps = items;
+			rebuildTrackedItems();
+			SwingUtilities.invokeLater(() -> panel.updateDumps(items, total, page));
+		};
+		if (panel.dumpsUsesBotEndpoint())
+		{
+			apiClient.fetchBotDumps(sort,
 				panel.getDumpsMinProfit(), panel.getDumpsPriceMin(), panel.getDumpsPriceMax(),
-				page,
-				(items, total) ->
-				{
-					lastDumps = items;
-					rebuildTrackedItems();
-					SwingUtilities.invokeLater(() -> panel.updateDumps(items, total, page));
-				}));
+				page, cb);
+		}
+		else
+		{
+			apiClient.fetchDumps(sort,
+				panel.getDumpsMinProfit(), panel.getDumpsPriceMin(), panel.getDumpsPriceMax(),
+				page, cb);
+		}
 	}
 
 	void onAlertsPageChanged(int page)
@@ -1587,16 +1627,7 @@ public class O7FlipPlugin extends Plugin
 
 	void onDumpsSortChanged(String sort)
 	{
-		executor.execute(() ->
-			apiClient.fetchDumps(sort,
-				panel.getDumpsMinProfit(), panel.getDumpsPriceMin(), panel.getDumpsPriceMax(),
-				0,
-				(items, total) ->
-				{
-					lastDumps = items;
-					rebuildTrackedItems();
-					SwingUtilities.invokeLater(() -> panel.updateDumps(items, total, 0));
-				}));
+		executor.execute(() -> fetchDumpsAtPage(sort, 0));
 	}
 
 	void onFlipsFilterChanged()
@@ -1606,16 +1637,7 @@ public class O7FlipPlugin extends Plugin
 
 	void onDumpsFilterChanged()
 	{
-		executor.execute(() ->
-			apiClient.fetchDumps(panel.getDumpsSortKey(),
-				panel.getDumpsMinProfit(), panel.getDumpsPriceMin(), panel.getDumpsPriceMax(),
-				0,
-				(items, total) ->
-				{
-					lastDumps = items;
-					rebuildTrackedItems();
-					SwingUtilities.invokeLater(() -> panel.updateDumps(items, total, 0));
-				}));
+		executor.execute(() -> fetchDumpsAtPage(panel.getDumpsSortKey(), 0));
 	}
 
 	void onPresetChanged()

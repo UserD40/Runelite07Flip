@@ -582,6 +582,50 @@ public class O7FlipApiClient
 		});
 	}
 
+	/**
+	 * Fetches the bot-dumps feed — items currently being mass-dumped by
+	 * automated price-collapse detectors. Same response shape as
+	 * {@link #fetchDumps}, served from a different endpoint that pulls
+	 * specifically from the bot-driven dump signal.
+	 */
+	public void fetchBotDumps(String sort, long minProfit, long priceMin, long priceMax,
+	                          int page, BiConsumer<List<DumpItem>, Integer> callback)
+	{
+		StringBuilder url = new StringBuilder(BASE_URL + "/bot-dumps?limit=").append(PAGE_LIMIT)
+			.append("&page=").append(page);
+		if (sort != null && !sort.isEmpty())
+		{
+			url.append("&sort=").append(sort);
+		}
+		if (minProfit > 0)
+		{
+			url.append("&minProfit=").append(minProfit);
+		}
+		if (priceMin > 0)
+		{
+			url.append("&priceMin=").append(priceMin);
+		}
+		if (priceMax < Long.MAX_VALUE)
+		{
+			url.append("&priceMax=").append(priceMax);
+		}
+		fetch(url.toString(), new Callback()
+		{
+			@Override
+			public void onFailure(Call call, IOException e)
+			{
+				log.warn("[07Flip] fetchBotDumps failed: {}", e.getMessage());
+				callback.accept(new ArrayList<>(), 0);
+			}
+
+			@Override
+			public void onResponse(Call call, Response response) throws IOException
+			{
+				parsePagedResponse(response, "dumps", O7FlipApiClient.this::parseDumpItem, callback);
+			}
+		});
+	}
+
 	public void fetchAlerts(int page, BiConsumer<List<AlertItem>, Integer> callback)
 	{
 		String url = BASE_URL + "/alerts?limit=" + PAGE_LIMIT + "&page=" + page;
