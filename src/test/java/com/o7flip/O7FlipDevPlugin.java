@@ -24,19 +24,24 @@
  */
 package com.o7flip;
 
-import net.runelite.client.RuneLite;
-import net.runelite.client.externalplugins.ExternalPluginManager;
+import net.runelite.client.plugins.PluginDescriptor;
 
-public class O7FlipLauncher
+/**
+ * Dev-only wrapper around {@link O7FlipPlugin} that registers under a
+ * different display name. The dev test client (launched via gradle run /
+ * O7FlipLauncher) loads this class as a builtin so it can run side-by-side
+ * with a user's Plugin Hub-installed copy of "07Flip - GE Flip Finder"
+ * without conflict — both icons appear in the sidebar, distinguishable by
+ * their tooltips. All behaviour is inherited from O7FlipPlugin.
+ *
+ * Lives in the test source set, so it is NOT included in the production
+ * plugin jar shipped to Plugin Hub (which only packages src/main).
+ */
+@PluginDescriptor(
+	name = "07Flip [DEV]",
+	description = "DEV BUILD — Live Grand Exchange data from 07flip.com. Top flips, dumps, spikes, dips, Barrows/Moon repair, decanting, merch alerts.",
+	tags = {"flipping", "grand exchange", "ge", "money making", "07flip", "dev"}
+)
+public class O7FlipDevPlugin extends O7FlipPlugin
 {
-	public static void main(String[] args) throws Exception
-	{
-		// Load the dev wrapper rather than O7FlipPlugin directly so the dev
-		// test client can coexist with a Plugin-Hub-installed copy of the
-		// production plugin. The wrapper has identical behaviour but a
-		// different @PluginDescriptor name ("07Flip [DEV]"), so both show
-		// up as separate icons in the sidebar.
-		ExternalPluginManager.loadBuiltin(O7FlipDevPlugin.class);
-		RuneLite.main(args);
-	}
 }
