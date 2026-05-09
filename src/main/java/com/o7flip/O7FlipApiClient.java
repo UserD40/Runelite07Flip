@@ -668,7 +668,11 @@ public class O7FlipApiClient
 		RequestBody requestBody = RequestBody.create(MEDIA_TYPE_JSON, gson.toJson(body));
 
 		Request.Builder builder = new Request.Builder()
-			.url(BASE_URL + "/bundle")
+			// v2 bundle returns full-shape flips rows (members + flip07_score
+			// + rec_buy_price/rec_sell_price/rec_profit). v1 still serves the
+			// legacy 8-key flips section. Other endpoints stay on v1 — only
+			// /bundle has a v2 equivalent right now.
+			.url(BASE_URL + "/v2/bundle")
 			.post(requestBody)
 			.header("User-Agent", USER_AGENT);
 		String key = sanitizedApiKey();

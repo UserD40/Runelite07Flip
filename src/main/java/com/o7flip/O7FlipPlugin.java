@@ -732,16 +732,47 @@ public class O7FlipPlugin extends Plugin
 		// Build the bundle sections object — only include tabs the user has enabled.
 		JsonObject sections = new JsonObject();
 
-		// Flips intentionally excluded from the /bundle request: the bundle's
-		// flips section currently returns the legacy shape (no flip07_score,
-		// no rec_buy_price/rec_sell_price/rec_profit), while the standalone
-		// /flips endpoint returns the full new shape. Routing flips through
-		// the bundle would silently strip those fields on every periodic
-		// refresh — the panel would render correctly after a filter change
-		// (which calls fetchFlipsAtPage directly) and then visibly downgrade
-		// ~90s later when the bundle response overwrote the rich data with
-		// the legacy shape. fetchFlipsAtPage is invoked below alongside the
-		// bundle so the user still gets a periodic refresh.
+		// Server v2 bundle (POST /api/runelite/v2/bundle) now returns the
+		// full-shape flips rows including flip07_score and rec_* fields, so
+		// flips can ride the bundle again. The standalone /flips endpoint is
+		// still used for filter-change re-fetches (see fetchFlipsAtPage).
+		if (config.showFlips())
+		{
+			JsonObject p = new JsonObject();
+			String preset = panel.getSelectedPreset();
+			if (preset != null && !preset.isEmpty())
+			{
+				p.addProperty("preset", preset);
+			}
+			String sort = panel.getFlipsSortKey();
+			if (sort != null && !sort.isEmpty())
+			{
+				p.addProperty("sort", sort);
+			}
+			long minProfit = panel.getFlipsMinProfit();
+			if (minProfit > 0)
+			{
+				p.addProperty("minProfit", minProfit);
+			}
+			long priceMin = panel.getFlipsPriceMin();
+			if (priceMin > 0)
+			{
+				p.addProperty("priceMin", priceMin);
+			}
+			long priceMax = panel.getFlipsPriceMax();
+			if (priceMax < Long.MAX_VALUE)
+			{
+				p.addProperty("priceMax", priceMax);
+			}
+			long cashStack = cashStackBucketGp();
+			if (cashStack > 0)
+			{
+				p.addProperty("cashStack", cashStack);
+				p.addProperty("annotate", "affordableQty");
+			}
+			p.addProperty("page", panel.getFlipsPage());
+			sections.add("flips", p);
+		}
 
 		if (config.showSpikes())
 		{
@@ -837,9 +868,12 @@ public class O7FlipPlugin extends Plugin
 
 		apiClient.fetchBundle(
 			sections,
-			// Flips intentionally null — fetched separately below to use the
-			// new /flips response shape (with flip07_score and rec_*).
-			null,
+			config.showFlips() ? (items, total) ->
+			{
+				lastFlips = items;
+				rebuildTrackedItems();
+				SwingUtilities.invokeLater(() -> panel.updateFlips(items, total, flipsPage));
+			} : null,
 			config.showSpikes() ? (items, total) ->
 			{
 				lastSpikes = items;
@@ -874,14 +908,6 @@ public class O7FlipPlugin extends Plugin
 				SwingUtilities.invokeLater(() -> panel.updateInvalidKeyWarning(hasKey ? connectUrl : null));
 			}
 		);
-
-		// Flips: always fetched via the standalone /flips endpoint (see
-		// comment above). Fires in parallel with the bundle so the user
-		// still gets a refresh on each periodic tick.
-		if (config.showFlips())
-		{
-			fetchFlipsAtPage(flipsPage);
-		}
 
 		// Bot-dumps lives on a dedicated endpoint outside the bundle. When
 		// the Dumps tab is in bot mode, fire the additional fetch in parallel.
