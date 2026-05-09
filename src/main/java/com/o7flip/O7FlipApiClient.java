@@ -345,9 +345,13 @@ public class O7FlipApiClient
 				try
 				{
 					int code = response.code();
-					if (code == 503)
+					if (code >= 500 && code <= 599)
 					{
-						log.info("[07Flip] /auth returned 503 (server warmup or maintenance) — will retry");
+						// Any 5xx is treated as transient — covers the 503 warmup
+						// guard our server uses after a deploy, plus 502/504 from
+						// the gateway during the same window. Schedule a retry;
+						// don't change the user-facing auth state in the meantime.
+						log.info("[07Flip] /auth returned {} — transient server error, will retry", code);
 						if (onTransient != null)
 						{
 							onTransient.run();
