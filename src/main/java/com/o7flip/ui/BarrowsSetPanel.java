@@ -79,32 +79,40 @@ public class BarrowsSetPanel extends JPanel
 		textPanel.add(nameLabel);
 		textPanel.add(Box.createVerticalStrut(3));
 
-		JLabel buyLbl = new JLabel("Buy: " + FlipItemPanel.formatGp(set.totalBrokenCost));
+		// Use 07Flip recommended aggregates when available. Barrows broken
+		// pieces are thinly traded so this often falls back to live numbers.
+		boolean useRec      = set.recBestProfit != null;
+		long   buyShown     = useRec ? set.recTotalBrokenCost    : set.totalBrokenCost;
+		long   repairShown  = useRec ? set.recTotalPohRepairCost : set.totalPohRepairCost;
+		long   profitShown  = useRec ? set.recBestProfit         : set.bestProfit;
+		String strategy     = useRec && set.recBestStrategy != null ? set.recBestStrategy : set.bestStrategy;
+
+		JLabel buyLbl = new JLabel("Buy: " + FlipItemPanel.formatGp(buyShown));
 		buyLbl.setFont(Fonts.SM);
 		buyLbl.setForeground(new Color(0xFF7070));
 		buyLbl.setAlignmentX(Component.LEFT_ALIGNMENT);
 		textPanel.add(buyLbl);
 		textPanel.add(Box.createVerticalStrut(2));
 
-		JLabel repairLbl = new JLabel("Repair: " + FlipItemPanel.formatGp(set.totalPohRepairCost));
+		JLabel repairLbl = new JLabel("Repair: " + FlipItemPanel.formatGp(repairShown));
 		repairLbl.setFont(Fonts.SM);
 		repairLbl.setForeground(new Color(0x888888));
 		repairLbl.setAlignmentX(Component.LEFT_ALIGNMENT);
 		textPanel.add(repairLbl);
 		textPanel.add(Box.createVerticalStrut(3));
 
-		String stratText = "sell_set".equals(set.bestStrategy) ? "Sell as set" : "Sell individual";
+		String stratText = "sell_set".equals(strategy) ? "Sell as set" : "Sell individual";
 		String volText   = set.dailyVolume > 0 ? "  \u00B7  " + set.dailyVolume + "/day" : "";
-		JLabel stratLabel = new JLabel(stratText + volText + "  \u203A");
+		String recTag    = useRec ? "  (07F)" : "";
+		JLabel stratLabel = new JLabel(stratText + volText + recTag + "  \u203A");
 		stratLabel.setFont(Fonts.SM);
 		stratLabel.setForeground(new Color(0xAAAAAA));
 		stratLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
 		textPanel.add(stratLabel);
 
-		// ── Right badge: best profit ──────────────────────────────────────────
-		boolean profitable = set.bestProfit > 0;
+		boolean profitable = profitShown > 0;
 		JLabel profitLabel = new JLabel(
-			"<html><center><b>" + (profitable ? "+" : "") + FlipItemPanel.formatGp(set.bestProfit)
+			"<html><center><b>" + (profitable ? "+" : "") + FlipItemPanel.formatGp(profitShown)
 			+ "</b><br><font color='#888888'>profit</font></center></html>");
 		profitLabel.setFont(Fonts.SM);
 		profitLabel.setForeground(profitable ? GREEN : RED);

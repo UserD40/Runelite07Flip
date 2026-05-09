@@ -819,6 +819,17 @@ public class O7FlipApiClient
 		s.bestStrategy       = getString(obj, "best_strategy", "sell_individual");
 		s.dailyVolume        = getInt(obj, "daily_volume", 0);
 
+		// 07Flip recommended-price aggregates — null-together when set has no rec data
+		s.recTotalBrokenCost    = getLongOrNull(obj, "rec_total_broken_cost");
+		s.recTotalNpcRepairCost = getLongOrNull(obj, "rec_total_npc_repair_cost");
+		s.recTotalPohRepairCost = getLongOrNull(obj, "rec_total_poh_repair_cost");
+		s.recNpcProfit          = getLongOrNull(obj, "rec_npc_profit");
+		s.recPohProfit          = getLongOrNull(obj, "rec_poh_profit");
+		s.recSetProfit          = getLongOrNull(obj, "rec_set_profit");
+		s.recBestProfit         = getLongOrNull(obj, "rec_best_profit");
+		String recStrat         = getString(obj, "rec_best_strategy", "");
+		s.recBestStrategy       = recStrat.isEmpty() ? null : recStrat;
+
 		// Derive setParam if server did not return it
 		if (s.setParam.isEmpty() && !s.shortName.isEmpty())
 		{
@@ -849,6 +860,11 @@ public class O7FlipApiClient
 					item.npcRoiPct         = getDouble(io, "npc_roi_pct", 0);
 					item.pohRoiPct         = getDouble(io, "poh_roi_pct", 0);
 					item.dailyVolume       = getInt(io, "daily_volume", 0);
+					item.recBrokenBuyPrice    = getLongOrNull(io, "rec_broken_buy_price");
+					item.recRepairedSellPrice = getLongOrNull(io, "rec_repaired_sell_price");
+					item.recRepairedAfterTax  = getLongOrNull(io, "rec_repaired_after_tax");
+					item.recNpcProfit         = getLongOrNull(io, "rec_npc_profit");
+					item.recPohProfit         = getLongOrNull(io, "rec_poh_profit");
 					s.items.add(item);
 				}
 				catch (Exception e)
@@ -1083,6 +1099,17 @@ public class O7FlipApiClient
 		s.setProfit           = getLong(obj, "set_profit", 0);
 		s.bestStrategy        = getString(obj, "best_strategy", "sell_individual");
 		s.bestProfit          = getLong(obj, "best_profit", 0);
+
+		s.recTotalBrokenCost    = getLongOrNull(obj, "rec_total_broken_cost");
+		s.recTotalNpcRepairCost = getLongOrNull(obj, "rec_total_npc_repair_cost");
+		s.recTotalPohRepairCost = getLongOrNull(obj, "rec_total_poh_repair_cost");
+		s.recNpcProfit          = getLongOrNull(obj, "rec_npc_profit");
+		s.recPohProfit          = getLongOrNull(obj, "rec_poh_profit");
+		s.recSetProfit          = getLongOrNull(obj, "rec_set_profit");
+		s.recBestProfit         = getLongOrNull(obj, "rec_best_profit");
+		String recStrat         = getString(obj, "rec_best_strategy", "");
+		s.recBestStrategy       = recStrat.isEmpty() ? null : recStrat;
+
 		JsonArray itemsArr = obj.getAsJsonArray("items");
 		if (itemsArr != null)
 		{
@@ -1106,6 +1133,11 @@ public class O7FlipApiClient
 					mi.pohProfit         = getLong(io, "poh_profit", 0);
 					mi.npcRoiPct         = getDouble(io, "npc_roi_pct", 0);
 					mi.pohRoiPct         = getDouble(io, "poh_roi_pct", 0);
+					mi.recBrokenBuyPrice    = getLongOrNull(io, "rec_broken_buy_price");
+					mi.recRepairedSellPrice = getLongOrNull(io, "rec_repaired_sell_price");
+					mi.recRepairedAfterTax  = getLongOrNull(io, "rec_repaired_after_tax");
+					mi.recNpcProfit         = getLongOrNull(io, "rec_npc_profit");
+					mi.recPohProfit         = getLongOrNull(io, "rec_poh_profit");
 					s.items.add(mi);
 				}
 				catch (Exception e)

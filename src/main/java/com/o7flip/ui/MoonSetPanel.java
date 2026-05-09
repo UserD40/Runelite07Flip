@@ -81,13 +81,25 @@ public class MoonSetPanel extends JPanel
 		add(buildHeader(set, itemManager, bg, acc));
 		add(Box.createVerticalStrut(6));
 
-		boolean sellSet = "sell_set".equals(set.bestStrategy);
+		// Prefer 07Flip recommended profit when the server supplied it for
+		// every piece in this set. Falls back to live data when rec is null
+		// (Barrows broken pieces are thinly traded so this is common there).
+		boolean useRec = set.recBestProfit != null;
+		long bestProfit  = useRec ? set.recBestProfit  : set.bestProfit;
+		String bestStrat = useRec ? set.recBestStrategy : set.bestStrategy;
+		boolean sellSet  = "sell_set".equals(bestStrat);
+		String tag       = useRec ? "  <font color='#FF981F'>07F</font>" : "";
 		JLabel bestLine = new JLabel(
 			"<html><font color='#888888'>Best profit: </font>"
-			+ "<font color='#00C27A'><b>+" + FlipItemPanel.formatGp(set.bestProfit) + " gp</b></font>"
-			+ "<font color='#555555'>  (" + (sellSet ? "sell as set" : "sell individual") + ")</font></html>");
+			+ "<font color='#00C27A'><b>+" + FlipItemPanel.formatGp(bestProfit) + " gp</b></font>"
+			+ "<font color='#555555'>  (" + (sellSet ? "sell as set" : "sell individual") + ")</font>"
+			+ tag + "</html>");
 		bestLine.setFont(Fonts.SM);
 		bestLine.setAlignmentX(Component.LEFT_ALIGNMENT);
+		bestLine.setToolTipText(useRec
+			? "Profit calculated using 07Flip recommended buy/sell prices."
+			: "Profit calculated using live market prices (07Flip recommended unavailable for this set)."
+		);
 		add(bestLine);
 		add(Box.createVerticalStrut(8));
 
@@ -157,7 +169,10 @@ public class MoonSetPanel extends JPanel
 		namePanel.add(styleLabel);
 		header.add(namePanel, BorderLayout.CENTER);
 
-		boolean isSellSet = "sell_set".equals(set.bestStrategy);
+		String headerStrategy = set.recBestProfit != null && set.recBestStrategy != null
+			? set.recBestStrategy
+			: set.bestStrategy;
+		boolean isSellSet = "sell_set".equals(headerStrategy);
 		JLabel badge = new JLabel(isSellSet ? "SELL AS SET" : "SELL PIECES");
 		badge.setFont(Fonts.SM);
 		badge.setForeground(WHITE);
@@ -202,8 +217,16 @@ public class MoonSetPanel extends JPanel
 		text.add(nameLabel);
 		text.add(Box.createVerticalStrut(2));
 
+		// Per-item rec values: when both broken+repaired sides are available,
+		// show 07Flip recommended buy/sell instead of live. recNpcProfit /
+		// recPohProfit are non-null together — use any non-null as the gate.
+		boolean itemUseRec   = item.recBrokenBuyPrice != null && item.recRepairedSellPrice != null;
+		long itemBuyShown    = itemUseRec ? item.recBrokenBuyPrice    : item.brokenBuyPrice;
+		long itemSellShown   = itemUseRec ? item.recRepairedAfterTax  : item.repairedAfterTax;
+		long itemPohProfit   = itemUseRec && item.recPohProfit != null ? item.recPohProfit : item.pohProfit;
+
 		JLabel buyLbl = new JLabel(
-			"<html><font color='#FF7070'>Buy: " + FlipItemPanel.formatGp(item.brokenBuyPrice) + "</font></html>");
+			"<html><font color='#FF7070'>Buy: " + FlipItemPanel.formatGp(itemBuyShown) + "</font></html>");
 		buyLbl.setFont(Fonts.SM);
 		buyLbl.setAlignmentX(Component.LEFT_ALIGNMENT);
 		text.add(buyLbl);
@@ -225,20 +248,20 @@ public class MoonSetPanel extends JPanel
 		text.add(repairLabel);
 		text.add(Box.createVerticalStrut(2));
 
+		String sellSourceTag = itemUseRec ? "  <font color='#FF981F'>(07F)</font>" : "  <font color='#555555'>(after 2% tax)</font>";
 		JLabel sellLbl = new JLabel(
-			"<html><font color='#888888'>Sell: </font>" + FlipItemPanel.formatGp(item.repairedAfterTax)
-			+ "<font color='#555555'>  (after 2% tax)</font></html>");
+			"<html><font color='#888888'>Sell: </font>" + FlipItemPanel.formatGp(itemSellShown) + sellSourceTag + "</html>");
 		sellLbl.setFont(Fonts.SM);
 		sellLbl.setAlignmentX(Component.LEFT_ALIGNMENT);
 		text.add(sellLbl);
 		text.add(Box.createVerticalStrut(2));
 
-		String profitColor = item.pohProfit >= 0 ? "#00C27A" : "#FF5555";
-		String profitSign  = item.pohProfit >= 0 ? "+" : "";
+		String profitColor = itemPohProfit >= 0 ? "#00C27A" : "#FF5555";
+		String profitSign  = itemPohProfit >= 0 ? "+" : "";
 		String profitLabel = isWeapon ? "Profit: " : "Profit (POH): ";
 		JLabel profitLbl = new JLabel(
 			"<html><font color='#888888'>" + profitLabel + "</font>"
-			+ "<font color='" + profitColor + "'>" + profitSign + FlipItemPanel.formatGp(item.pohProfit) + "</font></html>");
+			+ "<font color='" + profitColor + "'>" + profitSign + FlipItemPanel.formatGp(itemPohProfit) + "</font></html>");
 		profitLbl.setFont(Fonts.SM);
 		profitLbl.setAlignmentX(Component.LEFT_ALIGNMENT);
 		text.add(profitLbl);
@@ -290,7 +313,17 @@ public class MoonSetPanel extends JPanel
 	private JPanel buildTotals(MoonSet set, long weaponCost)
 	{
 		Color bg = bgFor(set.setName);
-		boolean hasSellSet = "sell_set".equals(set.bestStrategy) && set.setProfit > 0;
+		// Use rec totals when available — set-level rec fields are non-null
+		// together when every piece has rec data.
+		boolean useRec = set.recBestProfit != null;
+		long armourBuy   = useRec ? set.recTotalBrokenCost    : set.totalBrokenCost;
+		long npcRepair   = useRec ? set.recTotalNpcRepairCost : set.totalNpcRepairCost;
+		long pohRepair   = useRec ? set.recTotalPohRepairCost : set.totalPohRepairCost;
+		long npcProfit   = useRec ? set.recNpcProfit          : set.npcProfit;
+		long pohProfit   = useRec ? set.recPohProfit          : set.pohProfit;
+		Long setProfit   = useRec ? set.recSetProfit          : Long.valueOf(set.setProfit);
+		String bestStrat = useRec && set.recBestStrategy != null ? set.recBestStrategy : set.bestStrategy;
+		boolean hasSellSet = "sell_set".equals(bestStrat) && setProfit != null && setProfit > 0;
 
 		JPanel panel = new JPanel();
 		panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
@@ -298,27 +331,27 @@ public class MoonSetPanel extends JPanel
 		panel.setAlignmentX(Component.LEFT_ALIGNMENT);
 
 		panel.add(totalsRow(bg,
-			"<html><font color='#888888'>Armour buy: </font><font color='#FF7070'>" + FlipItemPanel.formatGp(set.totalBrokenCost) + "</font></html>",
-			"<html><font color='#888888'>NPC repair: </font>" + FlipItemPanel.formatGp(set.totalNpcRepairCost) + "</html>"));
+			"<html><font color='#888888'>Armour buy: </font><font color='#FF7070'>" + FlipItemPanel.formatGp(armourBuy) + "</font></html>",
+			"<html><font color='#888888'>NPC repair: </font>" + FlipItemPanel.formatGp(npcRepair) + "</html>"));
 		panel.add(Box.createVerticalStrut(4));
 
 		panel.add(totalsRow(bg,
-			"<html><font color='#888888'>NPC profit: </font><font color='#00C27A'>+" + FlipItemPanel.formatGp(set.npcProfit) + "</font></html>",
-			"<html><font color='#888888'>POH repair: </font>" + FlipItemPanel.formatGp(set.totalPohRepairCost) + "</html>"));
+			"<html><font color='#888888'>NPC profit: </font><font color='#00C27A'>+" + FlipItemPanel.formatGp(npcProfit) + "</font></html>",
+			"<html><font color='#888888'>POH repair: </font>" + FlipItemPanel.formatGp(pohRepair) + "</html>"));
 		panel.add(Box.createVerticalStrut(4));
 
 		String weaponHtml = weaponCost > 0
 			? "<html><font color='#888888'>Weapon buy: </font><font color='#FF7070'>" + FlipItemPanel.formatGp(weaponCost) + "</font></html>"
 			: "";
 		panel.add(totalsRow(bg,
-			"<html><font color='#888888'>POH profit: </font><font color='#00C27A'>+" + FlipItemPanel.formatGp(set.pohProfit) + "</font></html>",
+			"<html><font color='#888888'>POH profit: </font><font color='#00C27A'>+" + FlipItemPanel.formatGp(pohProfit) + "</font></html>",
 			weaponHtml));
 		panel.add(Box.createVerticalStrut(10));
 
 		if (hasSellSet)
 		{
 			panel.add(totalsRow(bg,
-				"<html><font color='#888888'>Set profit: </font><font color='#FF981F'><b>+" + FlipItemPanel.formatGp(set.setProfit) + "</b></font></html>",
+				"<html><font color='#888888'>Set profit: </font><font color='#FF981F'><b>+" + FlipItemPanel.formatGp(setProfit) + "</b></font></html>",
 				""));
 		}
 

@@ -46,4 +46,15 @@ public class MoonSet
 	public long    setProfit;
 	public String  bestStrategy;   // "sell_individual" or "sell_set"
 	public long    bestProfit;
+
+	// 07Flip recommended-price aggregates. Null-together when any item lacks
+	// rec data. recSetProfit independently null when set-box itself is unpriced.
+	public Long    recTotalBrokenCost;
+	public Long    recTotalNpcRepairCost;
+	public Long    recTotalPohRepairCost;
+	public Long    recNpcProfit;
+	public Long    recPohProfit;
+	public Long    recSetProfit;
+	public Long    recBestProfit;
+	public String  recBestStrategy;
 }

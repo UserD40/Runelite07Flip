@@ -40,4 +40,12 @@ public class MoonItem
 	public long    pohProfit;
 	public double  npcRoiPct;
 	public double  pohRoiPct;
+
+	// 07Flip recommended-price fields. Null-together when broken or repaired
+	// fails the "≥10 last-hour snapshots with non-null prices" gate.
+	public Long    recBrokenBuyPrice;
+	public Long    recRepairedSellPrice;
+	public Long    recRepairedAfterTax;
+	public Long    recNpcProfit;
+	public Long    recPohProfit;
 }

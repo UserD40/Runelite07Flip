@@ -43,5 +43,19 @@ public class BarrowsSet
 	public String bestStrategy;
 	public int    dailyVolume;
 
+	// 07Flip recommended-price aggregates. Null-together when any item in
+	// the set lacks rec data (common on Barrows because broken pieces are
+	// thinly traded on the wiki /1h feed). recSetProfit is independently
+	// null when the set-box itself is unpriced — recBestStrategy then
+	// falls back to "sell_individual".
+	public Long   recTotalBrokenCost;
+	public Long   recTotalNpcRepairCost;
+	public Long   recTotalPohRepairCost;
+	public Long   recNpcProfit;
+	public Long   recPohProfit;
+	public Long   recSetProfit;
+	public Long   recBestProfit;
+	public String recBestStrategy;
+
 	public List<BarrowsItem> items = new ArrayList<>();
 }

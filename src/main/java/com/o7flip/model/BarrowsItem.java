@@ -40,4 +40,14 @@ public class BarrowsItem
 	public double npcRoiPct;
 	public double pohRoiPct;
 	public int    dailyVolume;
+
+	// 07Flip recommended-price fields. All five are non-null together;
+	// each becomes null when the broken or repaired side fails the
+	// "≥10 last-hour snapshots with non-null prices" gate. Barrows broken
+	// pieces are thinly traded so these will frequently be null per set.
+	public Long recBrokenBuyPrice;
+	public Long recRepairedSellPrice;
+	public Long recRepairedAfterTax;
+	public Long recNpcProfit;
+	public Long recPohProfit;
 }

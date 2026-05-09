@@ -74,14 +74,24 @@ public class BarrowsItemPanel extends JPanel
 		textPanel.add(nameLabel);
 		textPanel.add(Box.createVerticalStrut(4));
 
-		JLabel buyLbl = new JLabel("Buy: " + FlipItemPanel.formatGp(item.brokenBuyPrice));
+		// Use 07Flip recommended buy/sell when both are present, otherwise fall
+		// back to live prices. The five rec_* fields on BarrowsItem are
+		// non-null together, so any non-null is a sufficient gate.
+		boolean useRec  = item.recBrokenBuyPrice != null && item.recRepairedSellPrice != null;
+		long buyShown   = useRec ? item.recBrokenBuyPrice    : item.brokenBuyPrice;
+		long sellShown  = useRec ? item.recRepairedAfterTax  : item.repairedAfterTax;
+		long npcProfit  = useRec && item.recNpcProfit != null ? item.recNpcProfit : item.npcProfit;
+		long pohProfit  = useRec && item.recPohProfit != null ? item.recPohProfit : item.pohProfit;
+		String recTag   = useRec ? "  (07F)" : "";
+
+		JLabel buyLbl = new JLabel("Buy: " + FlipItemPanel.formatGp(buyShown) + recTag);
 		buyLbl.setFont(Fonts.SM);
 		buyLbl.setForeground(new Color(0xFF7070));
 		buyLbl.setAlignmentX(Component.LEFT_ALIGNMENT);
 		textPanel.add(buyLbl);
 		textPanel.add(Box.createVerticalStrut(3));
 
-		JLabel sellLbl = new JLabel("Sell: " + FlipItemPanel.formatGp(item.repairedAfterTax));
+		JLabel sellLbl = new JLabel("Sell: " + FlipItemPanel.formatGp(sellShown));
 		sellLbl.setFont(Fonts.SM);
 		sellLbl.setForeground(new Color(0x00C27A));
 		sellLbl.setAlignmentX(Component.LEFT_ALIGNMENT);
@@ -106,20 +116,20 @@ public class BarrowsItemPanel extends JPanel
 		textPanel.add(repairRow);
 		textPanel.add(Box.createVerticalStrut(3));
 
-		String npcSign = item.npcProfit >= 0 ? "+" : "";
-		String pohSign = item.pohProfit >= 0 ? "+" : "";
-		Color  npcCol  = item.npcProfit >= 0 ? new Color(0x00C27A) : new Color(0xFF5555);
-		Color  pohCol  = item.pohProfit >= 0 ? new Color(0x00C27A) : new Color(0xFF5555);
+		String npcSign = npcProfit >= 0 ? "+" : "";
+		String pohSign = pohProfit >= 0 ? "+" : "";
+		Color  npcCol  = npcProfit >= 0 ? new Color(0x00C27A) : new Color(0xFF5555);
+		Color  pohCol  = pohProfit >= 0 ? new Color(0x00C27A) : new Color(0xFF5555);
 
 		JLabel profHdrLbl = new JLabel("Profit: ");
 		profHdrLbl.setFont(Fonts.SM);
 		profHdrLbl.setForeground(new Color(0x888888));
 
-		JLabel npcProfLbl = new JLabel("NPC " + npcSign + FlipItemPanel.formatGp(item.npcProfit));
+		JLabel npcProfLbl = new JLabel("NPC " + npcSign + FlipItemPanel.formatGp(npcProfit));
 		npcProfLbl.setFont(Fonts.SM);
 		npcProfLbl.setForeground(npcCol);
 
-		JLabel pohProfLbl = new JLabel("  \u00B7  POH " + pohSign + FlipItemPanel.formatGp(item.pohProfit));
+		JLabel pohProfLbl = new JLabel("  \u00B7  POH " + pohSign + FlipItemPanel.formatGp(pohProfit));
 		pohProfLbl.setFont(Fonts.SM);
 		pohProfLbl.setForeground(pohCol);
 
