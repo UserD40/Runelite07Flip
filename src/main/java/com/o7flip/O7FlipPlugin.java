@@ -134,6 +134,7 @@ public class O7FlipPlugin extends Plugin
 	private NavigationButton navButton;
 	private ScheduledExecutorService executor;
 	private ScheduledFuture<?> refreshTask;
+	private ScheduledFuture<?> authRefreshTask;
 	private volatile boolean paused = false;
 
 	// Barrows/Moon/Decanting change with GE prices (hourly), not every minute.
@@ -325,6 +326,11 @@ public class O7FlipPlugin extends Plugin
 
 		executor = Executors.newSingleThreadScheduledExecutor();
 		fetchAuthStatus();
+		// Re-check auth periodically so subscription upgrades take effect without a
+		// client restart, and so transient 5xx at startup self-heal within minutes
+		// rather than blocking premium tabs for the whole session.
+		authRefreshTask = executor.scheduleAtFixedRate(
+			this::fetchAuthStatus, 15, 15, TimeUnit.MINUTES);
 		executor.execute(() -> fetchAll(true)); // forced — panel not yet visible at startup
 		executor.execute(this::doSyncTrackerHistory);
 		refreshTask = executor.scheduleAtFixedRate(
@@ -342,6 +348,10 @@ public class O7FlipPlugin extends Plugin
 		if (refreshTask != null)
 		{
 			refreshTask.cancel(true);
+		}
+		if (authRefreshTask != null)
+		{
+			authRefreshTask.cancel(true);
 		}
 		if (executor != null)
 		{
@@ -594,14 +604,32 @@ public class O7FlipPlugin extends Plugin
 
 	void fetchAuthStatus()
 	{
+		fetchAuthStatusInternal(false);
+	}
+
+	private void fetchAuthStatusInternal(boolean isRetry)
+	{
 		String key = config.apiKey();
 		if (key == null || key.trim().isEmpty())
 		{
 			SwingUtilities.invokeLater(() -> panel.updateAuthStatus(false, false));
 			return;
 		}
-		apiClient.fetchAuthStatus(status ->
-			SwingUtilities.invokeLater(() -> panel.updateAuthStatus(status.authenticated, status.premium)));
+		apiClient.fetchAuthStatus(
+			status -> SwingUtilities.invokeLater(() -> panel.updateAuthStatus(status.authenticated, status.premium)),
+			() ->
+			{
+				// 503 / network failure — server is likely warming up after a deploy
+				// (server returns 503 with a ~60s startup guard). Schedule one quick
+				// retry so a user who happens to launch during a deploy doesn't have
+				// to wait for the next 15-min periodic poll. Don't recurse beyond a
+				// single retry — the periodic poll handles longer outages.
+				if (!isRetry && executor != null && !executor.isShutdown())
+				{
+					executor.schedule(() -> fetchAuthStatusInternal(true), 60, TimeUnit.SECONDS);
+				}
+			}
+		);
 	}
 
 	// -------------------------------------------------------------------------

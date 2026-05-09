@@ -313,40 +313,75 @@ public class O7FlipApiClient
 	// Auth
 	// -------------------------------------------------------------------------
 
-	public void fetchAuthStatus(Consumer<AuthStatus> callback)
+	/**
+	 * @param onSuccess fired exactly once on a successful 200 response with
+	 *                  parsed AuthStatus.
+	 * @param onTransient fired once if the call failed in a way the server
+	 *                    explicitly invites a retry on — currently HTTP 503
+	 *                    (deploy warmup) or network failure. Callers should
+	 *                    schedule a one-shot retry. NOT fired for permanent
+	 *                    errors (401/403/parse errors) — auth state is
+	 *                    deliberately left unchanged for those.
+	 */
+	public void fetchAuthStatus(Consumer<AuthStatus> onSuccess, Runnable onTransient)
 	{
+		String key = sanitizedApiKey();
+		log.debug("[07Flip] /auth call, keyLen={}", key == null ? 0 : key.length());
 		fetch(BASE_URL + "/auth", new Callback()
 		{
 			@Override
 			public void onFailure(Call call, IOException e)
 			{
-				// Network failure — leave existing auth state unchanged rather than resetting to anonymous.
 				log.warn("[07Flip] fetchAuthStatus failed: {}", e.getMessage());
+				if (onTransient != null)
+				{
+					onTransient.run();
+				}
 			}
 
 			@Override
 			public void onResponse(Call call, Response response) throws IOException
 			{
-				if (!response.isSuccessful() || response.body() == null)
-				{
-					// Server error — leave existing auth state unchanged.
-					log.warn("[07Flip] fetchAuthStatus HTTP {}", response.code());
-					return;
-				}
 				try
 				{
+					int code = response.code();
+					if (code == 503)
+					{
+						log.info("[07Flip] /auth returned 503 (server warmup or maintenance) — will retry");
+						if (onTransient != null)
+						{
+							onTransient.run();
+						}
+						return;
+					}
+					if (!response.isSuccessful() || response.body() == null)
+					{
+						// Permanent error (401/403/etc) — leave existing auth state unchanged.
+						log.warn("[07Flip] fetchAuthStatus HTTP {}", code);
+						return;
+					}
 					JsonObject json = gson.fromJson(response.body().string(), JsonObject.class);
 					AuthStatus status = new AuthStatus();
 					status.authenticated = getBool(json, "authenticated", false);
 					status.premium       = getBool(json, "premium",       false);
-					callback.accept(status);
+					onSuccess.accept(status);
 				}
 				catch (Exception e)
 				{
 					log.warn("[07Flip] Auth parse error: {}", e.getMessage());
 				}
+				finally
+				{
+					response.close();
+				}
 			}
 		});
+	}
+
+	/** Convenience overload kept for any callers that don't care about retry signalling. */
+	public void fetchAuthStatus(Consumer<AuthStatus> callback)
+	{
+		fetchAuthStatus(callback, null);
 	}
 
 	// -------------------------------------------------------------------------
