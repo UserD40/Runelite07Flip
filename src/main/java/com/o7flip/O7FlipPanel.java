@@ -148,10 +148,28 @@ public class O7FlipPanel extends PluginPanel
 	};
 
 	// -------------------------------------------------------------------------
-	// Client-side Flips filters
+	// Client-side Flips filters (Flips tab uses Capital + Min profit + F2P toggle)
 	// -------------------------------------------------------------------------
-	private static final long[]   MIN_PROFITS       = {0, 100_000, 500_000, 1_000_000, 5_000_000};
-	private static final String[] MIN_PROFIT_LABELS = {"Any Profit", "100K+", "500K+", "1M+", "5M+"};
+	private static final long[]   MIN_PROFITS       = {0, 100_000, 500_000, 1_000_000};
+	private static final String[] MIN_PROFIT_LABELS = {"Any profit", "100K+", "500K+", "1M+"};
+
+	// "Capital" replaces the old 12-bucket Price filter — frames the choice
+	// as "what can I afford" rather than "what tier is this item". Each
+	// entry is {lowerInclusive, upperExclusive} on the buy-side price.
+	private static final long[][] CAPITAL_RANGES = {
+		{0,            Long.MAX_VALUE}, // Any
+		{0,            100_000},        // Under 100K
+		{100_000,      1_000_000},      // 100K – 1M
+		{1_000_000,    10_000_000},     // 1M – 10M
+		{10_000_000,   Long.MAX_VALUE}, // 10M+
+	};
+	private static final String[] CAPITAL_LABELS = {
+		"Any capital",
+		"Under 100K",
+		"100K – 1M",
+		"1M – 10M",
+		"10M+",
+	};
 
 	// Dumps profit thresholds — flip margin per item, much smaller than flip potential profit
 	private static final long[]   DUMP_MIN_PROFITS       = {0, 1_000, 5_000, 25_000, 100_000};
@@ -188,7 +206,9 @@ public class O7FlipPanel extends PluginPanel
 	};
 
 	private int flipsMinProfitIdx  = 0;
-	private int flipsPriceRangeIdx = 0;
+	private int flipsCapitalIdx    = 0;
+	private boolean flipsF2pOnly   = false;
+	private boolean flipsFilterPanelOpen = false;
 	private int dumpsMinProfitIdx  = 0;
 	private int dumpsPriceRangeIdx = 0;
 
@@ -292,8 +312,14 @@ public class O7FlipPanel extends PluginPanel
 	// -------------------------------------------------------------------------
 	// Other UI
 	// -------------------------------------------------------------------------
-	private final JComboBox<String> presetSelector;
-	private final JComboBox<String> flipsSortSelector;
+	// Filter panel widgets — created lazily inside buildFlipsTab and stashed
+	// here so chip-removals can keep them in sync with the panel state.
+	private JComboBox<String> flipsCapitalCombo;
+	private JComboBox<String> flipsMinProfitCombo;
+	private JButton           flipsF2pToggle;
+	private JButton           flipsFilterButton;
+	private JPanel            flipsFilterPanel;
+	private JPanel            flipsChipBar;
 	private JTextField searchField;
 	private JLabel statusLabel;
 	private JLabel pauseToggle;
@@ -341,41 +367,9 @@ public class O7FlipPanel extends PluginPanel
 		setLayout(new BorderLayout());
 		setBackground(ColorScheme.DARK_GRAY_COLOR);
 
-		String[] labels = new String[PRESETS.length];
-		for (int i = 0; i < PRESETS.length; i++)
-		{
-			labels[i] = PRESETS[i][1];
-		}
-		presetSelector = styledCombo(labels);
-		presetSelector.setRenderer(buildPresetRenderer());
-		presetSelector.addActionListener(e ->
-		{
-			int idx = presetSelector.getSelectedIndex();
-			if (idx >= 0 && idx < PREMIUM_PRESET.length && PREMIUM_PRESET[idx] && !isPremium)
-			{
-				presetSelector.setSelectedIndex(0);
-				return;
-			}
-			if (plugin != null)
-			{
-				plugin.onPresetChanged();
-			}
-		});
-
-		String[] sortLabels = new String[FLIPS_SORTS.length];
-		for (int i = 0; i < FLIPS_SORTS.length; i++)
-		{
-			sortLabels[i] = FLIPS_SORTS[i][1];
-		}
-		flipsSortSelector = styledCombo(sortLabels);
-		flipsSortSelector.addActionListener(e ->
-		{
-			flipsSortIdx = flipsSortSelector.getSelectedIndex();
-			if (plugin != null)
-			{
-				plugin.onFlipsFilterChanged();
-			}
-		});
+		// Flips tab no longer uses preset/sort dropdowns — sort is hardcoded
+		// to flip07Score, presets are gone. The filter panel widgets are
+		// created lazily inside buildFlipsTab(); we just need tabsWrapper.
 
 		tabsWrapper = new JPanel(new BorderLayout());
 		tabsWrapper.setBackground(ColorScheme.DARK_GRAY_COLOR);
@@ -412,7 +406,6 @@ public class O7FlipPanel extends PluginPanel
 		this.isSignedIn  = signedIn;
 		this.isPremium   = premium;
 		this.authChecked = true;
-		presetSelector.repaint();
 		updateAuthBanner();
 		rebuildTabs();
 	}
@@ -684,18 +677,19 @@ public class O7FlipPanel extends PluginPanel
 
 	public String getSelectedPreset()
 	{
-		int i = presetSelector.getSelectedIndex();
-		return i >= 0 ? PRESETS[i][0] : "";
+		// The Flips tab now exposes only an "F2P / All" toggle, no preset
+		// dropdown. F2P uses the server's free 'f2p' preset; otherwise no
+		// preset (defaults to 'all' on the server).
+		return flipsF2pOnly ? "f2p" : "";
 	}
 
 	public String getFlipsSortKey()
 	{
-		int i = flipsSortIdx;
-		if (i < 0 || i >= FLIPS_SORTS.length)
-		{
-			return "flip07Score";
-		}
-		return FLIPS_SORTS[i][0];
+		// Sort is hardcoded to flip07Score now — the panel surfaces the
+		// "Top flips by 07Flip Score" header without a sort dropdown,
+		// so anything else would be a lie. If the server adds a better
+		// score later, just change this constant.
+		return "flip07Score";
 	}
 
 	public String getSpikesSortKey()
@@ -731,12 +725,12 @@ public class O7FlipPanel extends PluginPanel
 
 	public long getFlipsPriceMin()
 	{
-		return flipsPriceRangeIdx > 0 ? PRICE_RANGES[flipsPriceRangeIdx][0] : 0;
+		return flipsCapitalIdx > 0 ? CAPITAL_RANGES[flipsCapitalIdx][0] : 0;
 	}
 
 	public long getFlipsPriceMax()
 	{
-		return flipsPriceRangeIdx > 0 ? PRICE_RANGES[flipsPriceRangeIdx][1] : Long.MAX_VALUE;
+		return flipsCapitalIdx > 0 ? CAPITAL_RANGES[flipsCapitalIdx][1] : Long.MAX_VALUE;
 	}
 
 	public long getDumpsMinProfit()
@@ -1763,10 +1757,9 @@ public class O7FlipPanel extends PluginPanel
 	public void showPremiumRequiredToast(String upgradeUrl)
 	{
 		String url = (upgradeUrl == null || upgradeUrl.isEmpty()) ? "https://07flip.com/premium" : upgradeUrl;
-		if (presetSelector != null && presetSelector.getSelectedIndex() != 0)
-		{
-			presetSelector.setSelectedIndex(0);
-		}
+		// No preset dropdown to reset anymore — the Flips tab no longer
+		// exposes premium presets. Just inform the user and offer to open
+		// the upgrade URL.
 		int choice = javax.swing.JOptionPane.showConfirmDialog(this,
 			"That preset requires a 07Flip premium subscription. Open the upgrade page?",
 			"Premium required",
@@ -1951,51 +1944,36 @@ public class O7FlipPanel extends PluginPanel
 
 	private JPanel buildFlipsTab()
 	{
-		JComboBox<String> minProfitCb = styledCombo(MIN_PROFIT_LABELS);
-		minProfitCb.addActionListener(e ->
-		{
-			flipsMinProfitIdx = minProfitCb.getSelectedIndex();
-			flipsPage = 0;
-			renderFlips(filtered());
-			if (plugin != null)
-			{
-				plugin.onFlipsFilterChanged();
-			}
-		});
+		// \u2500\u2500 Header row: declarative title + Filter button \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+		JLabel headerLabel = new JLabel("Top flips by 07Flip Score");
+		headerLabel.setFont(Fonts.BOLD);
+		headerLabel.setForeground(Color.WHITE);
 
-		JComboBox<String> priceRangeCb = styledCombo(PRICE_RANGE_LABELS);
-		priceRangeCb.addActionListener(e ->
-		{
-			flipsPriceRangeIdx = priceRangeCb.getSelectedIndex();
-			flipsPage = 0;
-			renderFlips(filtered());
-			if (plugin != null)
-			{
-				plugin.onFlipsFilterChanged();
-			}
-		});
+		flipsFilterButton = pillButton("Filter");
+		flipsFilterButton.addActionListener(e -> toggleFlipsFilterPanel());
 
-		// Compact 2x2 grid for the Flips tab top bar:
-		//   [ Sort by: 07Flip Score ] [ All Flips        ]
-		//   [ Any Profit             ] [ Any Price       ]
-		// Sort and preset both drive a fresh fetch on change; min-profit and
-		// price range are client-side filters applied to the rendered page.
-		JPanel sortCell = new JPanel(new BorderLayout(4, 0));
-		sortCell.setBackground(ColorScheme.DARKER_GRAY_COLOR);
-		JLabel sortLabel = new JLabel("Sort by");
-		sortLabel.setFont(Fonts.SM);
-		sortLabel.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
-		sortLabel.setBorder(new EmptyBorder(0, 0, 0, 6));
-		sortCell.add(sortLabel,         BorderLayout.WEST);
-		sortCell.add(flipsSortSelector, BorderLayout.CENTER);
+		JPanel headerRow = new JPanel(new BorderLayout());
+		headerRow.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+		headerRow.setBorder(new EmptyBorder(8, 10, 4, 8));
+		headerRow.add(headerLabel,       BorderLayout.WEST);
+		headerRow.add(flipsFilterButton, BorderLayout.EAST);
 
-		JPanel topBar = new JPanel(new GridLayout(2, 2, 4, 4));
+		// \u2500\u2500 Active filter chips (visible only when any filter is set) \u2500\u2500\u2500\u2500
+		flipsChipBar = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 0));
+		flipsChipBar.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+		flipsChipBar.setBorder(new EmptyBorder(0, 8, 4, 8));
+		flipsChipBar.setVisible(false);
+
+		// \u2500\u2500 Collapsible filter panel \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+		flipsFilterPanel = buildFlipsFilterPanel();
+		flipsFilterPanel.setVisible(false);
+
+		JPanel topBar = new JPanel();
+		topBar.setLayout(new BoxLayout(topBar, BoxLayout.Y_AXIS));
 		topBar.setBackground(ColorScheme.DARKER_GRAY_COLOR);
-		topBar.setBorder(new EmptyBorder(4, 8, 4, 8));
-		topBar.add(sortCell);
-		topBar.add(presetSelector);
-		topBar.add(minProfitCb);
-		topBar.add(priceRangeCb);
+		topBar.add(headerRow);
+		topBar.add(flipsChipBar);
+		topBar.add(flipsFilterPanel);
 
 		flipsListPanel = listPanel();
 		flipsPageLabel = pageLabel();
@@ -2016,7 +1994,150 @@ public class O7FlipPanel extends PluginPanel
 			}
 		});
 
+		// Refresh chips and combo selections to match current state.
+		rebuildFlipsChipBar();
+
 		return assembleTab(topBar, flipsListPanel, buildPageBar(flipsPageLabel, flipsPrev, flipsNext));
+	}
+
+	/** Builds the collapsible "Capital / Account / Min profit" filter panel. */
+	private JPanel buildFlipsFilterPanel()
+	{
+		flipsCapitalCombo = styledCombo(CAPITAL_LABELS);
+		flipsCapitalCombo.setSelectedIndex(flipsCapitalIdx);
+		flipsCapitalCombo.addActionListener(e ->
+		{
+			flipsCapitalIdx = flipsCapitalCombo.getSelectedIndex();
+			flipsPage = 0;
+			rebuildFlipsChipBar();
+			if (plugin != null)
+			{
+				plugin.onFlipsFilterChanged();
+			}
+		});
+
+		flipsMinProfitCombo = styledCombo(MIN_PROFIT_LABELS);
+		flipsMinProfitCombo.setSelectedIndex(flipsMinProfitIdx);
+		flipsMinProfitCombo.addActionListener(e ->
+		{
+			flipsMinProfitIdx = flipsMinProfitCombo.getSelectedIndex();
+			flipsPage = 0;
+			rebuildFlipsChipBar();
+			if (plugin != null)
+			{
+				plugin.onFlipsFilterChanged();
+			}
+		});
+
+		flipsF2pToggle = pillButton(flipsF2pOnly ? "F2P only" : "All accounts");
+		flipsF2pToggle.addActionListener(e ->
+		{
+			flipsF2pOnly = !flipsF2pOnly;
+			flipsF2pToggle.setText(flipsF2pOnly ? "F2P only" : "All accounts");
+			flipsPage = 0;
+			rebuildFlipsChipBar();
+			if (plugin != null)
+			{
+				plugin.onFlipsFilterChanged();
+			}
+		});
+
+		JPanel panel = new JPanel(new GridLayout(0, 2, 6, 6));
+		panel.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+		panel.setBorder(new EmptyBorder(0, 8, 8, 8));
+		panel.add(filterRowLabel("Capital"));
+		panel.add(flipsCapitalCombo);
+		panel.add(filterRowLabel("Min profit"));
+		panel.add(flipsMinProfitCombo);
+		panel.add(filterRowLabel("Account"));
+		panel.add(flipsF2pToggle);
+		return panel;
+	}
+
+	private static JLabel filterRowLabel(String text)
+	{
+		JLabel l = new JLabel(text);
+		l.setFont(Fonts.SM);
+		l.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
+		return l;
+	}
+
+	private void toggleFlipsFilterPanel()
+	{
+		flipsFilterPanelOpen = !flipsFilterPanelOpen;
+		flipsFilterPanel.setVisible(flipsFilterPanelOpen);
+		flipsFilterButton.setText(flipsFilterPanelOpen ? "Filter \u25B4" : "Filter");
+		flipsFilterPanel.revalidate();
+		flipsFilterPanel.repaint();
+	}
+
+	/** Renders one chip per active filter; click the \u00D7 to clear that filter. */
+	private void rebuildFlipsChipBar()
+	{
+		if (flipsChipBar == null)
+		{
+			return;
+		}
+		flipsChipBar.removeAll();
+		if (flipsCapitalIdx > 0)
+		{
+			flipsChipBar.add(buildFilterChip("Capital: " + CAPITAL_LABELS[flipsCapitalIdx], () ->
+			{
+				flipsCapitalIdx = 0;
+				if (flipsCapitalCombo != null)
+				{
+					flipsCapitalCombo.setSelectedIndex(0);
+				}
+			}));
+		}
+		if (flipsMinProfitIdx > 0)
+		{
+			flipsChipBar.add(buildFilterChip("Min: " + MIN_PROFIT_LABELS[flipsMinProfitIdx], () ->
+			{
+				flipsMinProfitIdx = 0;
+				if (flipsMinProfitCombo != null)
+				{
+					flipsMinProfitCombo.setSelectedIndex(0);
+				}
+			}));
+		}
+		if (flipsF2pOnly)
+		{
+			flipsChipBar.add(buildFilterChip("F2P only", () ->
+			{
+				flipsF2pOnly = false;
+				if (flipsF2pToggle != null)
+				{
+					flipsF2pToggle.setText("All accounts");
+				}
+			}));
+		}
+		flipsChipBar.setVisible(flipsChipBar.getComponentCount() > 0);
+		flipsChipBar.revalidate();
+		flipsChipBar.repaint();
+	}
+
+	/** Pill-shaped chip with a small \u00D7 that resets the filter when clicked. */
+	private JButton buildFilterChip(String text, Runnable onClear)
+	{
+		JButton chip = new JButton(text + "  \u00D7");
+		chip.setFont(Fonts.SM);
+		chip.setBackground(new Color(0x2F2F2F));
+		chip.setForeground(Color.WHITE);
+		chip.setBorder(new EmptyBorder(2, 8, 2, 8));
+		chip.setFocusable(false);
+		chip.setToolTipText("Click to clear this filter");
+		chip.addActionListener(ev ->
+		{
+			onClear.run();
+			flipsPage = 0;
+			rebuildFlipsChipBar();
+			if (plugin != null)
+			{
+				plugin.onFlipsFilterChanged();
+			}
+		});
+		return chip;
 	}
 
 	private JPanel buildMoonTab()
@@ -2398,30 +2519,7 @@ public class O7FlipPanel extends PluginPanel
 	// Preset dropdown renderer (premium items greyed + [P] tag)
 	// =========================================================================
 
-	private ListCellRenderer<Object> buildPresetRenderer()
-	{
-		return new BasicComboBoxRenderer()
-		{
-			@Override
-			public Component getListCellRendererComponent(JList<?> list, Object value,
-				int index, boolean isSelected, boolean cellHasFocus)
-			{
-				JLabel lbl = (JLabel) super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus);
-				lbl.setBackground(isSelected ? new Color(0x4A4A4A) : ColorScheme.DARKER_GRAY_COLOR);
-				int i = index >= 0 ? index : presetSelector.getSelectedIndex();
-				if (i >= 0 && i < PREMIUM_PRESET.length && PREMIUM_PRESET[i] && !isPremium)
-				{
-					lbl.setForeground(new Color(0x777777));
-					lbl.setText("<html>" + value + " <font color='#FF981F'><b>[P]</b></font></html>");
-				}
-				else
-				{
-					lbl.setForeground(Color.WHITE);
-				}
-				return lbl;
-			}
-		};
-	}
+	// buildPresetRenderer removed — preset dropdown no longer exists.
 
 	// =========================================================================
 	// Sort bar — pill buttons
