@@ -1652,7 +1652,11 @@ public class O7FlipPanel extends PluginPanel
 
 	private JTabbedPane buildTabs()
 	{
-		JTabbedPane tabs = new JTabbedPane(JTabbedPane.TOP, JTabbedPane.SCROLL_TAB_LAYOUT);
+		// WRAP_TAB_LAYOUT spreads all tabs across multiple rows so every tab
+		// is visible at once — avoids the awkward "> chevron + dropdown"
+		// overflow that SCROLL_TAB_LAYOUT shows in narrow side panels.
+		// 9 tabs at SM font fit comfortably across 2 rows of the side panel.
+		JTabbedPane tabs = new JTabbedPane(JTabbedPane.TOP, JTabbedPane.WRAP_TAB_LAYOUT);
 		tabs.setBackground(ColorScheme.DARK_GRAY_COLOR);
 		tabs.setForeground(Color.WHITE);
 		tabs.setFont(Fonts.SM);
