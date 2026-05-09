@@ -97,7 +97,24 @@ public class FlipItemPanel extends JPanel
 		JLabel buyLabel = new JLabel(buyHtml);
 		buyLabel.setFont(Fonts.SM);
 		buyLabel.setForeground(new Color(0xFF7070));
-		buyLabel.setToolTipText("Buy: instant-buy price (top ask). Rec: 07Flip recommended bid (p10 of last-hour fills).");
+		buyLabel.setToolTipText("Buy: instant-buy price (top ask). Rec: 07Flip recommended bid (p10 of last-hour fills). Right-click to queue this price into the GE.");
+		buyLabel.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+		// Right-click on the Buy line queues a buy at the recommended price
+		// (or the live sell-side price if no rec data) — no menu, direct action.
+		final long buyTarget = (flip.recBuyPrice != null && flip.recBuyPrice > 0)
+			? flip.recBuyPrice : flip.sellPrice;
+		buyLabel.addMouseListener(new MouseAdapter()
+		{
+			@Override
+			public void mousePressed(MouseEvent e)
+			{
+				if (SwingUtilities.isRightMouseButton(e) && plugin != null)
+				{
+					plugin.queueGeBuy(flip.itemId, buyTarget, flip.name);
+					e.consume();
+				}
+			}
+		});
 
 		// ── SELL (green) ──────────────────────────────────────────────────────
 		String sellHtml = "<html><b>Sell:</b>  " + formatGpCompact(flip.sellPrice);
@@ -109,32 +126,60 @@ public class FlipItemPanel extends JPanel
 		JLabel sellLabel = new JLabel(sellHtml);
 		sellLabel.setFont(Fonts.SM);
 		sellLabel.setForeground(GREEN);
-		sellLabel.setToolTipText("Sell: instant-sell price (top bid). Rec: 07Flip recommended ask (p90 of last-hour fills).");
+		sellLabel.setToolTipText("Sell: instant-sell price (top bid). Rec: 07Flip recommended ask (p90 of last-hour fills). Right-click to queue this price into the GE.");
+		sellLabel.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+		final long sellTarget = (flip.recSellPrice != null && flip.recSellPrice > 0)
+			? flip.recSellPrice : flip.buyPrice;
+		sellLabel.addMouseListener(new MouseAdapter()
+		{
+			@Override
+			public void mousePressed(MouseEvent e)
+			{
+				if (SwingUtilities.isRightMouseButton(e) && plugin != null)
+				{
+					plugin.queueGeSell(flip.itemId, sellTarget, flip.name);
+					e.consume();
+				}
+			}
+		});
 
 		// ── PROFIT + ROI ───────────────────────────────────────────────────────
 		String limitText = flip.buyLimit > 0 ? "  \u00B7  L" + flip.buyLimit : "";
-		String affText   = (flip.affordableQty != null && flip.affordableQty > 0)
-			? "  \u00B7  Buy " + flip.affordableQty
-			: "";
-		String recProfitText = "";
+		// Compact single line: "+158.0K · L70". ROI, 07F margin and
+		// affordable qty are surfaced via hover tooltip so the row never
+		// truncates regardless of price magnitude.
+		String profitHtml = "<html><font color='#00C27A'>+" + formatGpCompact(flip.profit) + "</font>"
+			+ limitText + "</html>";
+		JLabel profitLabel = new JLabel(profitHtml);
+		profitLabel.setFont(Fonts.SM);
+		profitLabel.setForeground(GREEN);
+
+		StringBuilder tip = new StringBuilder("<html><b>");
+		tip.append(escapeHtml(flip.name)).append("</b><br>");
+		tip.append("Market margin: <font color='#00C27A'>+").append(formatGp(flip.profit)).append("</font>");
+		tip.append("  (").append(String.format("%.2f", flip.roiPct)).append("% ROI)<br>");
 		if (flip.recProfit != null && flip.recProfit > 0)
 		{
 			double recRoi = (flip.recBuyPrice != null && flip.recBuyPrice > 0)
 				? 100.0 * flip.recProfit / flip.recBuyPrice
 				: 0.0;
-			recProfitText = "  ·  <font color='#FF981F'>07F +" + formatGpCompact(flip.recProfit)
-				+ "</font>  <font color='#888888'>(" + String.format("%.1f", recRoi) + "%)</font>";
+			tip.append("07Flip margin: <font color='#FF981F'>+").append(formatGp(flip.recProfit)).append("</font>");
+			tip.append("  (").append(String.format("%.2f", recRoi)).append("%)<br>");
 		}
-		String profitHtml = "<html><font color='#00C27A'>+" + formatGpCompact(flip.profit) + "</font>"
-			+ "  (" + String.format("%.1f", flip.roiPct) + "% ROI)"
-			+ recProfitText + limitText + affText + "</html>";
-		JLabel profitLabel = new JLabel(profitHtml);
-		profitLabel.setFont(Fonts.SM);
-		profitLabel.setForeground(GREEN);
-		if (flip.affordableQty != null || flip.recProfit != null)
+		if (flip.buyLimit > 0)
 		{
-			profitLabel.setToolTipText("Market profit, then 07Flip margin (after-tax at rec_buy/rec_sell). 'L' = GE buy limit; 'Buy N' = affordable qty.");
+			tip.append("GE buy limit: ").append(flip.buyLimit).append("<br>");
 		}
+		if (flip.affordableQty != null && flip.affordableQty > 0)
+		{
+			tip.append("Affordable: ").append(flip.affordableQty).append("<br>");
+		}
+		if (flip.flip07Score != null)
+		{
+			tip.append("07Flip Score: ").append(flip.flip07Score).append("/100<br>");
+		}
+		tip.append("</html>");
+		profitLabel.setToolTipText(tip.toString());
 
 		JPanel textPanel = new JPanel(new GridLayout(4, 1, 0, 2));
 		textPanel.setBackground(bg);
@@ -178,8 +223,7 @@ public class FlipItemPanel extends JPanel
 					// available \u2014 they target the patient-flipper p10/p90 entry
 					// points. Fall back to the instant-fill market prices when
 					// the server hasn't computed recommendations for this item.
-					long buyTarget  = (flip.recBuyPrice  != null && flip.recBuyPrice  > 0) ? flip.recBuyPrice  : flip.sellPrice;
-					long sellTarget = (flip.recSellPrice != null && flip.recSellPrice > 0) ? flip.recSellPrice : flip.buyPrice;
+					// buyTarget / sellTarget are computed once at constructor scope above.
 					JMenuItem buyItem = new JMenuItem("Buy on GE \u2014 " + formatGp(buyTarget));
 					buyItem.addActionListener(ae -> plugin.queueGeBuy(flip.itemId, buyTarget, flip.name));
 					menu.add(buyItem);
