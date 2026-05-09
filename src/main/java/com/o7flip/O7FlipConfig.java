@@ -153,14 +153,15 @@ public interface O7FlipConfig extends Config
 
 	@ConfigItem(
 		keyName = "showSpikes",
-		name = "Show Spikes tab",
-		description = "Show the Spikes tab in the panel.",
+		name = "",
+		description = "",
 		section = tabsSection,
-		position = 2
+		position = 2,
+		hidden = true
 	)
 	default boolean showSpikes()
 	{
-		return true;
+		return false;
 	}
 
 	@ConfigItem(
@@ -189,8 +190,8 @@ public interface O7FlipConfig extends Config
 
 	@ConfigItem(
 		keyName = "showMoon",
-		name = "Show Moon tab",
-		description = "Show the Moon armour tab in the panel. Requires an 07flip.com API key.",
+		name = "Show Moons tab",
+		description = "Show the Moons armour tab in the panel. Requires an 07flip.com API key.",
 		section = tabsSection,
 		position = 5
 	)

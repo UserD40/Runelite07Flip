@@ -121,7 +121,6 @@ public class O7FlipPanel extends PluginPanel
 		{"",                 "All Flips"},
 		{"starterFlips",     "Starter"},
 		{"highMargin",       "High Margin"},
-		{"spikes",           "Spikes"},
 		{"f2p",              "F2P Only"},
 		// Premium
 		{"priceDip",         "Price Dip"},
@@ -133,7 +132,7 @@ public class O7FlipPanel extends PluginPanel
 		{"lowVolatility",    "Low Volatility"},
 	};
 	private static final boolean[] PREMIUM_PRESET = {
-		false, false, false, false, false,         // free
+		false, false, false, false,                // free
 		true,  true,  true,  true,  true,  true,  true,  // premium
 	};
 
@@ -1597,10 +1596,9 @@ public class O7FlipPanel extends PluginPanel
 		{
 			case "Flips":     return config.showFlips();
 			case "Dumps":     return config.showDumps();
-			case "Spikes":    return config.showSpikes();
 			case "Dips":      return config.showDips();
 			case "Alerts":    return config.showAlerts() && isPremium;
-			case "Moon":      return config.showMoon()    && isSignedIn;
+			case "Moons":     return config.showMoon()    && isSignedIn;
 			case "Barrows":   return config.showBarrows() && isSignedIn;
 			case "Decant":    return config.showDecant();
 			case "My Trades": return config.showMyFlips();
@@ -1612,7 +1610,10 @@ public class O7FlipPanel extends PluginPanel
 	 *  this plugin shipped with before the reorder feature was added.
 	 *  Used by {@link com.o7flip.ui.TabOrderDialog} as the "reset" value. */
 	public static final List<String> DEFAULT_TAB_ORDER = java.util.Arrays.asList(
-		"Flips", "Dumps", "Spikes", "Dips", "Alerts", "Moon", "Barrows", "Decant", "My Trades"
+		// Row 1 (4 tabs)
+		"Flips", "My Trades", "Alerts", "Dumps",
+		// Row 2 (4 tabs)
+		"Moons", "Barrows", "Decant", "Dips"
 	);
 
 	/**
@@ -1679,13 +1680,15 @@ public class O7FlipPanel extends PluginPanel
 		java.util.Map<String, JPanel> contentByName = new java.util.HashMap<>();
 		contentByName.put("Flips",     flipsContent);
 		contentByName.put("Dumps",     dumpsContent);
-		contentByName.put("Spikes",    spikesContent);
 		contentByName.put("Dips",      dipsContent);
 		contentByName.put("Alerts",    alertsContent);
-		contentByName.put("Moon",      moonContent);
+		contentByName.put("Moons",     moonContent);
 		contentByName.put("Barrows",   barrowsContent);
 		contentByName.put("Decant",    decantContent);
 		contentByName.put("My Trades", myFlipsContent);
+		// Spikes intentionally not registered: feature retired from the panel
+		// per design feedback. The buildSpikesTab() call above still runs to
+		// initialise listPanel state used by sortFlips/filtered fallbacks.
 
 		for (String name : resolveTabOrder())
 		{
