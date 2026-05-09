@@ -314,11 +314,23 @@ public final class ProfitCalculator
 			long totalGpSold = 0L;
 			int wins = 0, losses = 0, evens = 0;
 			double roiSum = 0.0;
-			int roiCount = 0;
+			int matchedCount = 0;
 			CompletedFlip best = null;
 			CompletedFlip worst = null;
 			for (CompletedFlip f : flips)
 			{
+				// Phantom flips (sells with no matching buy in tracked history)
+				// are excluded from every aggregate stat. Including their gross
+				// proceeds inflates totalProfit dramatically when the underlying
+				// buy was made before the plugin started recording, which is
+				// exactly when phantom flips occur. The flip itself still
+				// appears in the completedFlips list so it shows in trade
+				// history; it just doesn't pollute the summary numbers.
+				if (f.buyTotal <= 0)
+				{
+					continue;
+				}
+				matchedCount++;
 				totalProfit += f.profit;
 				totalGpSold += f.sellTotal;
 				if (f.profit > 0)
@@ -333,11 +345,7 @@ public final class ProfitCalculator
 				{
 					evens++;
 				}
-				if (f.buyTotal > 0)
-				{
-					roiSum += f.roiPct;
-					roiCount++;
-				}
+				roiSum += f.roiPct;
 				if (best == null || f.profit > best.profit)
 				{
 					best = f;
@@ -347,10 +355,13 @@ public final class ProfitCalculator
 					worst = f;
 				}
 			}
-			int n = flips.size();
-			double winRate = 100.0 * wins / n;
-			double avgRoi = roiCount > 0 ? roiSum / roiCount : 0.0;
-			return new Stats(totalProfit, totalGpSold, n, wins, losses, evens, winRate, avgRoi, best, worst);
+			if (matchedCount == 0)
+			{
+				return EMPTY;
+			}
+			double winRate = 100.0 * wins / matchedCount;
+			double avgRoi = roiSum / matchedCount;
+			return new Stats(totalProfit, totalGpSold, matchedCount, wins, losses, evens, winRate, avgRoi, best, worst);
 		}
 	}
 

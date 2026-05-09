@@ -224,16 +224,26 @@ public class ProfitCalculatorTest
 	}
 
 	@Test
-	public void avgRoi_excludesPhantomFlips()
+	public void stats_excludePhantomFlips()
 	{
-		// One real flip @ +20% ROI, one phantom (no buy basis) — avgRoi should be 20% not 10%.
+		// One real flip @ +20% ROI plus one phantom (sell without matched buy
+		// in tracked history). Phantoms must be excluded from every stat —
+		// counting them would make totalProfit, win-rate, best/worst, and the
+		// flip count all misleading whenever the user has trades older than
+		// the plugin's history (e.g. items bought before installing).
 		ProfitCalculator.Result r = ProfitCalculator.compute(Arrays.asList(
 			trade(1, "A", true,  10, 10_000L, 1000L),
 			trade(1, "A", false, 10, 12_000L, 1100L), // +2000, +20% ROI
-			trade(2, "B", false, 10, 50_000L, 2000L)  // phantom, buyTotal=0, ROI undefined → excluded
+			trade(2, "B", false, 10, 50_000L, 2000L)  // phantom, buyTotal=0
 		));
-		assertEquals(2, r.stats.completedFlipCount);
+		// Phantom still appears in the raw flip list (so it can render in
+		// the trade history view) but does NOT contribute to summary stats.
+		assertEquals(2, r.completedFlips.size());
+		assertEquals(1, r.stats.completedFlipCount);
+		assertEquals(2_000L, r.stats.totalProfit);
+		assertEquals(1, r.stats.winCount);
 		assertEquals(20.0, r.stats.avgRoiPct, 0.01);
+		assertEquals(1, r.stats.bestFlip.itemId);
 	}
 
 	@Test
