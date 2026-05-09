@@ -609,27 +609,57 @@ public class O7FlipPlugin extends Plugin
 		{
 			return;
 		}
+		String key = event.getKey();
+
 		// Re-check auth only when the API key itself changes.
-		if ("apiKey".equals(event.getKey()))
+		if ("apiKey".equals(key))
 		{
 			executor.execute(this::fetchAuthStatus);
+			return;
 		}
-		// Re-fetch repair costs immediately when smithing level changes —
-		// but no need to rebuild tabs for that setting.
-		if ("smithingLevel".equals(event.getKey()))
+		// Re-fetch repair costs when smithing level changes.
+		if ("smithingLevel".equals(key))
 		{
 			executor.execute(this::fetchSlow);
 			return;
 		}
-		// Open the tab reorder dialog when the user ticks the helper box.
-		// Auto-clear it back to false so re-ticking re-opens the dialog.
-		if ("openTabReorderDialog".equals(event.getKey()) && Boolean.parseBoolean(event.getNewValue()))
+		// One-shot trigger for the tab reorder dialog.
+		if ("openTabReorderDialog".equals(key) && Boolean.parseBoolean(event.getNewValue()))
 		{
 			configManager.setConfiguration("o7flip", "openTabReorderDialog", false);
 			SwingUtilities.invokeLater(this::openTabReorderDialog);
 			return;
 		}
-		SwingUtilities.invokeLater(() -> panel.rebuildTabs());
+		// Only rebuild the entire tab structure when a key that actually
+		// affects which tabs are shown (or in what order) changes. The
+		// previous catchall rebuilt on every o7flip config write — including
+		// the very chatty tradeHistory, lastTrackerSync, and blocklistItemIds
+		// keys — which clobbered any in-progress UI state (filters, scroll
+		// position, dialog popups) every time a trade synced or got recorded.
+		if (isTabStructureKey(key))
+		{
+			SwingUtilities.invokeLater(() -> panel.rebuildTabs());
+		}
+	}
+
+	private static boolean isTabStructureKey(String key)
+	{
+		switch (key)
+		{
+			case "showFlips":
+			case "showDumps":
+			case "showSpikes":
+			case "showDips":
+			case "showAlerts":
+			case "showMoon":
+			case "showBarrows":
+			case "showDecant":
+			case "showMyFlips":
+			case "tabOrder":
+				return true;
+			default:
+				return false;
+		}
 	}
 
 	/** Opens the reorder dialog. Called by the panel header's reorder button. */
