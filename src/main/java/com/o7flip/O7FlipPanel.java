@@ -1944,11 +1944,6 @@ public class O7FlipPanel extends PluginPanel
 
 	private JPanel buildFlipsTab()
 	{
-		JPanel presetRow = new JPanel(new BorderLayout(4, 0));
-		presetRow.setBackground(ColorScheme.DARKER_GRAY_COLOR);
-		presetRow.setBorder(new EmptyBorder(4, 8, 0, 8));
-		presetRow.add(presetSelector, BorderLayout.CENTER);
-
 		JComboBox<String> minProfitCb = styledCombo(MIN_PROFIT_LABELS);
 		minProfitCb.addActionListener(e ->
 		{
@@ -1973,30 +1968,27 @@ public class O7FlipPanel extends PluginPanel
 			}
 		});
 
-		JPanel filterRow = new JPanel(new GridLayout(1, 2, 4, 0));
-		filterRow.setBackground(ColorScheme.DARKER_GRAY_COLOR);
-		filterRow.setBorder(new EmptyBorder(4, 8, 0, 8));
-		filterRow.add(minProfitCb);
-		filterRow.add(priceRangeCb);
-
-		// Sort dropdown — server-side sort via ?sort= param. Default (index 0)
-		// is flip07Score. Dropdown change triggers a fresh fetch through
-		// onFlipsFilterChanged(), which resets pagination too.
-		JPanel sortRow = new JPanel(new BorderLayout(4, 0));
-		sortRow.setBackground(ColorScheme.DARKER_GRAY_COLOR);
-		sortRow.setBorder(new EmptyBorder(4, 8, 4, 8));
+		// Compact 2x2 grid for the Flips tab top bar:
+		//   [ Sort by: 07Flip Score ] [ All Flips        ]
+		//   [ Any Profit             ] [ Any Price       ]
+		// Sort and preset both drive a fresh fetch on change; min-profit and
+		// price range are client-side filters applied to the rendered page.
+		JPanel sortCell = new JPanel(new BorderLayout(4, 0));
+		sortCell.setBackground(ColorScheme.DARKER_GRAY_COLOR);
 		JLabel sortLabel = new JLabel("Sort by");
 		sortLabel.setFont(Fonts.SM);
 		sortLabel.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
 		sortLabel.setBorder(new EmptyBorder(0, 0, 0, 6));
-		sortRow.add(sortLabel,         BorderLayout.WEST);
-		sortRow.add(flipsSortSelector, BorderLayout.CENTER);
+		sortCell.add(sortLabel,         BorderLayout.WEST);
+		sortCell.add(flipsSortSelector, BorderLayout.CENTER);
 
-		JPanel topBar = new JPanel(new BorderLayout());
+		JPanel topBar = new JPanel(new GridLayout(2, 2, 4, 4));
 		topBar.setBackground(ColorScheme.DARKER_GRAY_COLOR);
-		topBar.add(presetRow,  BorderLayout.NORTH);
-		topBar.add(filterRow,  BorderLayout.CENTER);
-		topBar.add(sortRow,    BorderLayout.SOUTH);
+		topBar.setBorder(new EmptyBorder(4, 8, 4, 8));
+		topBar.add(sortCell);
+		topBar.add(presetSelector);
+		topBar.add(minProfitCb);
+		topBar.add(priceRangeCb);
 
 		flipsListPanel = listPanel();
 		flipsPageLabel = pageLabel();
