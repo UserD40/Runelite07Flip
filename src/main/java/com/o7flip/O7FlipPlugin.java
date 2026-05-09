@@ -140,8 +140,12 @@ public class O7FlipPlugin extends Plugin
 
 	// Barrows/Moon/Decanting change with GE prices (hourly), not every minute.
 	// Only refresh them every SLOW_EVERY cycles to reduce server load.
+	// Initial value SLOW_EVERY (not 0) so the first refresh after startup
+	// already pulls Moons / Barrows / Decant — otherwise the user opens the
+	// panel and stares at empty premium tabs for ~6 minutes (5 × 90s) until
+	// the slow tick rolls over for the first time.
 	private static final int SLOW_EVERY = 5;
-	private int slowTick = 0;
+	private int slowTick = SLOW_EVERY;
 
 	// -------------------------------------------------------------------------
 	// Pending GE pre-fill state (set by panel right-click, cleared after use)
