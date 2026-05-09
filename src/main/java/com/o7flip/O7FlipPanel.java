@@ -1418,9 +1418,32 @@ public class O7FlipPanel extends PluginPanel
 			}
 		});
 
+		// "Reorder tabs" icon \u2014 always visible in the panel header so the
+		// feature is discoverable. Click opens the same dialog used to be
+		// behind a config-screen checkbox; the user's saved order persists
+		// in the hidden tabOrder config.
+		JLabel reorderToggle = new JLabel("\u21C5");
+		reorderToggle.setFont(new Font("Dialog", Font.PLAIN, 14));
+		reorderToggle.setForeground(new Color(0x888888));
+		reorderToggle.setToolTipText("Reorder tabs");
+		reorderToggle.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+		reorderToggle.setBorder(new EmptyBorder(0, 0, 0, 0));
+		reorderToggle.addMouseListener(new java.awt.event.MouseAdapter()
+		{
+			@Override
+			public void mouseClicked(java.awt.event.MouseEvent e)
+			{
+				if (plugin != null)
+				{
+					plugin.openTabReorderDialog();
+				}
+			}
+		});
+
 		JPanel rightCluster = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.RIGHT, 8, 0));
 		rightCluster.setBackground(ColorScheme.DARKER_GRAY_COLOR);
 		rightCluster.add(statusLabel);
+		rightCluster.add(reorderToggle);
 		rightCluster.add(pauseToggle);
 
 		header.add(title,        BorderLayout.WEST);
