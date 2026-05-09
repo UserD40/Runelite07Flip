@@ -33,8 +33,6 @@ import javax.inject.Singleton;
 import net.runelite.api.Client;
 import net.runelite.api.Point;
 import net.runelite.api.widgets.WidgetItem;
-import net.runelite.client.ui.overlay.OverlayLayer;
-import net.runelite.client.ui.overlay.OverlayPosition;
 import net.runelite.client.ui.overlay.WidgetItemOverlay;
 import net.runelite.client.ui.overlay.tooltip.Tooltip;
 import net.runelite.client.ui.overlay.tooltip.TooltipManager;
@@ -61,8 +59,10 @@ public class InventoryTooltipOverlay extends WidgetItemOverlay
 		this.client = client;
 		this.plugin = plugin;
 		this.tooltipManager = tooltipManager;
-		setPosition(OverlayPosition.DYNAMIC);
-		setLayer(OverlayLayer.ABOVE_WIDGETS);
+		// WidgetItemOverlay manages its own position and layer internally —
+		// calling setPosition()/setLayer() throws IllegalStateException, which
+		// blocks Guice from instantiating this class and prevents the whole
+		// plugin from loading. Just register the inventory hook.
 		showOnInventory();
 	}
 

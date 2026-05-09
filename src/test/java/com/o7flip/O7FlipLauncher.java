@@ -31,12 +31,7 @@ public class O7FlipLauncher
 {
 	public static void main(String[] args) throws Exception
 	{
-		// Load the dev wrapper rather than O7FlipPlugin directly so the dev
-		// test client can coexist with a Plugin-Hub-installed copy of the
-		// production plugin. The wrapper has identical behaviour but a
-		// different @PluginDescriptor name ("07Flip [DEV]"), so both show
-		// up as separate icons in the sidebar.
-		ExternalPluginManager.loadBuiltin(O7FlipDevPlugin.class);
+		ExternalPluginManager.loadBuiltin(O7FlipPlugin.class);
 		RuneLite.main(args);
 	}
 }
