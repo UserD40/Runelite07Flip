@@ -595,6 +595,14 @@ public class O7FlipPlugin extends Plugin
 			executor.execute(this::fetchSlow);
 			return;
 		}
+		// Open the tab reorder dialog when the user ticks the helper box.
+		// Auto-clear it back to false so re-ticking re-opens the dialog.
+		if ("openTabReorderDialog".equals(event.getKey()) && Boolean.parseBoolean(event.getNewValue()))
+		{
+			configManager.setConfiguration("o7flip", "openTabReorderDialog", false);
+			SwingUtilities.invokeLater(this::openTabReorderDialog);
+			return;
+		}
 		SwingUtilities.invokeLater(() -> panel.rebuildTabs());
 	}
 

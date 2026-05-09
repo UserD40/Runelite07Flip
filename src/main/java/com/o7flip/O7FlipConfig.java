@@ -63,6 +63,13 @@ public interface O7FlipConfig extends Config
 	)
 	String trackerSection = "tracker";
 
+	@ConfigSection(
+		name = "Tab order",
+		description = "Customise the left-to-right order of the panel tabs.",
+		position = 4
+	)
+	String tabOrderSection = "tabOrder";
+
 	// ── General ─────────────────────────────────────────────────────────────
 
 	@ConfigItem(
@@ -214,12 +221,28 @@ public interface O7FlipConfig extends Config
 		return true;
 	}
 
+	// ── Tab order ──────────────────────────────────────────────────────────
+
+	@ConfigItem(
+		keyName = "openTabReorderDialog",
+		name = "Open reorder dialog",
+		description = "<html>Tick this box to open the tab reorder dialog. Pick a tab in the popup,<br>"
+			+ "use the ▲ / ▼ buttons to move it, then Save. The tick auto-clears once<br>"
+			+ "the dialog is open, so you can re-tick it any time to re-open.</html>",
+		section = tabOrderSection,
+		position = 0
+	)
+	default boolean openTabReorderDialog()
+	{
+		return false;
+	}
+
 	@ConfigItem(
 		keyName = "tabOrder",
 		name = "",
 		description = "",
-		section = tabsSection,
-		position = 9,
+		section = tabOrderSection,
+		position = 1,
 		hidden = true
 	)
 	default String tabOrder()
