@@ -38,6 +38,7 @@ import com.o7flip.model.DumpItem;
 import com.o7flip.model.FlipItem;
 import com.o7flip.model.MoonItem;
 import com.o7flip.model.MoonSet;
+import com.o7flip.model.RecommendedPrices;
 import com.o7flip.model.SearchResultItem;
 import com.o7flip.model.SpikeItem;
 import com.o7flip.model.TradeRecord;
@@ -393,14 +394,37 @@ public class O7FlipApiClient
 	// serverTotal defaults to items.size() when the server does not return "total"
 	// -------------------------------------------------------------------------
 
+	/** Backwards-compatible overload — defaults sort to flip07Score (server default). */
 	public void fetchFlips(String preset, long minProfit, long priceMin, long priceMax,
 	                       int page, BiConsumer<List<FlipItem>, Integer> callback)
+	{
+		fetchFlips(preset, "flip07Score", minProfit, priceMin, priceMax, 0L, page, callback, null);
+	}
+
+	/**
+	 * Full request including sort, optional cashStack annotation, and a
+	 * separate callback for premium-gated rejections (HTTP 403). When the
+	 * server returns 403 with {@code error: premium_required}, the empty
+	 * list is delivered to {@code callback} and {@code onPremiumRequired}
+	 * is also invoked with the {@code upgrade_url} so the UI can surface
+	 * an "upgrade to unlock" prompt instead of just showing a blank list.
+	 *
+	 * @param sort  one of "flip07Score" | "potentialProfit" | "profit" | "roi" | "recProfit"
+	 */
+	public void fetchFlips(String preset, String sort, long minProfit, long priceMin, long priceMax,
+	                       long cashStack, int page,
+	                       BiConsumer<List<FlipItem>, Integer> callback,
+	                       Consumer<String> onPremiumRequired)
 	{
 		StringBuilder url = new StringBuilder(BASE_URL + "/flips?limit=").append(PAGE_LIMIT)
 			.append("&page=").append(page);
 		if (preset != null && !preset.isEmpty())
 		{
 			url.append("&preset=").append(preset);
+		}
+		if (sort != null && !sort.isEmpty())
+		{
+			url.append("&sort=").append(sort);
 		}
 		if (minProfit > 0)
 		{
@@ -414,6 +438,10 @@ public class O7FlipApiClient
 		{
 			url.append("&priceMax=").append(priceMax);
 		}
+		if (cashStack > 0)
+		{
+			url.append("&cashStack=").append(cashStack).append("&annotate=affordableQty");
+		}
 		fetch(url.toString(), new Callback()
 		{
 			@Override
@@ -426,9 +454,44 @@ public class O7FlipApiClient
 			@Override
 			public void onResponse(Call call, Response response) throws IOException
 			{
+				if (response.code() == 403)
+				{
+					handlePremiumRejection(response, onPremiumRequired);
+					callback.accept(new ArrayList<>(), 0);
+					return;
+				}
 				parsePagedResponse(response, "flips", O7FlipApiClient.this::parseFlipItem, callback);
 			}
 		});
+	}
+
+	private void handlePremiumRejection(Response response, Consumer<String> onPremiumRequired)
+	{
+		String upgradeUrl = "https://07flip.com/premium";
+		try
+		{
+			if (response.body() != null)
+			{
+				JsonObject json = gson.fromJson(response.body().string(), JsonObject.class);
+				String parsed = getString(json, "upgrade_url", "");
+				if (!parsed.isEmpty())
+				{
+					upgradeUrl = parsed;
+				}
+			}
+		}
+		catch (Exception ignored)
+		{
+		}
+		finally
+		{
+			response.close();
+		}
+		log.info("[07Flip] Premium preset rejected (403). Upgrade URL: {}", upgradeUrl);
+		if (onPremiumRequired != null)
+		{
+			onPremiumRequired.accept(upgradeUrl);
+		}
 	}
 
 	public void fetchSpikes(String sort, int page, BiConsumer<List<SpikeItem>, Integer> callback)
@@ -795,6 +858,76 @@ public class O7FlipApiClient
 	// Per-type parsers (shared by individual fetch methods and fetchBundle)
 	// -------------------------------------------------------------------------
 
+	/**
+	 * Fetch the per-item p10/p90 recommended buy/sell prices from
+	 * {@code GET /api/runelite/recommended-prices?itemId=…}. Used by the GE
+	 * overlay to populate the auto-fill price suggestion.
+	 *
+	 * Callback receives {@code null} when the item has insufficient recent
+	 * trade data, or on any error (network / HTTP non-200). The plugin
+	 * should treat null as "no recommendation available" and fall back to
+	 * whatever it already shows.
+	 */
+	public void fetchRecommendedPrices(int itemId, Consumer<RecommendedPrices> callback)
+	{
+		if (itemId <= 0)
+		{
+			callback.accept(null);
+			return;
+		}
+		fetch(BASE_URL + "/recommended-prices?itemId=" + itemId, new Callback()
+		{
+			@Override
+			public void onFailure(Call call, IOException e)
+			{
+				log.warn("[07Flip] fetchRecommendedPrices failed: {}", e.getMessage());
+				callback.accept(null);
+			}
+
+			@Override
+			public void onResponse(Call call, Response response) throws IOException
+			{
+				try
+				{
+					if (response.code() == 429)
+					{
+						markRateLimited();
+					}
+					if (!response.isSuccessful() || response.body() == null)
+					{
+						log.warn("[07Flip] fetchRecommendedPrices HTTP {}", response.code());
+						callback.accept(null);
+						return;
+					}
+					JsonObject json = gson.fromJson(response.body().string(), JsonObject.class);
+					RecommendedPrices rp = parseRecommendedPrices(json);
+					callback.accept(rp);
+				}
+				catch (Exception e)
+				{
+					log.warn("[07Flip] Recommended prices parse error: {}", e.getMessage());
+					callback.accept(null);
+				}
+				finally
+				{
+					response.close();
+				}
+			}
+		});
+	}
+
+	private RecommendedPrices parseRecommendedPrices(JsonObject obj)
+	{
+		RecommendedPrices rp = new RecommendedPrices();
+		rp.itemId       = getInt(obj, "item_id", 0);
+		rp.recBuyPrice  = getLongOrNull(obj, "rec_buy_price");
+		rp.recSellPrice = getLongOrNull(obj, "rec_sell_price");
+		rp.geTax        = getLongOrNull(obj, "ge_tax");
+		rp.recProfit    = getLongOrNull(obj, "rec_profit");
+		rp.sampleSize   = getIntOrNull(obj, "sample_size");
+		return rp;
+	}
+
 	private FlipItem parseFlipItem(JsonObject obj)
 	{
 		FlipItem item = new FlipItem();
@@ -807,6 +940,11 @@ public class O7FlipApiClient
 		item.potentialProfit = getLong(obj, "potential_profit", 0);
 		item.buyLimit        = getInt(obj, "buy_limit", 0);
 		item.members         = getBool(obj, "members", true);
+		item.affordableQty   = getIntOrNull(obj, "affordable_qty");
+		item.flip07Score     = getIntOrNull(obj, "flip07_score");
+		item.recBuyPrice     = getLongOrNull(obj, "rec_buy_price");
+		item.recSellPrice    = getLongOrNull(obj, "rec_sell_price");
+		item.recProfit       = getLongOrNull(obj, "rec_profit");
 		return item;
 	}
 

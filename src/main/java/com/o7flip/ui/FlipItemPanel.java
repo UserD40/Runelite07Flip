@@ -66,10 +66,26 @@ public class FlipItemPanel extends JPanel
 		// ── ICON ──────────────────────────────────────────────────────────────
 		JLabel iconLabel = buildIcon(flip.itemId, itemManager);
 
-		// ── NAME ──────────────────────────────────────────────────────────────
-		JLabel nameLabel = new JLabel(flip.name);
+		// ── NAME (with 07Flip Score chip when available) ─────────────────────
+		String nameHtml;
+		if (flip.flip07Score != null)
+		{
+			int s = flip.flip07Score;
+			String scoreColor = s >= 70 ? "#00C27A" : (s >= 40 ? "#E8A838" : "#E85050");
+			nameHtml = "<html>" + escapeHtml(flip.name)
+				+ " <font color='" + scoreColor + "'>" + s + "</font></html>";
+		}
+		else
+		{
+			nameHtml = flip.name;
+		}
+		JLabel nameLabel = new JLabel(nameHtml);
 		nameLabel.setFont(Fonts.BOLD);
 		nameLabel.setForeground(Color.WHITE);
+		if (flip.flip07Score != null)
+		{
+			nameLabel.setToolTipText("07Flip Score (0–100): composite of price stability, after-tax margin and hourly volume.");
+		}
 
 		// ── BUY (red) ─────────────────────────────────────────────────────────
 		JLabel buyLabel = new JLabel("Buy:  " + formatGp(flip.buyPrice));
@@ -165,6 +181,15 @@ public class FlipItemPanel extends JPanel
 	public static String formatGp(long amount)
 	{
 		return String.format("%,d", amount);
+	}
+
+	private static String escapeHtml(String s)
+	{
+		if (s == null)
+		{
+			return "";
+		}
+		return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
 	}
 
 	static void openUrl(String url)

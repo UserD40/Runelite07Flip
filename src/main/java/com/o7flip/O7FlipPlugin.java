@@ -684,6 +684,11 @@ public class O7FlipPlugin extends Plugin
 			{
 				p.addProperty("preset", preset);
 			}
+			String sort = panel.getFlipsSortKey();
+			if (sort != null && !sort.isEmpty())
+			{
+				p.addProperty("sort", sort);
+			}
 			long minProfit = panel.getFlipsMinProfit();
 			if (minProfit > 0)
 			{
@@ -1395,16 +1400,25 @@ public class O7FlipPlugin extends Plugin
 
 	void onFlipsPageChanged(int page)
 	{
-		executor.execute(() ->
-			apiClient.fetchFlips(panel.getSelectedPreset(),
-				panel.getFlipsMinProfit(), panel.getFlipsPriceMin(), panel.getFlipsPriceMax(),
-				page,
-				(items, total) ->
-				{
-					lastFlips = items;
-					rebuildTrackedItems();
-					SwingUtilities.invokeLater(() -> panel.updateFlips(items, total, page));
-				}));
+		executor.execute(() -> fetchFlipsAtPage(page));
+	}
+
+	private void fetchFlipsAtPage(int page)
+	{
+		apiClient.fetchFlips(
+			panel.getSelectedPreset(),
+			panel.getFlipsSortKey(),
+			panel.getFlipsMinProfit(), panel.getFlipsPriceMin(), panel.getFlipsPriceMax(),
+			0L,
+			page,
+			(items, total) ->
+			{
+				lastFlips = items;
+				rebuildTrackedItems();
+				SwingUtilities.invokeLater(() -> panel.updateFlips(items, total, page));
+			},
+			upgradeUrl -> SwingUtilities.invokeLater(() -> panel.showPremiumRequiredToast(upgradeUrl))
+		);
 	}
 
 	void onSpikesPageChanged(int page)
@@ -1501,16 +1515,7 @@ public class O7FlipPlugin extends Plugin
 
 	void onFlipsFilterChanged()
 	{
-		executor.execute(() ->
-			apiClient.fetchFlips(panel.getSelectedPreset(),
-				panel.getFlipsMinProfit(), panel.getFlipsPriceMin(), panel.getFlipsPriceMax(),
-				0,
-				(items, total) ->
-				{
-					lastFlips = items;
-					rebuildTrackedItems();
-					SwingUtilities.invokeLater(() -> panel.updateFlips(items, total, 0));
-				}));
+		executor.execute(() -> fetchFlipsAtPage(0));
 	}
 
 	void onDumpsFilterChanged()
@@ -1529,16 +1534,7 @@ public class O7FlipPlugin extends Plugin
 
 	void onPresetChanged()
 	{
-		executor.execute(() ->
-			apiClient.fetchFlips(panel.getSelectedPreset(),
-				panel.getFlipsMinProfit(), panel.getFlipsPriceMin(), panel.getFlipsPriceMax(),
-				0,
-				(items, total) ->
-				{
-					lastFlips = items;
-					rebuildTrackedItems();
-					SwingUtilities.invokeLater(() -> panel.updateFlips(items, total, 0));
-				}));
+		executor.execute(() -> fetchFlipsAtPage(0));
 	}
 
 	void onBarrowsSetClicked(BarrowsSet set)

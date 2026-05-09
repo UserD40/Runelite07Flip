@@ -113,17 +113,40 @@ public class O7FlipPanel extends PluginPanel
 	private static final int    FREE_ROWS    = 5;
 
 	// -------------------------------------------------------------------------
-	// Preset definitions — true = premium required
+	// Preset definitions — true = premium required (must match PRESETS order)
+	// Free presets first, then premium, mirroring the website's "All Flips" UI.
 	// -------------------------------------------------------------------------
 	private static final String[][] PRESETS = {
-		{"",            "All Flips"},
-		{"highVolume",  "High Volume"},
-		{"highMargin",  "High Margin"},
-		{"priceDip",    "Price Dip"},
-		{"stableFlips", "Stable"},
-		{"f2p",         "F2P Only"},
+		// Free
+		{"",                 "All Flips"},
+		{"starterFlips",     "Starter"},
+		{"highMargin",       "High Margin"},
+		{"spikes",           "Spikes"},
+		{"f2p",              "F2P Only"},
+		// Premium
+		{"priceDip",         "Price Dip"},
+		{"stableFlips",      "Stable"},
+		{"highVolume",       "High Volume"},
+		{"volumeSpike",      "Volume Spike"},
+		{"oversoldDip",      "Oversold"},
+		{"momentumRecovery", "Momentum"},
+		{"lowVolatility",    "Low Volatility"},
 	};
-	private static final boolean[] PREMIUM_PRESET = {false, true, false, true, true, false};
+	private static final boolean[] PREMIUM_PRESET = {
+		false, false, false, false, false,         // free
+		true,  true,  true,  true,  true,  true,  true,  // premium
+	};
+
+	// -------------------------------------------------------------------------
+	// Sort options for the Flips tab — server-side sort via ?sort= param.
+	// -------------------------------------------------------------------------
+	private static final String[][] FLIPS_SORTS = {
+		{"flip07Score",     "07Flip Score"},
+		{"potentialProfit", "gp / hour"},
+		{"profit",          "Profit"},
+		{"roi",             "ROI %"},
+		{"recProfit",       "Recommended profit"},
+	};
 
 	// -------------------------------------------------------------------------
 	// Client-side Flips filters
@@ -244,7 +267,8 @@ public class O7FlipPanel extends PluginPanel
 	// -------------------------------------------------------------------------
 	// Sort buttons
 	// -------------------------------------------------------------------------
-	private JButton[] flipsSortBtns;
+	// flipsSortBtns removed — replaced by flipsSortSelector dropdown for the
+	// expanded 5-option sort (07Flip Score / gp-hour / profit / roi / recProfit).
 	private JButton[] spikesSortBtns;
 	private JButton[] dipsSortBtns;
 	private JButton[] dumpsSortBtns;
@@ -269,6 +293,7 @@ public class O7FlipPanel extends PluginPanel
 	// Other UI
 	// -------------------------------------------------------------------------
 	private final JComboBox<String> presetSelector;
+	private final JComboBox<String> flipsSortSelector;
 	private JTextField searchField;
 	private JLabel statusLabel;
 	private JLabel pauseToggle;
@@ -334,6 +359,21 @@ public class O7FlipPanel extends PluginPanel
 			if (plugin != null)
 			{
 				plugin.onPresetChanged();
+			}
+		});
+
+		String[] sortLabels = new String[FLIPS_SORTS.length];
+		for (int i = 0; i < FLIPS_SORTS.length; i++)
+		{
+			sortLabels[i] = FLIPS_SORTS[i][1];
+		}
+		flipsSortSelector = styledCombo(sortLabels);
+		flipsSortSelector.addActionListener(e ->
+		{
+			flipsSortIdx = flipsSortSelector.getSelectedIndex();
+			if (plugin != null)
+			{
+				plugin.onFlipsFilterChanged();
 			}
 		});
 
@@ -648,6 +688,16 @@ public class O7FlipPanel extends PluginPanel
 		return i >= 0 ? PRESETS[i][0] : "";
 	}
 
+	public String getFlipsSortKey()
+	{
+		int i = flipsSortIdx;
+		if (i < 0 || i >= FLIPS_SORTS.length)
+		{
+			return "flip07Score";
+		}
+		return FLIPS_SORTS[i][0];
+	}
+
 	public String getSpikesSortKey()
 	{
 		return spikesSortKey;
@@ -951,14 +1001,6 @@ public class O7FlipPanel extends PluginPanel
 	// Sort helpers
 	// =========================================================================
 
-	private List<FlipItem> sortFlips(List<FlipItem> items)
-	{
-		Comparator<FlipItem> c = flipsSortIdx == 1
-			? Comparator.comparingDouble((FlipItem x) -> x.roiPct)
-			: Comparator.comparingLong((FlipItem x) -> x.profit);
-		return items.stream().sorted(c.reversed()).collect(Collectors.toList());
-	}
-
 	private List<DumpItem> sortDumps(List<DumpItem> items)
 	{
 		if (dumpsSortIdx == 1)  // Score
@@ -1025,12 +1067,12 @@ public class O7FlipPanel extends PluginPanel
 
 	private void renderFlips(String q)
 	{
-		List<FlipItem> list = sortFlips(fFlips(q));
-		fillListPaged(flipsListPanel, list, flipsPage, flipsTotal,
+		// Sort is applied server-side via ?sort=flip07Score|profit|roi|...
+		// so we just render the rows in the order the server returned them.
+		fillListPaged(flipsListPanel, fFlips(q), flipsPage, flipsTotal,
 			flipsPageLabel, flipsPrev, flipsNext,
 			(item, odd) -> new FlipItemPanel(item, itemManager, odd, plugin),
 			"No flips found", "Try a different preset or filter");
-		hilite(flipsSortBtns, flipsSortIdx);
 	}
 
 	private void renderSpikes(String q)
@@ -1695,6 +1737,29 @@ public class O7FlipPanel extends PluginPanel
 	}
 
 	/**
+	 * Surfaces the server's "premium required" rejection. Resets the preset
+	 * dropdown back to the free default ("All Flips") so the user isn't
+	 * stuck on an empty list, then offers to open the upgrade URL.
+	 */
+	public void showPremiumRequiredToast(String upgradeUrl)
+	{
+		String url = (upgradeUrl == null || upgradeUrl.isEmpty()) ? "https://07flip.com/premium" : upgradeUrl;
+		if (presetSelector != null && presetSelector.getSelectedIndex() != 0)
+		{
+			presetSelector.setSelectedIndex(0);
+		}
+		int choice = javax.swing.JOptionPane.showConfirmDialog(this,
+			"That preset requires a 07Flip premium subscription. Open the upgrade page?",
+			"Premium required",
+			javax.swing.JOptionPane.OK_CANCEL_OPTION,
+			javax.swing.JOptionPane.INFORMATION_MESSAGE);
+		if (choice == javax.swing.JOptionPane.OK_OPTION)
+		{
+			net.runelite.client.util.LinkBrowser.browse(url);
+		}
+	}
+
+	/**
 	 * Switches to the named tab if it is currently visible.
 	 * Updates the pause toggle icon to reflect the plugin's current paused
 	 * state. Called from {@link O7FlipPlugin#togglePaused()} on the EDT.
@@ -1902,14 +1967,18 @@ public class O7FlipPanel extends PluginPanel
 		filterRow.add(minProfitCb);
 		filterRow.add(priceRangeCb);
 
-		flipsSortBtns = new JButton[2];
-		JPanel sortRow = buildSortBar(flipsSortBtns, new String[]{"Profit", "ROI %"},
-			() -> flipsSortIdx, i ->
-			{
-				flipsSortIdx = i;
-				flipsPage = 0;
-				renderFlips(filtered());
-			});
+		// Sort dropdown — server-side sort via ?sort= param. Default (index 0)
+		// is flip07Score. Dropdown change triggers a fresh fetch through
+		// onFlipsFilterChanged(), which resets pagination too.
+		JPanel sortRow = new JPanel(new BorderLayout(4, 0));
+		sortRow.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+		sortRow.setBorder(new EmptyBorder(4, 8, 4, 8));
+		JLabel sortLabel = new JLabel("Sort by");
+		sortLabel.setFont(Fonts.SM);
+		sortLabel.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
+		sortLabel.setBorder(new EmptyBorder(0, 0, 0, 6));
+		sortRow.add(sortLabel,         BorderLayout.WEST);
+		sortRow.add(flipsSortSelector, BorderLayout.CENTER);
 
 		JPanel topBar = new JPanel(new BorderLayout());
 		topBar.setBackground(ColorScheme.DARKER_GRAY_COLOR);

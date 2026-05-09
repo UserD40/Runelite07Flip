@@ -24,30 +24,22 @@
  */
 package com.o7flip.model;
 
-public class FlipItem
+/**
+ * Result of {@code GET /api/runelite/recommended-prices?itemId=…}. All four
+ * price fields are non-null together (server returns null for all when the
+ * item has fewer than 10 snapshots in the last hour).
+ */
+public class RecommendedPrices
 {
 	public int itemId;
-	public String name;
-	public long buyPrice;
-	public long sellPrice;
-	public long profit;
-	public double roiPct;
-	public long potentialProfit;
-	public int buyLimit;
-	public boolean members;
-
-	// Optional cash-stack annotation (only present when the request used
-	// ?cashStack=…&annotate=affordableQty). Null otherwise.
-	public Integer affordableQty;
-
-	// Composite "07Flip Score" 0–100. Null when the item had < 20 trades
-	// in the last hour (illiquid or fresh items).
-	public Integer flip07Score;
-
-	// Recommended buy / sell prices from the server's last-hour p10/p90 of
-	// fills. Use for the GE auto-fill overlay and the item-detail drawer.
-	// Null together when the item had < 10 snapshots in the last hour.
 	public Long recBuyPrice;
 	public Long recSellPrice;
+	public Long geTax;
 	public Long recProfit;
+	public Integer sampleSize;
+
+	public boolean hasPrices()
+	{
+		return recBuyPrice != null && recSellPrice != null;
+	}
 }
