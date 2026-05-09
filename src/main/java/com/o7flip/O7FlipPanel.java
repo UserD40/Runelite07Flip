@@ -1533,6 +1533,69 @@ public class O7FlipPanel extends PluginPanel
 	// Build tabs
 	// =========================================================================
 
+	private boolean shouldShowTab(String name)
+	{
+		if (config == null)
+		{
+			return true;
+		}
+		switch (name)
+		{
+			case "Flips":     return config.showFlips();
+			case "Dumps":     return config.showDumps();
+			case "Spikes":    return config.showSpikes();
+			case "Dips":      return config.showDips();
+			case "Alerts":    return config.showAlerts() && isPremium;
+			case "Moon":      return config.showMoon()    && isSignedIn;
+			case "Barrows":   return config.showBarrows() && isSignedIn;
+			case "Decant":    return config.showDecant();
+			case "My Trades": return config.showMyFlips();
+			default:          return false;
+		}
+	}
+
+	/** Default left-to-right order of the panel tabs. Mirrors the order
+	 *  this plugin shipped with before the reorder feature was added.
+	 *  Used by {@link com.o7flip.ui.TabOrderDialog} as the "reset" value. */
+	public static final List<String> DEFAULT_TAB_ORDER = java.util.Arrays.asList(
+		"Flips", "Dumps", "Spikes", "Dips", "Alerts", "Moon", "Barrows", "Decant", "My Trades"
+	);
+
+	/**
+	 * Resolves the user's preferred tab order from config, falling back to
+	 * the default order. Any name in config that doesn't match a known tab
+	 * is dropped; any default tab name not listed in config is appended at
+	 * the end so newly-added tabs naturally show without requiring config
+	 * migration.
+	 */
+	public List<String> resolveTabOrder()
+	{
+		String raw = config != null ? config.tabOrder() : "";
+		if (raw == null || raw.trim().isEmpty())
+		{
+			return new ArrayList<>(DEFAULT_TAB_ORDER);
+		}
+		List<String> result = new ArrayList<>();
+		java.util.Set<String> seen = new java.util.HashSet<>();
+		for (String token : raw.split(","))
+		{
+			String name = token.trim();
+			if (DEFAULT_TAB_ORDER.contains(name) && !seen.contains(name))
+			{
+				result.add(name);
+				seen.add(name);
+			}
+		}
+		for (String name : DEFAULT_TAB_ORDER)
+		{
+			if (!seen.contains(name))
+			{
+				result.add(name);
+			}
+		}
+		return result;
+	}
+
 	private JTabbedPane buildTabs()
 	{
 		JTabbedPane tabs = new JTabbedPane(JTabbedPane.TOP, JTabbedPane.SCROLL_TAB_LAYOUT);
@@ -1552,15 +1615,33 @@ public class O7FlipPanel extends PluginPanel
 		JPanel decantContent   = buildGenericTab("Decant");
 		JPanel myFlipsContent  = buildMyFlipsTab();
 
-		if (config == null || config.showFlips())                          tabs.addTab("Flips",     flipsContent);
-		if (config == null || config.showDumps())                          tabs.addTab("Dumps",     dumpsContent);
-		if (config == null || config.showSpikes())                         tabs.addTab("Spikes",    spikesContent);
-		if (config == null || config.showDips())                           tabs.addTab("Dips",      dipsContent);
-		if ((config == null || config.showAlerts()) && isPremium)          tabs.addTab("Alerts",    alertsContent);
-		if ((config == null || config.showMoon()) && isSignedIn)           tabs.addTab("Moon",      moonContent);
-		if ((config == null || config.showBarrows()) && isSignedIn)        tabs.addTab("Barrows",   barrowsContent);
-		if (config == null || config.showDecant())                         tabs.addTab("Decant",    decantContent);
-		if (config == null || config.showMyFlips())                        tabs.addTab("My Trades", myFlipsContent);
+		// Map each tab name to its (content, visibility predicate) — the
+		// dialog reorder list and config tab-toggles drive what actually
+		// gets added below.
+		java.util.Map<String, JPanel> contentByName = new java.util.HashMap<>();
+		contentByName.put("Flips",     flipsContent);
+		contentByName.put("Dumps",     dumpsContent);
+		contentByName.put("Spikes",    spikesContent);
+		contentByName.put("Dips",      dipsContent);
+		contentByName.put("Alerts",    alertsContent);
+		contentByName.put("Moon",      moonContent);
+		contentByName.put("Barrows",   barrowsContent);
+		contentByName.put("Decant",    decantContent);
+		contentByName.put("My Trades", myFlipsContent);
+
+		for (String name : resolveTabOrder())
+		{
+			if (!shouldShowTab(name))
+			{
+				continue;
+			}
+			JPanel content = contentByName.get(name);
+			if (content == null)
+			{
+				continue;
+			}
+			tabs.addTab(name, content);
+		}
 
 		return tabs;
 	}

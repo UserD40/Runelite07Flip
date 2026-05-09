@@ -214,6 +214,32 @@ public interface O7FlipConfig extends Config
 		return true;
 	}
 
+	@ConfigItem(
+		keyName = "openTabReorderDialog",
+		name = "Reorder tabs…",
+		description = "<html>Tick this box to open a dialog where you can choose the order of the panel tabs.<br>"
+			+ "The tick auto-clears once the dialog opens.</html>",
+		section = tabsSection,
+		position = 9
+	)
+	default boolean openTabReorderDialog()
+	{
+		return false;
+	}
+
+	@ConfigItem(
+		keyName = "tabOrder",
+		name = "",
+		description = "",
+		section = tabsSection,
+		position = 10,
+		hidden = true
+	)
+	default String tabOrder()
+	{
+		return "";
+	}
+
 	// ── Grand Exchange integration ─────────────────────────────────────────
 
 	@ConfigItem(
