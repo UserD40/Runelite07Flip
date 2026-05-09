@@ -66,25 +66,27 @@ public class FlipItemPanel extends JPanel
 		// ── ICON ──────────────────────────────────────────────────────────────
 		JLabel iconLabel = buildIcon(flip.itemId, itemManager);
 
-		// ── NAME (with 07Flip Score chip when available) ─────────────────────
-		String nameHtml;
+		// ── NAME + SCORE — separate JLabels so each can carry its own tooltip
+		JLabel nameLabel = new JLabel(flip.name);
+		nameLabel.setFont(Fonts.BOLD);
+		nameLabel.setForeground(Color.WHITE);
+
+		JLabel scoreLabel = null;
 		if (flip.flip07Score != null)
 		{
 			int s = flip.flip07Score;
 			String scoreColor = s >= 70 ? "#00C27A" : (s >= 40 ? "#E8A838" : "#E85050");
-			nameHtml = "<html>" + escapeHtml(flip.name)
-				+ " <font color='" + scoreColor + "'>" + s + "</font></html>";
+			scoreLabel = new JLabel("<html><font color='" + scoreColor + "'>" + s + "</font></html>");
+			scoreLabel.setFont(Fonts.BOLD);
+			scoreLabel.setToolTipText("07Flip merch algorithm score (0–100)");
 		}
-		else
+
+		JPanel nameRow = new JPanel(new BorderLayout(6, 0));
+		nameRow.setBackground(bg);
+		nameRow.add(nameLabel, BorderLayout.CENTER);
+		if (scoreLabel != null)
 		{
-			nameHtml = flip.name;
-		}
-		JLabel nameLabel = new JLabel(nameHtml);
-		nameLabel.setFont(Fonts.BOLD);
-		nameLabel.setForeground(Color.WHITE);
-		if (flip.flip07Score != null)
-		{
-			nameLabel.setToolTipText("07Flip Score (0–100): composite of price stability, after-tax margin and hourly volume.");
+			nameRow.add(scoreLabel, BorderLayout.EAST);
 		}
 
 		// ── BUY (red) ─────────────────────────────────────────────────────────
@@ -183,7 +185,7 @@ public class FlipItemPanel extends JPanel
 
 		JPanel textPanel = new JPanel(new GridLayout(4, 1, 0, 2));
 		textPanel.setBackground(bg);
-		textPanel.add(nameLabel);
+		textPanel.add(nameRow);
 		textPanel.add(buyLabel);
 		textPanel.add(sellLabel);
 		textPanel.add(profitLabel);
