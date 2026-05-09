@@ -37,6 +37,15 @@ tasks.register('run', JavaExec) {
 	mainClass = pluginMainClass
 
 	jvmArgs "-ea"
+
+	// Isolate the dev test client from the user's real ~/.runelite config so
+	// the test session doesn't pick up Plugin Hub plugins (including older
+	// installed versions of this plugin) alongside the dev builtin. RuneLite
+	// computes its config directory as <user.home>/.runelite, so redirecting
+	// user.home to a project-local folder keeps the test client self-contained
+	// and gitignored. Production tasks (build, shadowJar) are unaffected.
+	systemProperty 'user.home', file('.dev-home').absolutePath
+
 	args "--developer-mode", "--debug"
 }
 

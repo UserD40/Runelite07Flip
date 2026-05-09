@@ -3,6 +3,11 @@
 build/
 out/
 
+# Isolated dev RuneLite config dir — used by `gradle run` to avoid mixing the
+# dev test client with the user's real ~/.runelite config. Holds the test
+# client's account state, plugin settings, and OSRS cache.
+.dev-home/
+
 # IntelliJ IDEA
 .idea/
 *.iml
