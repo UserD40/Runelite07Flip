@@ -316,7 +316,8 @@ public class O7FlipPanel extends PluginPanel
 	// here so chip-removals can keep them in sync with the panel state.
 	private JComboBox<String> flipsCapitalCombo;
 	private JComboBox<String> flipsMinProfitCombo;
-	private JButton           flipsF2pToggle;
+	private JButton           flipsMembersBtn;
+	private JButton           flipsF2pBtn;
 	private JButton           flipsFilterButton;
 	private JPanel            flipsFilterPanel;
 	private JPanel            flipsChipBar;
@@ -1944,18 +1945,14 @@ public class O7FlipPanel extends PluginPanel
 
 	private JPanel buildFlipsTab()
 	{
-		// \u2500\u2500 Header row: declarative title + Filter button \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
-		JLabel headerLabel = new JLabel("Top flips by 07Flip Score");
-		headerLabel.setFont(Fonts.BOLD);
-		headerLabel.setForeground(Color.WHITE);
-
+		// Filter button only \u2014 header text removed; the score-sorted list
+		// speaks for itself.
 		flipsFilterButton = pillButton("Filter");
 		flipsFilterButton.addActionListener(e -> toggleFlipsFilterPanel());
 
 		JPanel headerRow = new JPanel(new BorderLayout());
 		headerRow.setBackground(ColorScheme.DARKER_GRAY_COLOR);
-		headerRow.setBorder(new EmptyBorder(8, 10, 4, 8));
-		headerRow.add(headerLabel,       BorderLayout.WEST);
+		headerRow.setBorder(new EmptyBorder(6, 10, 4, 8));
 		headerRow.add(flipsFilterButton, BorderLayout.EAST);
 
 		// \u2500\u2500 Active filter chips (visible only when any filter is set) \u2500\u2500\u2500\u2500
@@ -2029,11 +2026,18 @@ public class O7FlipPanel extends PluginPanel
 			}
 		});
 
-		flipsF2pToggle = pillButton(flipsF2pOnly ? "F2P only" : "All accounts");
-		flipsF2pToggle.addActionListener(e ->
+		flipsMembersBtn = pillButton("Members");
+		flipsF2pBtn     = pillButton("F2P");
+		applyAccountStyle();
+
+		flipsMembersBtn.addActionListener(e ->
 		{
-			flipsF2pOnly = !flipsF2pOnly;
-			flipsF2pToggle.setText(flipsF2pOnly ? "F2P only" : "All accounts");
+			if (!flipsF2pOnly)
+			{
+				return;
+			}
+			flipsF2pOnly = false;
+			applyAccountStyle();
 			flipsPage = 0;
 			rebuildFlipsChipBar();
 			if (plugin != null)
@@ -2041,6 +2045,26 @@ public class O7FlipPanel extends PluginPanel
 				plugin.onFlipsFilterChanged();
 			}
 		});
+		flipsF2pBtn.addActionListener(e ->
+		{
+			if (flipsF2pOnly)
+			{
+				return;
+			}
+			flipsF2pOnly = true;
+			applyAccountStyle();
+			flipsPage = 0;
+			rebuildFlipsChipBar();
+			if (plugin != null)
+			{
+				plugin.onFlipsFilterChanged();
+			}
+		});
+
+		JPanel accountRow = new JPanel(new GridLayout(1, 2, 4, 0));
+		accountRow.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+		accountRow.add(flipsMembersBtn);
+		accountRow.add(flipsF2pBtn);
 
 		JPanel panel = new JPanel(new GridLayout(0, 2, 6, 6));
 		panel.setBackground(ColorScheme.DARKER_GRAY_COLOR);
@@ -2050,8 +2074,19 @@ public class O7FlipPanel extends PluginPanel
 		panel.add(filterRowLabel("Min profit"));
 		panel.add(flipsMinProfitCombo);
 		panel.add(filterRowLabel("Account"));
-		panel.add(flipsF2pToggle);
+		panel.add(accountRow);
 		return panel;
+	}
+
+	/** Highlights the active Members/F2P button using the existing sort-bar style. */
+	private void applyAccountStyle()
+	{
+		if (flipsMembersBtn == null || flipsF2pBtn == null)
+		{
+			return;
+		}
+		applySortStyle(flipsMembersBtn, !flipsF2pOnly);
+		applySortStyle(flipsF2pBtn,      flipsF2pOnly);
 	}
 
 	private static JLabel filterRowLabel(String text)
@@ -2106,10 +2141,7 @@ public class O7FlipPanel extends PluginPanel
 			flipsChipBar.add(buildFilterChip("F2P only", () ->
 			{
 				flipsF2pOnly = false;
-				if (flipsF2pToggle != null)
-				{
-					flipsF2pToggle.setText("All accounts");
-				}
+				applyAccountStyle();
 			}));
 		}
 		flipsChipBar.setVisible(flipsChipBar.getComponentCount() > 0);
