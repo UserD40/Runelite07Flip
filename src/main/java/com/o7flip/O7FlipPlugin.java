@@ -732,47 +732,14 @@ public class O7FlipPlugin extends Plugin
 		// Build the bundle sections object — only include tabs the user has enabled.
 		JsonObject sections = new JsonObject();
 
-		// Server v2 bundle (POST /api/runelite/v2/bundle) now returns the
-		// full-shape flips rows including flip07_score and rec_* fields, so
-		// flips can ride the bundle again. The standalone /flips endpoint is
-		// still used for filter-change re-fetches (see fetchFlipsAtPage).
-		if (config.showFlips())
-		{
-			JsonObject p = new JsonObject();
-			String preset = panel.getSelectedPreset();
-			if (preset != null && !preset.isEmpty())
-			{
-				p.addProperty("preset", preset);
-			}
-			String sort = panel.getFlipsSortKey();
-			if (sort != null && !sort.isEmpty())
-			{
-				p.addProperty("sort", sort);
-			}
-			long minProfit = panel.getFlipsMinProfit();
-			if (minProfit > 0)
-			{
-				p.addProperty("minProfit", minProfit);
-			}
-			long priceMin = panel.getFlipsPriceMin();
-			if (priceMin > 0)
-			{
-				p.addProperty("priceMin", priceMin);
-			}
-			long priceMax = panel.getFlipsPriceMax();
-			if (priceMax < Long.MAX_VALUE)
-			{
-				p.addProperty("priceMax", priceMax);
-			}
-			long cashStack = cashStackBucketGp();
-			if (cashStack > 0)
-			{
-				p.addProperty("cashStack", cashStack);
-				p.addProperty("annotate", "affordableQty");
-			}
-			p.addProperty("page", panel.getFlipsPage());
-			sections.add("flips", p);
-		}
+		// Flips intentionally excluded from the v2/bundle request: the bundle
+		// is not honouring the sort=flip07Score parameter (verified via curl —
+		// returns null-score items first instead of sorted desc), while the
+		// standalone /flips endpoint sorts correctly. Going through the bundle
+		// would land an unsorted list on every periodic refresh and overwrite
+		// the correctly-sorted result of any user-driven filter change.
+		// fetchFlipsAtPage is invoked below alongside the bundle so the user
+		// still gets a periodic refresh.
 
 		if (config.showSpikes())
 		{
@@ -868,12 +835,9 @@ public class O7FlipPlugin extends Plugin
 
 		apiClient.fetchBundle(
 			sections,
-			config.showFlips() ? (items, total) ->
-			{
-				lastFlips = items;
-				rebuildTrackedItems();
-				SwingUtilities.invokeLater(() -> panel.updateFlips(items, total, flipsPage));
-			} : null,
+			// Flips intentionally null — fetched separately below to use the
+			// /flips endpoint, which honours sort=flip07Score correctly.
+			null,
 			config.showSpikes() ? (items, total) ->
 			{
 				lastSpikes = items;
@@ -908,6 +872,12 @@ public class O7FlipPlugin extends Plugin
 				SwingUtilities.invokeLater(() -> panel.updateInvalidKeyWarning(hasKey ? connectUrl : null));
 			}
 		);
+
+		// Flips: standalone /flips while the v2/bundle ignores sort.
+		if (config.showFlips())
+		{
+			fetchFlipsAtPage(flipsPage);
+		}
 
 		// Bot-dumps lives on a dedicated endpoint outside the bundle. When
 		// the Dumps tab is in bot mode, fire the additional fetch in parallel.

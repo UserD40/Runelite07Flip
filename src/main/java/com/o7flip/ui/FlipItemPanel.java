@@ -87,7 +87,7 @@ public class FlipItemPanel extends JPanel
 		{
 			scoreLabel = new JLabel("—");
 			scoreLabel.setFont(Fonts.BOLD);
-			scoreLabel.setForeground(new Color(0x666666));
+			scoreLabel.setForeground(new Color(0xAAAAAA));
 			scoreLabel.setToolTipText("07Flip merch algorithm score — unavailable for this item right now (insufficient recent trade data).");
 		}
 
@@ -108,12 +108,10 @@ public class FlipItemPanel extends JPanel
 		buyLabel.setForeground(new Color(0xFF7070));
 
 		StringBuilder buyTip = new StringBuilder("<html><b>").append(escapeHtml(flip.name)).append("</b><br>");
-		buyTip.append("Market buy: <font color='#FF7070'>").append(formatGp(flip.buyPrice)).append("</font>")
-			.append("  <font color='#888888'>(top ask)</font><br>");
+		buyTip.append("Market buy: <font color='#FF7070'>").append(formatGp(flip.buyPrice)).append("</font><br>");
 		if (flip.recBuyPrice != null)
 		{
-			buyTip.append("07Flip rec: <font color='#FF981F'>").append(formatGp(flip.recBuyPrice)).append("</font>")
-				.append("  <font color='#888888'>(p10 of last-hour fills)</font><br>");
+			buyTip.append("07Flip rec: <font color='#FF981F'>").append(formatGp(flip.recBuyPrice)).append("</font><br>");
 		}
 		buyTip.append("<font color='#888888'>Right-click to queue this price into the GE</font></html>");
 		buyLabel.setToolTipText(buyTip.toString());
@@ -147,12 +145,10 @@ public class FlipItemPanel extends JPanel
 		sellLabel.setForeground(GREEN);
 
 		StringBuilder sellTip = new StringBuilder("<html><b>").append(escapeHtml(flip.name)).append("</b><br>");
-		sellTip.append("Market sell: <font color='#00C27A'>").append(formatGp(flip.sellPrice)).append("</font>")
-			.append("  <font color='#888888'>(top bid)</font><br>");
+		sellTip.append("Market sell: <font color='#00C27A'>").append(formatGp(flip.sellPrice)).append("</font><br>");
 		if (flip.recSellPrice != null)
 		{
-			sellTip.append("07Flip rec: <font color='#FF981F'>").append(formatGp(flip.recSellPrice)).append("</font>")
-				.append("  <font color='#888888'>(p90 of last-hour fills)</font><br>");
+			sellTip.append("07Flip rec: <font color='#FF981F'>").append(formatGp(flip.recSellPrice)).append("</font><br>");
 		}
 		sellTip.append("<font color='#888888'>Right-click to queue this price into the GE</font></html>");
 		sellLabel.setToolTipText(sellTip.toString());
