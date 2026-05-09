@@ -199,6 +199,21 @@ public class O7FlipPlugin extends Plugin
 	/** Item IDs currently in the player's inventory. Volatile reference swap. */
 	public volatile Set<Integer> inventoryItemIds = Collections.emptySet();
 
+	/**
+	 * Cache of {@code /recommended-prices} responses keyed by item ID.
+	 * Server caches 60s, so we cache locally for 60s too. Used by
+	 * GePriceOverlay to fall back when an item isn't in the current Flips
+	 * list (the bundled response only carries ~40 items).
+	 */
+	private final java.util.concurrent.ConcurrentHashMap<Integer, com.o7flip.model.RecommendedPrices> recPriceCache
+		= new java.util.concurrent.ConcurrentHashMap<>();
+	private final java.util.concurrent.ConcurrentHashMap<Integer, Long> recPriceFetchedAt
+		= new java.util.concurrent.ConcurrentHashMap<>();
+	private final java.util.Set<Integer> recPriceInFlight
+		= java.util.concurrent.ConcurrentHashMap.newKeySet();
+
+	private static final long REC_PRICE_TTL_MS = 60_000L;
+
 	/** Active GE offers keyed by slot index. Volatile reference swap. */
 	public volatile Map<Integer, GrandExchangeOffer> activeOffers = Collections.emptyMap();
 
@@ -1272,6 +1287,43 @@ public class O7FlipPlugin extends Plugin
 		}
 		final boolean p = paused;
 		SwingUtilities.invokeLater(() -> panel.setPaused(p));
+	}
+
+	/**
+	 * Returns the cached recommended prices for an item, or null if we
+	 * haven't fetched them recently. If the cache is stale (or empty), an
+	 * async fetch is fired and {@code null} is returned this call —
+	 * subsequent calls will get the populated value once the network round
+	 * trip completes. Safe to call from the EDT (overlay render) and from
+	 * the executor thread.
+	 */
+	public com.o7flip.model.RecommendedPrices getRecommendedPrices(int itemId)
+	{
+		if (itemId <= 0)
+		{
+			return null;
+		}
+		Long fetched = recPriceFetchedAt.get(itemId);
+		boolean stale = fetched == null || (System.currentTimeMillis() - fetched) > REC_PRICE_TTL_MS;
+		if (stale && executor != null && !executor.isShutdown() && recPriceInFlight.add(itemId))
+		{
+			executor.execute(() -> apiClient.fetchRecommendedPrices(itemId, rp ->
+			{
+				try
+				{
+					if (rp != null)
+					{
+						recPriceCache.put(itemId, rp);
+					}
+					recPriceFetchedAt.put(itemId, System.currentTimeMillis());
+				}
+				finally
+				{
+					recPriceInFlight.remove(itemId);
+				}
+			}));
+		}
+		return recPriceCache.get(itemId);
 	}
 
 	/** Public entry point used by the My Trades "Sync from server" button. */

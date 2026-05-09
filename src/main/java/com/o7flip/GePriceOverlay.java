@@ -111,15 +111,31 @@ public class GePriceOverlay extends Overlay
 		}
 
 		TrackedItemData data = plugin.trackedItems.get(currentItemId);
-		if (data == null)
-		{
-			return null;
-		}
 
 		// Buy = lower side (price to place a buy offer at).
 		// Sell = higher side (price to place a sell offer at).
-		Long buyPrice  = firstNonNull(data.flipBuyPrice,  data.dipBuyPrice,  data.spikeBuyPrice, data.dumpBuyPrice);
-		Long sellPrice = firstNonNull(data.flipSellPrice, data.dumpSellPrice);
+		Long buyPrice  = data != null ? firstNonNull(data.flipBuyPrice,  data.dipBuyPrice,  data.spikeBuyPrice, data.dumpBuyPrice) : null;
+		Long sellPrice = data != null ? firstNonNull(data.flipSellPrice, data.dumpSellPrice) : null;
+		String displayName = data != null ? data.name : null;
+
+		// Fall back to the dedicated /recommended-prices endpoint for items
+		// that aren't in the current Flips/Spikes/Dumps lists. Async — first
+		// hover triggers a fetch and the next render gets cached values.
+		if (buyPrice == null || sellPrice == null)
+		{
+			com.o7flip.model.RecommendedPrices rp = plugin.getRecommendedPrices(currentItemId);
+			if (rp != null && rp.hasPrices())
+			{
+				if (buyPrice == null)
+				{
+					buyPrice = rp.recBuyPrice;
+				}
+				if (sellPrice == null)
+				{
+					sellPrice = rp.recSellPrice;
+				}
+			}
+		}
 
 		if (buyPrice == null && sellPrice == null)
 		{
@@ -133,7 +149,7 @@ public class GePriceOverlay extends Overlay
 		panel.getChildren().clear();
 		panel.setPreferredSize(new Dimension(180, 0));
 
-		String title = data.name != null ? truncate(data.name, 24) : "07Flip";
+		String title = displayName != null ? truncate(displayName, 24) : "07Flip";
 		panel.getChildren().add(TitleComponent.builder()
 			.text(title)
 			.color(HEADER)
