@@ -37,6 +37,7 @@ logs/
 local.properties
 gradle.properties.local
 .env
+credentials.properties
 
 # Local dev scripts (not part of the plugin)
 build07flip.bat
