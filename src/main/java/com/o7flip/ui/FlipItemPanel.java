@@ -31,6 +31,8 @@ import net.runelite.client.game.ItemManager;
 import net.runelite.client.ui.ColorScheme;
 import net.runelite.client.util.AsyncBufferedImage;
 import net.runelite.client.util.LinkBrowser;
+import javax.swing.Box;
+import javax.swing.BoxLayout;
 import javax.swing.JLabel;
 import javax.swing.JMenuItem;
 import javax.swing.JPanel;
@@ -71,7 +73,10 @@ public class FlipItemPanel extends JPanel
 		nameLabel.setFont(Fonts.BOLD);
 		nameLabel.setForeground(Color.WHITE);
 
-		JLabel scoreLabel = null;
+		// Always render a score chip so the right edge of every row aligns —
+		// even when the server returns null (insufficient trade data). Null
+		// renders as a muted dash; the tooltip explains why.
+		JLabel scoreLabel;
 		if (flip.flip07Score != null)
 		{
 			int s = flip.flip07Score;
@@ -80,14 +85,18 @@ public class FlipItemPanel extends JPanel
 			scoreLabel.setFont(Fonts.BOLD);
 			scoreLabel.setToolTipText("07Flip merch algorithm score (0–100)");
 		}
+		else
+		{
+			scoreLabel = new JLabel("—");
+			scoreLabel.setFont(Fonts.BOLD);
+			scoreLabel.setForeground(new Color(0x666666));
+			scoreLabel.setToolTipText("07Flip merch algorithm score — unavailable for this item right now (insufficient recent trade data).");
+		}
 
 		JPanel nameRow = new JPanel(new BorderLayout(6, 0));
 		nameRow.setBackground(bg);
-		nameRow.add(nameLabel, BorderLayout.CENTER);
-		if (scoreLabel != null)
-		{
-			nameRow.add(scoreLabel, BorderLayout.EAST);
-		}
+		nameRow.add(nameLabel,  BorderLayout.CENTER);
+		nameRow.add(scoreLabel, BorderLayout.EAST);
 
 		// ── BUY (red) ─────────────────────────────────────────────────────────
 		String buyHtml = "<html><b>Buy:</b>  " + formatGpCompact(flip.buyPrice);
@@ -146,13 +155,12 @@ public class FlipItemPanel extends JPanel
 		});
 
 		// ── PROFIT + ROI ───────────────────────────────────────────────────────
-		String limitText = flip.buyLimit > 0 ? "  \u00B7  L" + flip.buyLimit : "";
 		// Compact single line: "+158.0K · L70". ROI, 07F margin and
 		// affordable qty are surfaced via hover tooltip so the row never
 		// truncates regardless of price magnitude.
-		String profitHtml = "<html><font color='#00C27A'>+" + formatGpCompact(flip.profit) + "</font>"
-			+ limitText + "</html>";
-		JLabel profitLabel = new JLabel(profitHtml);
+		// Profit only — limit lives in its own label below so it can carry
+		// its own '4-hour buy limit' tooltip.
+		JLabel profitLabel = new JLabel("<html><font color='#00C27A'>+" + formatGpCompact(flip.profit) + "</font></html>");
 		profitLabel.setFont(Fonts.SM);
 		profitLabel.setForeground(GREEN);
 
@@ -168,10 +176,8 @@ public class FlipItemPanel extends JPanel
 			tip.append("07Flip margin: <font color='#FF981F'>+").append(formatGp(flip.recProfit)).append("</font>");
 			tip.append("  (").append(String.format("%.2f", recRoi)).append("%)<br>");
 		}
-		if (flip.buyLimit > 0)
-		{
-			tip.append("GE buy limit: ").append(flip.buyLimit).append("<br>");
-		}
+		// Buy limit lives in its own label/tooltip alongside the profit row
+		// so we don't repeat it here.
 		if (flip.affordableQty != null && flip.affordableQty > 0)
 		{
 			tip.append("Affordable: ").append(flip.affordableQty).append("<br>");
@@ -183,12 +189,33 @@ public class FlipItemPanel extends JPanel
 		tip.append("</html>");
 		profitLabel.setToolTipText(tip.toString());
 
+		// Profit row: profit on the left, optional limit number on the right
+		// of a separator. Limit number has its own tooltip.
+		JPanel profitRow = new JPanel();
+		profitRow.setLayout(new BoxLayout(profitRow, BoxLayout.X_AXIS));
+		profitRow.setBackground(bg);
+		profitRow.add(profitLabel);
+		if (flip.buyLimit > 0)
+		{
+			JLabel sep = new JLabel("  ·  ");
+			sep.setFont(Fonts.SM);
+			sep.setForeground(new Color(0x888888));
+			profitRow.add(sep);
+
+			JLabel limitLabel = new JLabel(String.valueOf(flip.buyLimit));
+			limitLabel.setFont(Fonts.SM);
+			limitLabel.setForeground(GREEN);
+			limitLabel.setToolTipText("GE buy limit (resets every 4 hours)");
+			profitRow.add(limitLabel);
+		}
+		profitRow.add(Box.createHorizontalGlue());
+
 		JPanel textPanel = new JPanel(new GridLayout(4, 1, 0, 2));
 		textPanel.setBackground(bg);
 		textPanel.add(nameRow);
 		textPanel.add(buyLabel);
 		textPanel.add(sellLabel);
-		textPanel.add(profitLabel);
+		textPanel.add(profitRow);
 
 		add(iconLabel, BorderLayout.WEST);
 		add(textPanel, BorderLayout.CENTER);
