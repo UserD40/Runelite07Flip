@@ -31,8 +31,6 @@ import net.runelite.client.game.ItemManager;
 import net.runelite.client.ui.ColorScheme;
 import net.runelite.client.util.AsyncBufferedImage;
 import net.runelite.client.util.LinkBrowser;
-import javax.swing.Box;
-import javax.swing.BoxLayout;
 import javax.swing.JLabel;
 import javax.swing.JMenuItem;
 import javax.swing.JPanel;
@@ -108,7 +106,17 @@ public class FlipItemPanel extends JPanel
 		JLabel buyLabel = new JLabel(buyHtml);
 		buyLabel.setFont(Fonts.SM);
 		buyLabel.setForeground(new Color(0xFF7070));
-		buyLabel.setToolTipText("Buy: instant-buy price (top ask). Rec: 07Flip recommended bid (p10 of last-hour fills). Right-click to queue this price into the GE.");
+
+		StringBuilder buyTip = new StringBuilder("<html><b>").append(escapeHtml(flip.name)).append("</b><br>");
+		buyTip.append("Market buy: <font color='#FF7070'>").append(formatGp(flip.buyPrice)).append("</font>")
+			.append("  <font color='#888888'>(top ask)</font><br>");
+		if (flip.recBuyPrice != null)
+		{
+			buyTip.append("07Flip rec: <font color='#FF981F'>").append(formatGp(flip.recBuyPrice)).append("</font>")
+				.append("  <font color='#888888'>(p10 of last-hour fills)</font><br>");
+		}
+		buyTip.append("<font color='#888888'>Right-click to queue this price into the GE</font></html>");
+		buyLabel.setToolTipText(buyTip.toString());
 		buyLabel.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
 		// Right-click on the Buy line queues a buy at the recommended price
 		// (or the live sell-side price if no rec data) — no menu, direct action.
@@ -137,7 +145,17 @@ public class FlipItemPanel extends JPanel
 		JLabel sellLabel = new JLabel(sellHtml);
 		sellLabel.setFont(Fonts.SM);
 		sellLabel.setForeground(GREEN);
-		sellLabel.setToolTipText("Sell: instant-sell price (top bid). Rec: 07Flip recommended ask (p90 of last-hour fills). Right-click to queue this price into the GE.");
+
+		StringBuilder sellTip = new StringBuilder("<html><b>").append(escapeHtml(flip.name)).append("</b><br>");
+		sellTip.append("Market sell: <font color='#00C27A'>").append(formatGp(flip.sellPrice)).append("</font>")
+			.append("  <font color='#888888'>(top bid)</font><br>");
+		if (flip.recSellPrice != null)
+		{
+			sellTip.append("07Flip rec: <font color='#FF981F'>").append(formatGp(flip.recSellPrice)).append("</font>")
+				.append("  <font color='#888888'>(p90 of last-hour fills)</font><br>");
+		}
+		sellTip.append("<font color='#888888'>Right-click to queue this price into the GE</font></html>");
+		sellLabel.setToolTipText(sellTip.toString());
 		sellLabel.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
 		final long sellTarget = (flip.recSellPrice != null && flip.recSellPrice > 0)
 			? flip.recSellPrice : flip.buyPrice;
@@ -176,8 +194,11 @@ public class FlipItemPanel extends JPanel
 			tip.append("07Flip margin: <font color='#FF981F'>+").append(formatGp(flip.recProfit)).append("</font>");
 			tip.append("  (").append(String.format("%.2f", recRoi)).append("%)<br>");
 		}
-		// Buy limit lives in its own label/tooltip alongside the profit row
-		// so we don't repeat it here.
+		if (flip.buyLimit > 0)
+		{
+			tip.append("GE buy limit: ").append(flip.buyLimit)
+				.append(" <font color='#888888'>(resets every 4 hours)</font><br>");
+		}
 		if (flip.affordableQty != null && flip.affordableQty > 0)
 		{
 			tip.append("Affordable: ").append(flip.affordableQty).append("<br>");
@@ -189,33 +210,15 @@ public class FlipItemPanel extends JPanel
 		tip.append("</html>");
 		profitLabel.setToolTipText(tip.toString());
 
-		// Profit row: profit on the left, optional limit number on the right
-		// of a separator. Limit number has its own tooltip.
-		JPanel profitRow = new JPanel();
-		profitRow.setLayout(new BoxLayout(profitRow, BoxLayout.X_AXIS));
-		profitRow.setBackground(bg);
-		profitRow.add(profitLabel);
-		if (flip.buyLimit > 0)
-		{
-			JLabel sep = new JLabel("  ·  ");
-			sep.setFont(Fonts.SM);
-			sep.setForeground(new Color(0x888888));
-			profitRow.add(sep);
-
-			JLabel limitLabel = new JLabel(String.valueOf(flip.buyLimit));
-			limitLabel.setFont(Fonts.SM);
-			limitLabel.setForeground(GREEN);
-			limitLabel.setToolTipText("GE buy limit (resets every 4 hours)");
-			profitRow.add(limitLabel);
-		}
-		profitRow.add(Box.createHorizontalGlue());
-
+		// Profit row: just the margin number. Buy limit and other secondary
+		// facts live in the hover tooltip on the profit label so the row
+		// stays clean.
 		JPanel textPanel = new JPanel(new GridLayout(4, 1, 0, 2));
 		textPanel.setBackground(bg);
 		textPanel.add(nameRow);
 		textPanel.add(buyLabel);
 		textPanel.add(sellLabel);
-		textPanel.add(profitRow);
+		textPanel.add(profitLabel);
 
 		add(iconLabel, BorderLayout.WEST);
 		add(textPanel, BorderLayout.CENTER);
