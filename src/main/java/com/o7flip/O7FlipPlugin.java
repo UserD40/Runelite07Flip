@@ -302,7 +302,11 @@ public class O7FlipPlugin extends Plugin
 	{
 		panel = injector.getInstance(O7FlipPanel.class);
 
-		final BufferedImage icon = ImageUtil.loadImageResource(getClass(), "/icon.png");
+		// Loaded as a relative path (not "/icon.png") so the resource is resolved
+		// from this class's own package — src/main/resources/com/o7flip/icon.png —
+		// not from the classpath root. Avoids collisions with other plugins that
+		// also ship an icon.png at the root of their jar.
+		final BufferedImage icon = ImageUtil.loadImageResource(getClass(), "icon.png");
 		navButton = NavigationButton.builder()
 			.tooltip("07Flip - GE Flip Finder")
 			.icon(icon)
