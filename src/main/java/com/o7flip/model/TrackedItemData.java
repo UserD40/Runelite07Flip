@@ -29,7 +29,7 @@ import java.util.LinkedHashSet;
 /**
  * Aggregated data for a single item ID across all 07Flip API tabs.
  * Fields are boxed (Long/Double) — null means the item is not in that tab.
- * presentIn is an insertion-ordered set (Flips → Alerts → Dips → Dumps → Spikes).
+ * presentIn is an insertion-ordered set (Flips → Alerts → Dumps → Spikes).
  */
 public class TrackedItemData
 {
@@ -46,10 +46,6 @@ public class TrackedItemData
 	public Long   alertCurrentPrice;
 	public Long   alertSellTarget;
 	public Double alertUpsidePct;
-
-	// Dips
-	public Long   dipBuyPrice;
-	public Double dipPct;
 
 	// Dumps
 	public Long   dumpBuyPrice;

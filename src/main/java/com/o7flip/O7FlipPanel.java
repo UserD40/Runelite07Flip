@@ -27,7 +27,6 @@ package com.o7flip;
 import com.o7flip.model.AlertItem;
 import com.o7flip.model.BarrowsSet;
 import com.o7flip.model.DecantItem;
-import com.o7flip.model.DipItem;
 import com.o7flip.model.DumpItem;
 import com.o7flip.model.FlipItem;
 import com.o7flip.model.MoonSet;
@@ -38,7 +37,6 @@ import com.o7flip.ui.AlertItemPanel;
 import com.o7flip.ui.BarrowsItemPanel;
 import com.o7flip.ui.BarrowsSetPanel;
 import com.o7flip.ui.DecantItemPanel;
-import com.o7flip.ui.DipItemPanel;
 import com.o7flip.ui.DumpItemPanel;
 import com.o7flip.ui.FlipItemPanel;
 import com.o7flip.ui.MoonSetPanel;
@@ -59,7 +57,9 @@ import javax.swing.JComboBox;
 import javax.swing.JComponent;
 import javax.swing.JLabel;
 import javax.swing.JList;
+import javax.swing.JMenuItem;
 import javax.swing.JPanel;
+import javax.swing.JPopupMenu;
 import javax.swing.JScrollPane;
 import javax.swing.JTabbedPane;
 import javax.swing.JTextField;
@@ -94,7 +94,9 @@ import java.awt.event.MouseEvent;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 @Singleton
@@ -216,7 +218,6 @@ public class O7FlipPanel extends PluginPanel
 	// Server-side sort keys for spikes / dumps
 	// -------------------------------------------------------------------------
 	private String spikesSortKey = "recent";
-	private String dipsSortKey   = "recent";
 	private String dumpsSortKey  = "recent";
 	private boolean dumpsUseBotEndpoint = false;
 
@@ -225,6 +226,10 @@ public class O7FlipPanel extends PluginPanel
 	// -------------------------------------------------------------------------
 	private boolean isSignedIn = false;
 	private boolean isPremium  = false;
+
+	/** Public accessors so the GE overlay and row panels can gate premium features. */
+	public boolean isSignedIn() { return isSignedIn; }
+	public boolean isPremium()  { return isPremium;  }
 	private boolean authChecked = false;
 	private boolean noKeyBannerExpanded = true;
 
@@ -233,7 +238,6 @@ public class O7FlipPanel extends PluginPanel
 	// -------------------------------------------------------------------------
 	private List<FlipItem>    allFlips   = new ArrayList<>();
 	private List<SpikeItem>   allSpikes  = new ArrayList<>();
-	private List<DipItem>     allDips    = new ArrayList<>();
 	private List<DumpItem>    allDumps   = new ArrayList<>();
 	private List<BarrowsSet>  allBarrows = new ArrayList<>();
 	private List<MoonSet>     allMoon    = new ArrayList<>();
@@ -246,31 +250,30 @@ public class O7FlipPanel extends PluginPanel
 	// -------------------------------------------------------------------------
 	private int flipsSortIdx   = 0;
 	private int spikesSortIdx  = 0;
-	private int dipsSortIdx    = 0;
 	private int dumpsSortIdx   = 0;
 	private int barrowsSortIdx = 0;
 	private int moonFilterIdx  = 0;  // 0=Blood 1=Blue 2=Eclipse
 	private int decantSortIdx  = 0;
 	private int alertsSortIdx  = 0;
+	private int myFlipsSortIdx = 0;  // 0=Active 1=Recent 2=Margin
+	private int myFlipsPage    = 0;
+	private static final int MY_FLIPS_PAGE_SIZE = 5;
 
 	// -------------------------------------------------------------------------
 	// Page state (server-paginated tabs track total from server)
 	// -------------------------------------------------------------------------
 	private int flipsPage   = 0;  private int flipsTotal  = 0;
 	private int spikesPage  = 0;  private int spikesTotal = 0;
-	private int dipsPage    = 0;  private int dipsTotal   = 0;
 	private int dumpsPage   = 0;  private int dumpsTotal  = 0;
 	private int barrowsPage = 0;
 	private int moonPage    = 0;
 	private int decantPage  = 0;
-	private int alertsPage  = 0;  private int alertsTotal = 0;
 
 	// -------------------------------------------------------------------------
 	// List panels
 	// -------------------------------------------------------------------------
 	private JPanel flipsListPanel;
 	private JPanel spikesListPanel;
-	private JPanel dipsListPanel;
 	private JPanel dumpsListPanel;
 	private JPanel barrowsListPanel;
 	private JPanel barrowsDetailPanel;
@@ -281,6 +284,7 @@ public class O7FlipPanel extends PluginPanel
 	private JPanel alertsListPanel;
 	private JPanel myFlipsListPanel;
 	private com.o7flip.ui.MyTradesStatsPanel myFlipsStatsPanel;
+	private com.o7flip.ui.InsightsPanel insightsPanel;
 	private JPanel searchResultsPanel;
 	private JScrollPane searchScrollPane;
 
@@ -290,9 +294,9 @@ public class O7FlipPanel extends PluginPanel
 	// flipsSortBtns removed — replaced by flipsSortSelector dropdown for the
 	// expanded 5-option sort (07Flip Score / gp-hour / profit / roi / recProfit).
 	private JButton[] spikesSortBtns;
-	private JButton[] dipsSortBtns;
 	private JButton[] dumpsSortBtns;
 	private JButton[] barrowsSortBtns;
+	private JButton[] myFlipsSortBtns;
 	private JButton[] moonFilterBtns;
 	private JButton[] decantSortBtns;
 	private JButton[] alertsSortBtns;
@@ -302,12 +306,10 @@ public class O7FlipPanel extends PluginPanel
 	// -------------------------------------------------------------------------
 	private JLabel  flipsPageLabel;   private JButton flipsPrev,    flipsNext;
 	private JLabel  spikesPageLabel;  private JButton spikesPrev,   spikesNext;
-	private JLabel  dipsPageLabel;    private JButton dipsPrev,     dipsNext;
 	private JLabel  dumpsPageLabel;   private JButton dumpsPrev,    dumpsNext;
 	private JLabel  barrowsPageLabel; private JButton barrowsPrev,  barrowsNext;
 	private JLabel  moonPageLabel;    private JButton moonPrev,     moonNext;
 	private JLabel  decantPageLabel;  private JButton decantPrev,   decantNext;
-	private JLabel  alertsPageLabel;  private JButton alertsPrev,   alertsNext;
 
 	// -------------------------------------------------------------------------
 	// Other UI
@@ -323,7 +325,6 @@ public class O7FlipPanel extends PluginPanel
 	private JPanel            flipsChipBar;
 	private JTextField searchField;
 	private JLabel statusLabel;
-	private JLabel pauseToggle;
 	private JLabel hiddenCountLabel;
 	private JLabel lastUpdatedLabel;
 	private JPanel mainArea;
@@ -698,11 +699,6 @@ public class O7FlipPanel extends PluginPanel
 		return spikesSortKey;
 	}
 
-	public String getDipsSortKey()
-	{
-		return dipsSortKey;
-	}
-
 	/**
 	 * True when the Dumps tab is showing the bot-driven dump feed (from
 	 * {@code /api/runelite/bot-dumps}) instead of the general dump feed
@@ -759,19 +755,9 @@ public class O7FlipPanel extends PluginPanel
 		return spikesPage;
 	}
 
-	public int getDipsPage()
-	{
-		return dipsPage;
-	}
-
 	public int getDumpsPage()
 	{
 		return dumpsPage;
-	}
-
-	public int getAlertsPage()
-	{
-		return alertsPage;
 	}
 
 	public void setLoading(boolean loading)
@@ -786,6 +772,7 @@ public class O7FlipPanel extends PluginPanel
 		flipsTotal = total;
 		flipsPage = page;
 		renderFlips(filtered());
+		pushInsightsRecommendations();   // refresh the Item-tab empty state if it's showing
 		updateTimestamp();
 		setLoading(false);
 	}
@@ -798,14 +785,6 @@ public class O7FlipPanel extends PluginPanel
 		renderSpikes(filtered());
 	}
 
-	public void updateDips(List<DipItem> items, int total, int page)
-	{
-		allDips = items;
-		dipsTotal = total;
-		dipsPage = page;
-		renderDips(filtered());
-	}
-
 	public void updateDumps(List<DumpItem> items, int total, int page)
 	{
 		allDumps = items;
@@ -814,11 +793,9 @@ public class O7FlipPanel extends PluginPanel
 		renderDumps(filtered());
 	}
 
-	public void updateAlerts(List<AlertItem> items, int total, int page)
+	public void updateAlerts(List<AlertItem> items)
 	{
 		allAlerts = items;
-		alertsTotal = total;
-		alertsPage = page;
 		renderAlerts(filtered());
 		setLoading(false);
 	}
@@ -874,7 +851,6 @@ public class O7FlipPanel extends PluginPanel
 			cl.show(mainArea, "tabs");
 			renderFlips("");
 			renderSpikes("");
-			renderDips("");
 			renderDumps("");
 			renderBarrows("");
 			renderMoon("");
@@ -942,14 +918,6 @@ public class O7FlipPanel extends PluginPanel
 	private List<SpikeItem>  fSpikes(String q)
 	{
 		return allSpikes.stream()
-			.filter(i -> notBlocked(i.itemId))
-			.filter(i -> q.isEmpty() || matches(i.name, q))
-			.collect(Collectors.toList());
-	}
-
-	private List<DipItem>    fDips(String q)
-	{
-		return allDips.stream()
 			.filter(i -> notBlocked(i.itemId))
 			.filter(i -> q.isEmpty() || matches(i.name, q))
 			.collect(Collectors.toList());
@@ -1051,19 +1019,15 @@ public class O7FlipPanel extends PluginPanel
 
 	private List<AlertItem> sortAlerts(List<AlertItem> items)
 	{
-		Comparator<AlertItem> c;
-		if (alertsSortIdx == 1)
-		{
-			c = Comparator.comparingDouble((AlertItem x) -> x.upsidePct);
-		}
-		else if (alertsSortIdx == 2)
-		{
-			c = Comparator.comparingDouble((AlertItem x) -> x.drawdownPct);
-		}
-		else
-		{
-			c = Comparator.comparing((AlertItem x) -> x.detectedAt);
-		}
+		// Tabs are filters now — within each filtered set we always sort
+		// reverse-chronologically. Successful alerts use achievedAt (when the
+		// target was hit), everything else uses detectedAt (when it was first
+		// flagged). Falls back gracefully if either timestamp is missing.
+		boolean successfulView = (!isPremium) || alertsSortIdx == 2;
+		Comparator<AlertItem> c = successfulView
+			? Comparator.comparing((AlertItem x) ->
+				x.achievedAt != null ? x.achievedAt : (x.detectedAt != null ? x.detectedAt : ""))
+			: Comparator.comparing((AlertItem x) -> x.detectedAt != null ? x.detectedAt : "");
 		return items.stream().sorted(c.reversed()).collect(Collectors.toList());
 	}
 
@@ -1088,15 +1052,6 @@ public class O7FlipPanel extends PluginPanel
 			(item, odd) -> new SpikeItemPanel(item, itemManager, odd, plugin),
 			"No spike signals", "Check back soon");
 		hilite(spikesSortBtns, spikesSortIdx);
-	}
-
-	private void renderDips(String q)
-	{
-		fillListPaged(dipsListPanel, fDips(q), dipsPage, dipsTotal,
-			dipsPageLabel, dipsPrev, dipsNext,
-			(item, odd) -> new DipItemPanel(item, itemManager, odd, plugin),
-			"No dip signals", "Check back soon");
-		hilite(dipsSortBtns, dipsSortIdx);
 	}
 
 	private void renderDumps(String q)
@@ -1195,18 +1150,133 @@ public class O7FlipPanel extends PluginPanel
 	private void renderDecants(String q)
 	{
 		fillList(decantListPanel, sortDecants(fDecants(q)), decantPage, decantPageLabel, decantPrev, decantNext,
-			(item, odd) -> new DecantItemPanel(item, itemManager, odd),
+			(item, odd) -> new DecantItemPanel(item, itemManager, odd, plugin),
 			"No decanting opportunities", "");
 		hilite(decantSortBtns, decantSortIdx);
 	}
 
 	private void renderAlerts(String q)
 	{
-		fillListPaged(alertsListPanel, sortAlerts(fAlerts(q)), alertsPage, alertsTotal,
-			alertsPageLabel, alertsPrev, alertsNext,
-			(item, odd) -> new AlertItemPanel(item, itemManager, odd, plugin),
-			"No active price alerts", "Alerts posted twice daily");
+		alertsListPanel.removeAll();
+
+		List<AlertItem> filtered = sortAlerts(filterAlertsByStatus(fAlerts(q)));
+		if (filtered.isEmpty())
+		{
+			alertsListPanel.add(emptyLabel(emptyAlertsHeadline(), emptyAlertsSub()));
+		}
+		else
+		{
+			for (int i = 0; i < filtered.size(); i++)
+			{
+				alertsListPanel.add(new AlertItemPanel(filtered.get(i), itemManager, i % 2 != 0, plugin));
+			}
+		}
+
+		alertsListPanel.revalidate();
+		alertsListPanel.repaint();
 		hilite(alertsSortBtns, alertsSortIdx);
+	}
+
+	/**
+	 * Filters the alert list by the current sort tab. Free users only see the
+	 * "Successful" tab — alertsSortIdx is forced to 0 in {@link #buildAlertsSortBar}
+	 * for them. Premium index map: 0=Most Recent, 1=Pending, 2=Successful.
+	 */
+	private List<AlertItem> filterAlertsByStatus(List<AlertItem> input)
+	{
+		String wantStatus;
+		if (!isPremium)
+		{
+			wantStatus = "successful";
+		}
+		else if (alertsSortIdx == 1)
+		{
+			wantStatus = "pending";
+		}
+		else if (alertsSortIdx == 2)
+		{
+			wantStatus = "successful";
+		}
+		else
+		{
+			wantStatus = null;   // Most Recent — keep all
+		}
+		if (wantStatus == null)
+		{
+			return input;
+		}
+		List<AlertItem> out = new ArrayList<>();
+		for (AlertItem a : input)
+		{
+			if (wantStatus.equalsIgnoreCase(a.status))
+			{
+				out.add(a);
+			}
+		}
+		return out;
+	}
+
+	private String emptyAlertsHeadline()
+	{
+		if (!isPremium)                 return "No successful alerts yet";
+		if (alertsSortIdx == 1)         return "No pending alerts";
+		if (alertsSortIdx == 2)         return "No successful alerts yet";
+		return "No active price alerts";
+	}
+
+	private String emptyAlertsSub()
+	{
+		if (!isPremium)                 return "Premium unlocks pending + most-recent alerts";
+		if (alertsSortIdx == 1)         return "No alerts currently waiting to hit target";
+		if (alertsSortIdx == 2)         return "Successful alerts will appear here once targets hit";
+		return "Alerts posted twice daily";
+	}
+
+	/**
+	 * Small CTA card shown above the trade list when the user has no API key
+	 * set. Explains that local recording works as-is and points them to the
+	 * website sign-up to unlock cross-device tracker sync. Hidden as soon as
+	 * an API key lands in config — we don't keep nagging people once they're
+	 * signed up.
+	 */
+	private JPanel buildTrackerCta()
+	{
+		JPanel card = new JPanel(new BorderLayout(0, 4));
+		card.setBackground(new Color(0x1F1F1F));
+		card.setBorder(new javax.swing.border.CompoundBorder(
+			javax.swing.BorderFactory.createLineBorder(new Color(0x3A3A3A), 1),
+			new EmptyBorder(8, 10, 8, 10)));
+		card.setAlignmentX(Component.LEFT_ALIGNMENT);
+		card.setMaximumSize(new Dimension(Integer.MAX_VALUE, 84));
+
+		JLabel title = new JLabel("Sync your trades across devices");
+		title.setFont(com.o7flip.util.Fonts.SM_BOLD);
+		title.setForeground(new Color(0xFFAA00));
+
+		JLabel body = new JLabel("<html><font color='#A0A0A0'>"
+			+ "Local recording works as-is. Sign up at <b>07flip.com</b> with Discord, "
+			+ "paste your API key into config, and your completed flips sync to your "
+			+ "Tracker page so you can browse them from any device."
+			+ "</font></html>");
+		body.setFont(com.o7flip.util.Fonts.SM);
+
+		JButton signUp = new JButton("Open 07flip.com");
+		signUp.setFont(com.o7flip.util.Fonts.SM_BOLD);
+		signUp.setBackground(new Color(0xFFAA00));
+		signUp.setForeground(Color.BLACK);
+		signUp.setFocusPainted(false);
+		signUp.setOpaque(true);
+		signUp.setBorderPainted(false);
+		signUp.addActionListener(e -> net.runelite.client.util.LinkBrowser.browse("https://07flip.com"));
+
+		JPanel buttonRow = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 0, 0));
+		buttonRow.setBackground(card.getBackground());
+		buttonRow.add(signUp);
+
+		card.add(title,     BorderLayout.NORTH);
+		card.add(body,      BorderLayout.CENTER);
+		card.add(buttonRow, BorderLayout.SOUTH);
+		return card;
 	}
 
 	private void renderMyFlips()
@@ -1217,9 +1287,11 @@ public class O7FlipPanel extends PluginPanel
 		}
 		myFlipsListPanel.removeAll();
 
+		com.o7flip.util.ProfitCalculator.Result result = com.o7flip.util.ProfitCalculator.compute(allMyFlips);
+
 		if (myFlipsStatsPanel != null)
 		{
-			myFlipsStatsPanel.update(com.o7flip.util.ProfitCalculator.compute(allMyFlips));
+			myFlipsStatsPanel.update(result, plugin != null ? plugin.trackerStats : null);
 			if (myFlipsStatsPanel.isVisible())
 			{
 				myFlipsListPanel.add(myFlipsStatsPanel);
@@ -1227,22 +1299,227 @@ public class O7FlipPanel extends PluginPanel
 			}
 		}
 
-		if (allMyFlips.isEmpty())
+		// CTA for users without an API key: surface the website sign-up so they
+		// know how to unlock cross-device tracker sync. Local recording always
+		// works without a key; this card just explains how to take their
+		// history further.
+		String apiKey = plugin != null && plugin.getConfig() != null ? plugin.getConfig().apiKey() : null;
+		if (apiKey == null || apiKey.trim().isEmpty())
 		{
-			myFlipsListPanel.add(emptyLabel("No trades recorded yet", "Completed GE buys and sells appear here"));
+			myFlipsListPanel.add(buildTrackerCta());
+			myFlipsListPanel.add(sep());
 		}
-		else
+
+		switch (myFlipsSortIdx)
 		{
-			List<TradeRecord> reversed = new ArrayList<>(allMyFlips);
-			Collections.reverse(reversed);
-			for (int i = 0; i < reversed.size(); i++)
-			{
-				myFlipsListPanel.add(new TradeRecordPanel(reversed.get(i), itemManager, i % 2 != 0));
-				myFlipsListPanel.add(sep());
-			}
+			case 1:
+				renderMyFlipsByRecent(result);
+				break;
+			case 2:
+				renderMyFlipsByMargin(result);
+				break;
+			default:
+				renderMyFlipsActive();
+				break;
 		}
+
 		myFlipsListPanel.revalidate();
 		myFlipsListPanel.repaint();
+	}
+
+	/** Recent: per-leg trade list (newest first), with profit on matched sells. */
+	private void renderMyFlipsByRecent(com.o7flip.util.ProfitCalculator.Result result)
+	{
+		// Bond legs are hidden from the per-leg view — they're aggregated into
+		// "Membership cost" in the stats panel instead. Bond flips (buy + sell
+		// pair) still surface in Margin via the matched-flip path.
+		List<TradeRecord> filtered = new ArrayList<>();
+		for (TradeRecord t : allMyFlips)
+		{
+			if (t.itemId == com.o7flip.util.ProfitCalculator.BOND_ITEM_ID)
+			{
+				continue;
+			}
+			filtered.add(t);
+		}
+
+		if (filtered.isEmpty())
+		{
+			myFlipsListPanel.add(emptyLabel("No trades recorded yet", "Completed GE buys and sells appear here"));
+			return;
+		}
+
+		// Per-sell-timestamp profit, summed over every CompletedFlip whose sell
+		// matches that timestamp. Phantom flips (buyTotal == 0) are excluded so
+		// unmatched sells stay number-less rather than showing an inflated gross.
+		Map<Long, Long> profitBySellTimestamp = new HashMap<>();
+		for (com.o7flip.util.ProfitCalculator.CompletedFlip f : result.completedFlips)
+		{
+			if (f.buyTotal <= 0)
+			{
+				continue;
+			}
+			profitBySellTimestamp.merge(f.sellTimestamp, f.profit, Long::sum);
+		}
+
+		Collections.reverse(filtered);
+
+		int total      = filtered.size();
+		int totalPages = pageCount(total);
+		myFlipsPage    = clampPage(myFlipsPage, totalPages);
+		int from       = myFlipsPage * MY_FLIPS_PAGE_SIZE;
+		int to         = Math.min(total, from + MY_FLIPS_PAGE_SIZE);
+
+		for (int i = from; i < to; i++)
+		{
+			TradeRecord t = filtered.get(i);
+			Long rowProfit = !t.isBuy ? profitBySellTimestamp.get(t.timestamp) : null;
+			myFlipsListPanel.add(new TradeRecordPanel(t, itemManager, i % 2 != 0, rowProfit, plugin));
+			myFlipsListPanel.add(sep());
+		}
+
+		appendPageBar(total, totalPages);
+	}
+
+	/** Margin: closed flips only, sorted by profit desc. Phantoms excluded. */
+	private void renderMyFlipsByMargin(com.o7flip.util.ProfitCalculator.Result result)
+	{
+		List<com.o7flip.util.ProfitCalculator.CompletedFlip> matched = new ArrayList<>();
+		for (com.o7flip.util.ProfitCalculator.CompletedFlip f : result.completedFlips)
+		{
+			if (f.buyTotal > 0)
+			{
+				matched.add(f);
+			}
+		}
+		if (matched.isEmpty())
+		{
+			myFlipsListPanel.add(emptyLabel("No completed flips yet",
+				"Buy/sell pairs the plugin has matched will appear here"));
+			return;
+		}
+		matched.sort((a, b) -> Long.compare(b.profit, a.profit));
+
+		int total      = matched.size();
+		int totalPages = pageCount(total);
+		myFlipsPage    = clampPage(myFlipsPage, totalPages);
+		int from       = myFlipsPage * MY_FLIPS_PAGE_SIZE;
+		int to         = Math.min(total, from + MY_FLIPS_PAGE_SIZE);
+
+		for (int i = from; i < to; i++)
+		{
+			myFlipsListPanel.add(new com.o7flip.ui.CompletedFlipRow(matched.get(i), itemManager, i % 2 != 0, plugin));
+			myFlipsListPanel.add(sep());
+		}
+
+		appendPageBar(total, totalPages);
+	}
+
+	/**
+	 * Active: live GE state — one row per occupied slot, with progress bars
+	 * for partially-filled offers. Sources from {@code plugin.activeOffers},
+	 * which the plugin keeps in sync via the GrandExchangeOfferChanged event
+	 * handler. The plugin calls {@code panel.updateMyFlips(...)} from that
+	 * handler so this renders update live as offers fill.
+	 */
+	private void renderMyFlipsActive()
+	{
+		java.util.Map<Integer, com.o7flip.model.ActiveOfferSnapshot> offers =
+			plugin != null ? plugin.activeOffers : java.util.Collections.emptyMap();
+
+		if (offers == null || offers.isEmpty())
+		{
+			myFlipsListPanel.add(emptyLabel("No active GE orders",
+				"Buys and sells will show here while they're on the exchange"));
+			return;
+		}
+
+		// Sort by slot index so rows stay in a consistent order across rerenders
+		// — otherwise progress bars would visually jump as offers fill out of order.
+		List<Integer> slots = new ArrayList<>(offers.keySet());
+		Collections.sort(slots);
+
+		int rendered = 0;
+		for (int slot : slots)
+		{
+			com.o7flip.model.ActiveOfferSnapshot offer = offers.get(slot);
+			if (offer == null || offer.itemId <= 0)
+			{
+				continue;
+			}
+			myFlipsListPanel.add(new com.o7flip.ui.ActiveOfferRow(offer, itemManager, rendered % 2 != 0, plugin));
+			myFlipsListPanel.add(sep());
+			rendered++;
+		}
+
+		if (rendered == 0)
+		{
+			myFlipsListPanel.add(emptyLabel("No active GE orders",
+				"Buys and sells will show here while they're on the exchange"));
+		}
+		// No pagination on Active — max 8 rows ever (one per GE slot).
+	}
+
+	private static int pageCount(int total)
+	{
+		return Math.max(1, (total + MY_FLIPS_PAGE_SIZE - 1) / MY_FLIPS_PAGE_SIZE);
+	}
+
+	private static int clampPage(int page, int totalPages)
+	{
+		if (page < 0)            return 0;
+		if (page >= totalPages)  return totalPages - 1;
+		return page;
+	}
+
+	/**
+	 * Footer-style row showing "‹ Page 2 / 12 ›" when the underlying list
+	 * has more rows than fit on a single page. Hidden when total ≤ page size
+	 * since pagination would just be visual noise. Buttons disable at
+	 * boundaries so the user can't navigate off the ends.
+	 */
+	private void appendPageBar(int total, int totalPages)
+	{
+		if (total <= MY_FLIPS_PAGE_SIZE)
+		{
+			return;
+		}
+		JPanel bar = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.CENTER, 8, 4));
+		bar.setBackground(ColorScheme.DARK_GRAY_COLOR);
+		bar.setAlignmentX(Component.LEFT_ALIGNMENT);
+		bar.setMaximumSize(new Dimension(Integer.MAX_VALUE, 32));
+		bar.setBorder(new EmptyBorder(6, 0, 6, 0));
+
+		JButton prev = pageBtn("‹");
+		prev.setEnabled(myFlipsPage > 0);
+		prev.addActionListener(e ->
+		{
+			if (myFlipsPage > 0)
+			{
+				myFlipsPage--;
+				renderMyFlips();
+			}
+		});
+
+		JLabel label = new JLabel("Page " + (myFlipsPage + 1) + " / " + totalPages);
+		label.setFont(Fonts.SM);
+		label.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
+
+		JButton next = pageBtn("›");
+		next.setEnabled(myFlipsPage < totalPages - 1);
+		next.addActionListener(e ->
+		{
+			if (myFlipsPage < totalPages - 1)
+			{
+				myFlipsPage++;
+				renderMyFlips();
+			}
+		});
+
+		bar.add(prev);
+		bar.add(label);
+		bar.add(next);
+		myFlipsListPanel.add(bar);
 	}
 
 	/** Shows a plain status/placeholder message in the search panel. */
@@ -1283,7 +1560,7 @@ public class O7FlipPanel extends PluginPanel
 		{
 			for (int i = 0; i < items.size(); i++)
 			{
-				searchResultsPanel.add(new SearchResultPanel(items.get(i), itemManager, i % 2 != 0));
+				searchResultsPanel.add(new SearchResultPanel(items.get(i), itemManager, i % 2 != 0, plugin));
 				searchResultsPanel.add(sep());
 			}
 		}
@@ -1448,28 +1725,9 @@ public class O7FlipPanel extends PluginPanel
 		statusLabel.setFont(Fonts.SM);
 		statusLabel.setForeground(new Color(0xFFAA00));
 
-		pauseToggle = new JLabel("\u23F8");
-		pauseToggle.setFont(new Font("Dialog", Font.PLAIN, 14));
-		pauseToggle.setForeground(new Color(0x888888));
-		pauseToggle.setToolTipText("Pause auto-refresh of all data");
-		pauseToggle.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
-		pauseToggle.setBorder(new EmptyBorder(0, 0, 0, 0));
-		pauseToggle.addMouseListener(new java.awt.event.MouseAdapter()
-		{
-			@Override
-			public void mouseClicked(java.awt.event.MouseEvent e)
-			{
-				if (plugin != null)
-				{
-					plugin.togglePaused();
-				}
-			}
-		});
-
 		JPanel rightCluster = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.RIGHT, 8, 0));
 		rightCluster.setBackground(ColorScheme.DARKER_GRAY_COLOR);
 		rightCluster.add(statusLabel);
-		rightCluster.add(pauseToggle);
 
 		header.add(title,        BorderLayout.WEST);
 		header.add(rightCluster, BorderLayout.EAST);
@@ -1591,8 +1849,8 @@ public class O7FlipPanel extends PluginPanel
 		{
 			case "Flips":     return config.showFlips();
 			case "Dumps":     return config.showDumps();
-			case "Dips":      return config.showDips();
-			case "Alerts":    return config.showAlerts() && isPremium;
+			case "Item":      return config.showInsights();
+			case "Alerts":    return config.showAlerts();
 			case "Moons":     return config.showMoon()    && isSignedIn;
 			case "Barrows":   return config.showBarrows() && isSignedIn;
 			case "Decant":    return config.showDecant();
@@ -1608,7 +1866,7 @@ public class O7FlipPanel extends PluginPanel
 		// Row 1 (4 tabs)
 		"Flips", "My Trades", "Alerts", "Dumps",
 		// Row 2 (4 tabs)
-		"Moons", "Barrows", "Decant", "Dips"
+		"Moons", "Barrows", "Decant", "Item"
 	);
 
 	/**
@@ -1662,7 +1920,7 @@ public class O7FlipPanel extends PluginPanel
 		JPanel flipsContent    = buildFlipsTab();
 		JPanel dumpsContent    = buildDumpsTab();
 		JPanel spikesContent   = buildSpikesTab();
-		JPanel dipsContent     = buildDipsTab();
+		JPanel insightsContent = buildInsightsTab();
 		JPanel alertsContent   = buildGenericTab("Merch");
 		JPanel moonContent     = buildMoonTab();
 		JPanel barrowsContent  = buildGenericTab("Barrows");
@@ -1675,7 +1933,7 @@ public class O7FlipPanel extends PluginPanel
 		java.util.Map<String, JPanel> contentByName = new java.util.HashMap<>();
 		contentByName.put("Flips",     flipsContent);
 		contentByName.put("Dumps",     dumpsContent);
-		contentByName.put("Dips",      dipsContent);
+		contentByName.put("Item",      insightsContent);
 		contentByName.put("Alerts",    alertsContent);
 		contentByName.put("Moons",     moonContent);
 		contentByName.put("Barrows",   barrowsContent);
@@ -1699,7 +1957,139 @@ public class O7FlipPanel extends PluginPanel
 			tabs.addTab(name, content);
 		}
 
+		// Lazy-create the Insights panel the first time the user navigates to
+		// the Item tab. We can't construct it in buildInsightsTab() because
+		// itemManager is @Inject'd by Guice *after* the constructor returns,
+		// so capturing it at construction time would leave the panel with a
+		// permanently-null reference. By the time the user can click a tab,
+		// injection has completed and itemManager is populated.
+		tabs.addChangeListener(e ->
+		{
+			int idx = tabs.getSelectedIndex();
+			if (idx >= 0 && "Item".equals(tabs.getTitleAt(idx)))
+			{
+				ensureInsightsPanel();
+			}
+		});
+
+		// Cover the edge case where Item is the user's first tab (custom
+		// reorder) — Swing won't fire the listener for the initial selection
+		// since it happens before the listener is attached. Defer to EDT to
+		// give Guice a moment to finish field injection before we capture
+		// itemManager into the InsightsPanel constructor.
+		SwingUtilities.invokeLater(() ->
+		{
+			int idx = tabs.getSelectedIndex();
+			if (idx >= 0 && "Item".equals(tabs.getTitleAt(idx)))
+			{
+				ensureInsightsPanel();
+			}
+		});
+
 		return tabs;
+	}
+
+	private JPanel insightsHost;
+
+	private JPanel buildInsightsTab()
+	{
+		// itemManager is null at panel-construction time (Guice field-injects
+		// AFTER the constructor returns). Defer InsightsPanel creation to the
+		// first show — same lazy pattern other tabs use via lambdas.
+		insightsHost = listPanel();
+		return assembleTab(null, insightsHost, null);
+	}
+
+	/**
+	 * Context-aware target for the footer "07flip.com" button. When the user
+	 * is on the Item tab and an item is currently loaded, link directly to
+	 * that item's page on the website. Anywhere else, fall back to the
+	 * homepage.
+	 */
+	private String resolveWebsiteUrl()
+	{
+		String selectedTab = currentTabName();
+		if ("Item".equals(selectedTab) && plugin != null && plugin.currentInsights != null
+			&& plugin.currentInsights.itemId > 0)
+		{
+			return "https://07flip.com/item/" + plugin.currentInsights.itemId;
+		}
+		return WEBSITE_URL;
+	}
+
+	private String currentTabName()
+	{
+		if (tabsWrapper == null || tabsWrapper.getComponentCount() == 0)
+		{
+			return null;
+		}
+		java.awt.Component c = tabsWrapper.getComponent(0);
+		if (!(c instanceof JTabbedPane))
+		{
+			return null;
+		}
+		JTabbedPane pane = (JTabbedPane) c;
+		int idx = pane.getSelectedIndex();
+		return idx >= 0 ? pane.getTitleAt(idx) : null;
+	}
+
+	private com.o7flip.ui.InsightsPanel ensureInsightsPanel()
+	{
+		if (insightsPanel == null && insightsHost != null)
+		{
+			insightsPanel = new com.o7flip.ui.InsightsPanel(itemManager, plugin);
+			insightsHost.add(insightsPanel);
+			// Seed the empty-state recommendations with whatever's currently
+			// loaded in the Flips list. Subsequent flips refreshes flow through
+			// updateFlips() which calls back into setRecommended.
+			pushInsightsRecommendations();
+		}
+		return insightsPanel;
+	}
+
+	private void pushInsightsRecommendations()
+	{
+		if (insightsPanel == null || allFlips == null || allFlips.isEmpty())
+		{
+			return;
+		}
+		// Top 3 by score, falling back to the order the server returned (which
+		// is already 07Flip-score-sorted on the Flips fetch). Filtering out
+		// score==null items keeps "Recommended" focused on items the engine
+		// has high-confidence numbers for.
+		List<com.o7flip.model.FlipItem> top = new ArrayList<>();
+		for (com.o7flip.model.FlipItem f : allFlips)
+		{
+			if (f.flip07Score == null) continue;
+			top.add(f);
+			if (top.size() >= 3) break;
+		}
+		if (top.isEmpty() && !allFlips.isEmpty())
+		{
+			top = allFlips.subList(0, Math.min(3, allFlips.size()));
+		}
+		insightsPanel.setRecommended(top, plugin);
+	}
+
+	/** Switch to the Insights tab and show a loading state for the requested item. */
+	public void showInsightsLoading(int itemId, String fallbackName)
+	{
+		com.o7flip.ui.InsightsPanel p = ensureInsightsPanel();
+		if (p != null)
+		{
+			p.showLoading(itemId, fallbackName);
+		}
+		selectTab("Item");
+	}
+
+	/** Render the fetched Insights data, ignoring late callbacks for items the user moved off. */
+	public void showInsights(int itemId, com.o7flip.model.ItemInsights insights)
+	{
+		com.o7flip.ui.InsightsPanel p = ensureInsightsPanel();
+		if (p != null)
+		{
+			p.show(insights);
+		}
 	}
 
 	private JPanel buildMyFlipsTab()
@@ -1707,47 +2097,65 @@ public class O7FlipPanel extends PluginPanel
 		myFlipsListPanel = listPanel();
 		myFlipsStatsPanel = new com.o7flip.ui.MyTradesStatsPanel();
 
-		JButton syncBtn = pillButton("Sync");
-		syncBtn.setToolTipText("Pull your trade history from 07flip.com (requires API key + share trade data enabled)");
-		syncBtn.addActionListener(e ->
-		{
-			if (plugin != null)
+		// Three-way sort sits as the only header element. Sync is implicit
+		// (fires on plugin start + tab open via fetchTrackerStats). Clear
+		// lives on the list's right-click popup so it's reachable but not
+		// foot-gun. Web button removed — full trade history is on the
+		// website only when the user actively wants to navigate there;
+		// keeping it pinned to the panel ate vertical space without earning it.
+		myFlipsSortBtns = new JButton[3];
+		// requiresSignIn=false — all three views (Active / Recent / Margin) read
+		// from local state (tradeHistory + activeOffers). Anonymous/free users
+		// must be able to switch between them without an auth gate eating the click.
+		// Active is the default so users see live GE state the moment they open
+		// the tab — historical sorts are one click away.
+		JPanel sortBar = buildSortBar(myFlipsSortBtns,
+			new String[]{"Active", "Recent", "Margin"},
+			() -> myFlipsSortIdx,
+			i ->
 			{
-				plugin.syncTrackerHistory();
-			}
-		});
+				myFlipsSortIdx = i;
+				myFlipsPage    = 0;   // reset to first page when switching sort
+				renderMyFlips();
+			},
+			false);
 
-		JButton viewWebsiteBtn = pillButton("Web");
-		viewWebsiteBtn.setToolTipText("Open your full trade history on 07flip.com (Discord login may be required)");
-		viewWebsiteBtn.addActionListener(e -> LinkBrowser.browse("https://07flip.com/tracker?tab=ge-log"));
-
-		JButton clearBtn = pillButton("Clear");
-		clearBtn.setToolTipText("Erase the local trade history stored on this machine");
-		clearBtn.addActionListener(e ->
-		{
-			if (plugin != null)
-			{
-				plugin.clearTradeHistory();
-			}
-		});
-
-		JPanel leftButtons = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 4, 0));
-		leftButtons.setBackground(ColorScheme.DARKER_GRAY_COLOR);
-		leftButtons.add(syncBtn);
-		leftButtons.add(viewWebsiteBtn);
-
-		JPanel topBar = new JPanel(new BorderLayout());
-		topBar.setBackground(ColorScheme.DARKER_GRAY_COLOR);
-		topBar.setBorder(new EmptyBorder(6, 10, 6, 10));
-		topBar.add(leftButtons, BorderLayout.WEST);
-		topBar.add(clearBtn,    BorderLayout.EAST);
+		attachClearPopup(myFlipsListPanel);
 
 		renderMyFlips();
 
 		JPanel footer = new JPanel();
 		footer.setBackground(ColorScheme.DARKER_GRAY_COLOR);
 
-		return assembleTab(topBar, myFlipsListPanel, footer);
+		return assembleTab(sortBar, myFlipsListPanel, footer);
+	}
+
+	/**
+	 * Right-click popup on the trade list — replaces the dropped "Clear" pill
+	 * button. Attached to the list panel itself rather than individual rows so
+	 * row-level right-click handlers (if added later) can coexist.
+	 */
+	private void attachClearPopup(JPanel listPanel)
+	{
+		JPopupMenu menu = new JPopupMenu();
+		JMenuItem clearItem = new JMenuItem("Clear local trade history…");
+		clearItem.setToolTipText("Erase the local trade history stored on this machine. Server data is not affected.");
+		clearItem.addActionListener(e ->
+		{
+			int choice = javax.swing.JOptionPane.showConfirmDialog(
+				listPanel,
+				"Erase the local trade history stored on this machine?\n"
+					+ "Trades synced from 07flip.com will repopulate on next sync.",
+				"Clear local trade history",
+				javax.swing.JOptionPane.OK_CANCEL_OPTION,
+				javax.swing.JOptionPane.WARNING_MESSAGE);
+			if (choice == javax.swing.JOptionPane.OK_OPTION && plugin != null)
+			{
+				plugin.clearTradeHistory();
+			}
+		});
+		menu.add(clearItem);
+		listPanel.setComponentPopupMenu(menu);
 	}
 
 	/**
@@ -1772,30 +2180,6 @@ public class O7FlipPanel extends PluginPanel
 		}
 	}
 
-	/**
-	 * Switches to the named tab if it is currently visible.
-	 * Updates the pause toggle icon to reflect the plugin's current paused
-	 * state. Called from {@link O7FlipPlugin#togglePaused()} on the EDT.
-	 */
-	public void setPaused(boolean paused)
-	{
-		if (pauseToggle == null)
-		{
-			return;
-		}
-		if (paused)
-		{
-			pauseToggle.setText("▶");
-			pauseToggle.setForeground(new Color(0xFFAA00));
-			pauseToggle.setToolTipText("Resume auto-refresh");
-		}
-		else
-		{
-			pauseToggle.setText("⏸");
-			pauseToggle.setForeground(new Color(0x888888));
-			pauseToggle.setToolTipText("Pause auto-refresh of all data");
-		}
-	}
 
 	/**
 	 * Returns true if the tab was found and selected, false otherwise.
@@ -1826,6 +2210,21 @@ public class O7FlipPanel extends PluginPanel
 
 	public void rebuildTabs()
 	{
+		// Capture the currently-selected tab name BEFORE tearing down so we
+		// can restore it after the rebuild. Without this, every rebuild snaps
+		// the user back to the first tab — including the rebuilds triggered
+		// by background auth-status refreshes, which yanked users off
+		// My Trades / Item every refresh cycle.
+		String previouslySelected = currentSelectedTabName();
+
+		// The Item tab's lazy-init pattern caches the InsightsPanel in a
+		// field but its host container is recreated by buildInsightsTab()
+		// on every rebuild. Without clearing the field reference, the old
+		// InsightsPanel stays bound to a detached host and the new host
+		// renders blank. Null it out so ensureInsightsPanel rebuilds it
+		// against the fresh host.
+		insightsPanel = null;
+
 		tabsWrapper.removeAll();
 		tabsWrapper.add(buildTabs(), BorderLayout.CENTER);
 		tabsWrapper.revalidate();
@@ -1833,13 +2232,38 @@ public class O7FlipPanel extends PluginPanel
 		String q = filtered();
 		renderFlips(q);
 		renderSpikes(q);
-		renderDips(q);
 		renderDumps(q);
 		renderBarrows(q);
 		renderMoon(q);
 		renderDecants(q);
 		renderAlerts(q);
 		refreshBlocklistFooter();
+
+		if (previouslySelected != null)
+		{
+			selectTab(previouslySelected);
+		}
+	}
+
+	/** Returns the title of the currently selected tab, or null if none. */
+	private String currentSelectedTabName()
+	{
+		if (tabsWrapper.getComponentCount() == 0)
+		{
+			return null;
+		}
+		java.awt.Component c = tabsWrapper.getComponent(0);
+		if (!(c instanceof JTabbedPane))
+		{
+			return null;
+		}
+		JTabbedPane pane = (JTabbedPane) c;
+		int idx = pane.getSelectedIndex();
+		if (idx < 0 || idx >= pane.getTabCount())
+		{
+			return null;
+		}
+		return pane.getTitleAt(idx);
 	}
 
 	public void refreshBlocklistFooter()
@@ -2251,43 +2675,6 @@ public class O7FlipPanel extends PluginPanel
 		return assembleTab(sortRow, spikesListPanel, buildPageBar(spikesPageLabel, spikesPrev, spikesNext));
 	}
 
-	private JPanel buildDipsTab()
-	{
-		dipsSortBtns = new JButton[2];
-		JPanel sortRow = buildSortBar(dipsSortBtns, new String[]{"Recent", "Biggest Dip"},
-			() -> dipsSortIdx, i ->
-			{
-				dipsSortIdx = i;
-				dipsSortKey = i == 0 ? "recent" : "dip_pct";
-				dipsPage    = 0;
-				if (plugin != null)
-				{
-					plugin.onDipsSortChanged(dipsSortKey);
-				}
-			});
-
-		dipsListPanel = listPanel();
-		dipsPageLabel = pageLabel();
-		dipsPrev      = pageBtn("\u2039");
-		dipsNext      = pageBtn("\u203A");
-		dipsPrev.addActionListener(e ->
-		{
-			if (plugin != null)
-			{
-				plugin.onDipsPageChanged(--dipsPage);
-			}
-		});
-		dipsNext.addActionListener(e ->
-		{
-			if (plugin != null)
-			{
-				plugin.onDipsPageChanged(++dipsPage);
-			}
-		});
-
-		return assembleTab(sortRow, dipsListPanel, buildPageBar(dipsPageLabel, dipsPrev, dipsNext));
-	}
-
 	private JPanel buildDumpsTab()
 	{
 		// Sort bar — no sign-in gate (server-side sort, useful to all users)
@@ -2496,34 +2883,36 @@ public class O7FlipPanel extends PluginPanel
 					decantListPanel, buildPageBar(decantPageLabel, decantPrev, decantNext));
 
 			default: // Merch / Price Alerts
-				alertsSortBtns  = new JButton[3];
 				alertsListPanel = listPanel();
-				alertsPageLabel = pageLabel();
-				alertsPrev      = pageBtn("\u2039");
-				alertsNext      = pageBtn("\u203A");
-				alertsPrev.addActionListener(e ->
-				{
-					if (plugin != null)
-					{
-						plugin.onAlertsPageChanged(--alertsPage);
-					}
-				});
-				alertsNext.addActionListener(e ->
-				{
-					if (plugin != null)
-					{
-						plugin.onAlertsPageChanged(++alertsPage);
-					}
-				});
-				return assembleTab(buildSortBar(alertsSortBtns, new String[]{"Recent", "Upside %", "Drawdown"},
-					() -> alertsSortIdx, i ->
-					{
-						alertsSortIdx = i;
-						alertsPage = 0;
-						renderAlerts(filtered());
-					}),
-					alertsListPanel, buildPageBar(alertsPageLabel, alertsPrev, alertsNext));
+				return assembleTab(buildAlertsSortBar(), alertsListPanel, null);
 		}
+	}
+
+	/**
+	 * Three-tab sort bar for the Alerts panel: Most Recent / Pending / Successful.
+	 * Free users only ever see the Successful button \u2014 Most Recent and Pending
+	 * are hidden, and the index is forced to "Successful" on render. Premium
+	 * users see all three with Most Recent as the default.
+	 */
+	private JPanel buildAlertsSortBar()
+	{
+		String[] labels = isPremium
+			? new String[]{"Most Recent", "Pending", "Successful"}
+			: new String[]{"Successful"};
+		alertsSortBtns = new JButton[labels.length];
+		// Free user only has the Successful button \u2014 index 0 maps to "successful".
+		// Premium users get the full ordering (0=recent, 1=pending, 2=successful).
+		if (!isPremium)
+		{
+			alertsSortIdx = 0;
+		}
+		return buildSortBar(alertsSortBtns, labels,
+			() -> alertsSortIdx,
+			i ->
+			{
+				alertsSortIdx = i;
+				renderAlerts(filtered());
+			});
 	}
 
 	// =========================================================================
@@ -2559,6 +2948,19 @@ public class O7FlipPanel extends PluginPanel
 
 	private JPanel buildSortBar(JButton[] store, String[] labels, IntSupplier get, IntConsumer set)
 	{
+		return buildSortBar(store, labels, get, set, true);
+	}
+
+	/**
+	 * Sort-bar builder with an explicit "requires sign-in" flag. The default
+	 * (true) is for tabs whose sort triggers a server request — if the user
+	 * isn't signed in we silently swallow the click since the request would
+	 * fail anyway. Pass {@code false} for tabs that operate on local data
+	 * (My Trades, Active GE state) so anonymous / free users can still
+	 * switch between local views.
+	 */
+	private JPanel buildSortBar(JButton[] store, String[] labels, IntSupplier get, IntConsumer set, boolean requiresSignIn)
+	{
 		JPanel bar = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 4));
 		bar.setBackground(ColorScheme.DARKER_GRAY_COLOR);
 		bar.setBorder(new MatteBorder(0, 0, 1, 0, new Color(0x3A3A3A)));
@@ -2569,17 +2971,42 @@ public class O7FlipPanel extends PluginPanel
 			applySortStyle(btn, i == get.get());
 			btn.addActionListener(e ->
 			{
-				if (!isSignedIn)
+				if (requiresSignIn && !isSignedIn)
 				{
 					return;
 				}
 				set.accept(idx);
-				hilite(store, idx);
+				if (requiresSignIn)
+				{
+					hilite(store, idx);
+				}
+				else
+				{
+					hiliteLocal(store, idx);
+				}
 			});
 			store[i] = btn;
 			bar.add(btn);
 		}
 		return bar;
+	}
+
+	/**
+	 * Like {@link #hilite}, but doesn't gate enabled state on {@code isSignedIn}.
+	 * Used for sort bars over local-only data, where the auth gate would
+	 * incorrectly disable working buttons for anonymous users.
+	 */
+	private void hiliteLocal(JButton[] btns, int active)
+	{
+		if (btns == null)
+		{
+			return;
+		}
+		for (int i = 0; i < btns.length; i++)
+		{
+			btns[i].setEnabled(true);
+			applySortStyle(btns[i], i == active);
+		}
 	}
 
 	private static JButton pillButton(String label)
@@ -2706,9 +3133,15 @@ public class O7FlipPanel extends PluginPanel
 
 		JPanel tab = new JPanel(new BorderLayout());
 		tab.setBackground(ColorScheme.DARK_GRAY_COLOR);
-		tab.add(topBar,  BorderLayout.NORTH);
-		tab.add(sp,      BorderLayout.CENTER);
-		tab.add(pageBar, BorderLayout.SOUTH);
+		if (topBar != null)
+		{
+			tab.add(topBar, BorderLayout.NORTH);
+		}
+		tab.add(sp, BorderLayout.CENTER);
+		if (pageBar != null)
+		{
+			tab.add(pageBar, BorderLayout.SOUTH);
+		}
 		return tab;
 	}
 
@@ -2730,7 +3163,7 @@ public class O7FlipPanel extends PluginPanel
 		wb.setForeground(Color.BLACK);
 		db.setBackground(new Color(0x5865F2));
 		db.setForeground(Color.WHITE);
-		wb.addActionListener(e -> openUrl(WEBSITE_URL));
+		wb.addActionListener(e -> openUrl(resolveWebsiteUrl()));
 		db.addActionListener(e -> openUrl(DISCORD_URL));
 
 		JPanel btns = new JPanel(new GridLayout(1, 2, 6, 0));

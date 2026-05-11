@@ -30,7 +30,6 @@ import com.google.gson.JsonObject;
 import com.google.inject.Provides;
 import com.o7flip.model.AlertItem;
 import com.o7flip.model.BarrowsSet;
-import com.o7flip.model.DipItem;
 import com.o7flip.model.DumpItem;
 import com.o7flip.model.FlipItem;
 import com.o7flip.model.SpikeItem;
@@ -131,12 +130,12 @@ public class O7FlipPlugin extends Plugin
 	@Inject
 	private net.runelite.client.config.ConfigManager configManager;
 
-	private O7FlipPanel panel;
+	/** Public so overlays / row panels in other packages can read auth state via panel.isPremium(). */
+	public O7FlipPanel panel;
 	private NavigationButton navButton;
 	private ScheduledExecutorService executor;
 	private ScheduledFuture<?> refreshTask;
 	private ScheduledFuture<?> authRefreshTask;
-	private volatile boolean paused = false;
 
 	// Barrows/Moon/Decanting change with GE prices (hourly), not every minute.
 	// Only refresh them every SLOW_EVERY cycles to reduce server load.
@@ -174,6 +173,11 @@ public class O7FlipPlugin extends Plugin
 	// passes or the GE setup screen closes.
 	public volatile long confirmHighlightUntilMs = 0L;
 
+	// Last item id we've already armed the implicit-sell auto-fill for. Reset
+	// when the setup screen closes so a fresh sell of the same item still
+	// re-arms. Game-thread only.
+	private int sellSetupArmedItemId = -1;
+
 	// -------------------------------------------------------------------------
 	// Long-lived right-click queue used by the movable GE price overlay.
 	// Outlives the per-phase pendingGe* fields above so the overlay can show the
@@ -192,9 +196,9 @@ public class O7FlipPlugin extends Plugin
 	// -------------------------------------------------------------------------
 
 	/** Per-tab last-fetched lists. Written on executor thread only. */
-	private List<FlipItem>  lastFlips  = Collections.emptyList();
+	/** Most recent /flips response. Package-private so GePriceOverlay can read flip07Score from it. */
+	List<FlipItem>  lastFlips  = Collections.emptyList();
 	private List<AlertItem> lastAlerts = Collections.emptyList();
-	private List<DipItem>   lastDips   = Collections.emptyList();
 	private List<DumpItem>  lastDumps  = Collections.emptyList();
 	private List<SpikeItem> lastSpikes = Collections.emptyList();
 
@@ -225,19 +229,85 @@ public class O7FlipPlugin extends Plugin
 
 	private static final long REC_PRICE_TTL_MS = 60_000L;
 
-	/** Active GE offers keyed by slot index. Volatile reference swap. */
-	public volatile Map<Integer, GrandExchangeOffer> activeOffers = Collections.emptyMap();
+	/**
+	 * Per-item insights cache used exclusively by the GE setup-screen
+	 * overlay. Separate from {@link #currentInsights} (which the Item tab
+	 * owns) so an open GE setup can render its own chart / score / volume
+	 * without overwriting the panel's loaded item. Same TTL as
+	 * {@link #recPriceCache} since the server caches alongside it.
+	 */
+	private final java.util.concurrent.ConcurrentHashMap<Integer, com.o7flip.model.ItemInsights> overlayInsightsCache
+		= new java.util.concurrent.ConcurrentHashMap<>();
+	private final java.util.concurrent.ConcurrentHashMap<Integer, Long> overlayInsightsFetchedAt
+		= new java.util.concurrent.ConcurrentHashMap<>();
+	private final java.util.Set<Integer> overlayInsightsInFlight
+		= java.util.concurrent.ConcurrentHashMap.newKeySet();
+
+	/**
+	 * Live GE offers keyed by slot index — snapshots, NOT raw
+	 * {@link GrandExchangeOffer} references. Snapshots are captured on the
+	 * game thread (where item-name resolution is legal) so the panel can
+	 * render rows from any thread without triggering the client-thread
+	 * assertion in {@code Client.getItemDefinition}.
+	 */
+	public volatile Map<Integer, com.o7flip.model.ActiveOfferSnapshot> activeOffers = Collections.emptyMap();
 
 	/** Previous offer state per slot — used to detect buy/sell completions. Game-thread only. */
 	private final Map<Integer, GrandExchangeOfferState> prevSlotStates = new HashMap<>();
 
+	/**
+	 * Cumulative fills already written to {@link #tradeHistory} per GE slot.
+	 * Each entry is {@code {quantitySold, totalGp, offerInstanceId}} where
+	 * {@code offerInstanceId} is a unique per-offer key generated on first
+	 * observation. Compared against the live offer state every tick (and on
+	 * state-change events) to detect incremental fills so partial buys land
+	 * in tradeHistory while the offer is still BUYING — otherwise a sell of
+	 * a partially-filled buy is a phantom flip (no matching buy in history).
+	 *
+	 * The {@code offerInstanceId} is what lets {@link #recordTrade} merge
+	 * subsequent fills of the same offer into the same TradeRecord row
+	 * instead of appending one row per fill — keeping the UI clean while
+	 * preserving the per-fill timing needed for accurate cost-basis tracking.
+	 *
+	 * Cleared when the slot transitions to EMPTY (offer collected) so a new
+	 * offer in the same slot starts from zero with a fresh offerInstanceId.
+	 * A defensive check inside {@link #recordIfNewFills} also resets the
+	 * slot when {@code quantitySold} drops below what we recorded, which
+	 * catches the rare case where the slot changes offers between
+	 * observations.
+	 *
+	 * Game-thread only.
+	 */
+	private final Map<Integer, long[]> slotRecordedFills = new HashMap<>();
+
 	/** Completed trade history (oldest first). Volatile reference swap. */
 	public volatile List<TradeRecord> tradeHistory = Collections.emptyList();
+
+	/**
+	 * Latest server-authoritative My Trades stats. Null when no API key is
+	 * set, sharing is off, or the endpoint hasn't responded yet — in which
+	 * case the panel falls back to a local FIFO ProfitCalculator result.
+	 */
+	public volatile com.o7flip.model.TrackerStats trackerStats = null;
+
+	/** Currently selected item for the Insights tab; null when nothing is selected. */
+	public volatile com.o7flip.model.ItemInsights currentInsights = null;
+
+	/**
+	 * Local cache of frozen 07Flip sell prices keyed by item id. Populated when
+	 * the plugin calls {@code /v2/item/{id}/freeze} after a Buy on GE action,
+	 * cleared when the matching sell closes out the open position. The GE
+	 * setup overlay reads this map to override live rec_sell — projected
+	 * margin survives market drift between buy placement and sell setup.
+	 */
+	private final java.util.concurrent.ConcurrentHashMap<Integer, Long> frozenSellByItemId
+		= new java.util.concurrent.ConcurrentHashMap<>();
 
 	private static final int MAX_TRADE_HISTORY = 200;
 	private static final String TRADE_HISTORY_KEY = "tradeHistory";
 	private static final String LAST_TRACKER_SYNC_KEY = "lastTrackerSync";
 	private static final String BLOCKLIST_KEY = "blocklistItemIds";
+	private static final String SLOT_FILLS_KEY = "slotRecordedFills";
 
 	/** Item IDs the user has hidden from Flips/Dumps/Spikes/Dips/Alerts panels. */
 	public volatile Set<Integer> blocklist = Collections.emptySet();
@@ -247,32 +317,49 @@ public class O7FlipPlugin extends Plugin
 	{
 		log.debug("[07Flip] GE buy queued: {} ({}) @ {}", name, itemId, price);
 		setOverlayQueue(itemId, price, true);
+
+		// Auto-freeze the current 07Flip rec_buy / rec_sell pair the moment
+		// the user intends to buy. The sell-side overlay later reads the
+		// frozen sell price via /v2/item/{id} so projected margin survives
+		// any market drift between buy placement and sell setup. We try the
+		// Flips list first (cheapest source of the rec pair); if the item
+		// isn't in any tracked list, fall back to /recommended-prices.
+		freezeFromTrackedOrFetch(itemId);
 		clientThread.invokeLater(() ->
 		{
-			// GE_ITEM_SEARCH only works when a buy slot is active (offer container visible)
-			// AND the user is on the main GE screen. If the offer setup is open, firing the
-			// search would write into the price-input chatbox and corrupt the user's input —
-			// arm the queue instead and let onGameTick fire once they back out to main GE.
-			Widget offerContainer = client.getWidget(ComponentID.GRAND_EXCHANGE_OFFER_CONTAINER);
-			Widget setup = client.getWidget(InterfaceID.GeOffers.SETUP);
-			boolean geOpen = offerContainer != null && !offerContainer.isHidden();
-			boolean setupOpen = setup != null && !setup.isHidden();
-			if (geOpen && !setupOpen)
-			{
-				fillGeBuyOffer(itemId, price, name);
-				return;
-			}
+			// Always arm the queue first. The search chatbox only appears AFTER
+			// the user clicks an empty buy slot — on the slots view the widget
+			// doesn't exist yet, so the immediate-fire path below would silently
+			// no-op. onGameTick polls every tick and fires once the chatbox
+			// becomes available, clearing the queue on success.
 			pendingGeBuyItemId = itemId;
 			pendingGeBuyPrice  = price;
 			pendingGeBuyName   = name;
+
+			Widget setup = client.getWidget(InterfaceID.GeOffers.SETUP);
+			boolean setupOpen = setup != null && !setup.isHidden();
 			if (setupOpen)
 			{
 				notifier.notify("Close the current offer first — your buy for " + name + " is queued");
+				return;
 			}
-			else
+
+			// Edge case: search chatbox is already open (e.g. user clicked a
+			// slot before right-clicking the panel). Fire immediately; clear
+			// the queue on success so onGameTick doesn't double-fire.
+			if (fillGeBuyOffer(itemId, price, name))
 			{
-				notifier.notify("Open the Grand Exchange, click an empty buy slot, then your offer will pre-fill for " + name);
+				pendingGeBuyItemId = -1;
+				pendingGeBuyPrice  = -1;
+				pendingGeBuyName   = null;
+				return;
 			}
+
+			Widget offerContainer = client.getWidget(ComponentID.GRAND_EXCHANGE_OFFER_CONTAINER);
+			boolean geOpen = offerContainer != null && !offerContainer.isHidden();
+			notifier.notify(geOpen
+				? "Click an empty buy slot — your offer will pre-fill for " + name
+				: "Open the Grand Exchange, click an empty buy slot, then your offer will pre-fill for " + name);
 		});
 	}
 
@@ -306,11 +393,184 @@ public class O7FlipPlugin extends Plugin
 		overlayQueueExpiresAt = 0L;
 	}
 
+	/**
+	 * Posts a price freeze for the given item using the best rec_buy / rec_sell
+	 * pair we have at hand. Tries the loaded Flips list first; if the item
+	 * isn't there, falls back to {@code /recommended-prices}. Best-effort —
+	 * any failure is logged at warn level by the API client. No-op when the
+	 * user has no API key (freeze is account-scoped).
+	 */
+	private void freezeFromTrackedOrFetch(int itemId)
+	{
+		if (executor == null || executor.isShutdown())
+		{
+			return;
+		}
+		executor.execute(() ->
+		{
+			for (FlipItem f : lastFlips)
+			{
+				if (f.itemId == itemId && f.recBuyPrice != null && f.recSellPrice != null)
+				{
+					freezeAndCache(itemId, f.recBuyPrice, f.recSellPrice);
+					return;
+				}
+			}
+			// Not in Flips list — try the cached /recommended-prices, which the
+			// GE overlay already populates on hover for arbitrary items. Triggers
+			// an async fetch if cold; we'll just miss the freeze for this attempt.
+			com.o7flip.model.RecommendedPrices rp = getRecommendedPrices(itemId);
+			if (rp != null && rp.recBuyPrice != null && rp.recSellPrice != null)
+			{
+				freezeAndCache(itemId, rp.recBuyPrice, rp.recSellPrice);
+			}
+			else
+			{
+				log.debug("[07Flip] Skipping freeze for item {} — no rec prices available", itemId);
+			}
+		});
+	}
+
+	private void freezeAndCache(int itemId, long recBuy, long recSell)
+	{
+		// Cache immediately so the GE overlay can use the frozen sell without
+		// waiting for the server round trip. If the POST eventually fails the
+		// local cache stays — the next sell still gets the right number, and
+		// the server miss matters only across plugin restarts.
+		frozenSellByItemId.put(itemId, recSell);
+		apiClient.postFreeze(itemId, recBuy, recSell, null);
+	}
+
+	/** Returns the locally-tracked frozen sell price for an item, or null if none. */
+	public Long getFrozenSell(int itemId)
+	{
+		return frozenSellByItemId.get(itemId);
+	}
+
+	/**
+	 * Picks the best sell price the plugin knows of for an item, used by the
+	 * implicit-sell auto-fill when the user clicks an inventory item directly
+	 * (no panel right-click). Order of precedence:
+	 * <ol>
+	 *   <li>{@code max(frozen, liveRec)} — frozen preserves the projected
+	 *       margin from when the buy was placed; live rec captures any upward
+	 *       drift so the user takes the better number.</li>
+	 *   <li>Live rec alone, if no freeze exists.</li>
+	 *   <li>Frozen alone, if live rec is missing.</li>
+	 *   <li>-1 — nothing recommended; the user types their own price.</li>
+	 * </ol>
+	 */
+	long computeAutoSellPrice(int itemId)
+	{
+		Long frozen = frozenSellByItemId.get(itemId);
+		Long live   = lookupLiveRecSell(itemId);
+		long best   = -1L;
+		if (frozen != null && frozen > 0)        best = frozen;
+		if (live   != null && live   > 0 && live > best) best = live;
+		return best;
+	}
+
+	private Long lookupLiveRecSell(int itemId)
+	{
+		// First check the Flips list — cheapest source, already on-hand.
+		for (FlipItem f : lastFlips)
+		{
+			if (f.itemId == itemId && f.recSellPrice != null && f.recSellPrice > 0)
+			{
+				return f.recSellPrice;
+			}
+		}
+		// Fall back to the /recommended-prices cache populated by the GE overlay.
+		com.o7flip.model.RecommendedPrices rp = recPriceCache.get(itemId);
+		if (rp != null && rp.recSellPrice != null && rp.recSellPrice > 0)
+		{
+			return rp.recSellPrice;
+		}
+		return null;
+	}
+
+	/**
+	 * On-demand fetch for the implicit-sell flow. Delegates to the shared
+	 * rec-prices fetcher whose completion callback now also drives the
+	 * sell-arming check, so this single call kicks off (or piggybacks on)
+	 * the fetch and ensures the highlight + auto-fill arm once the response
+	 * lands — including when {@link GePriceOverlay} already triggered the
+	 * same fetch via its per-frame cache check.
+	 */
+	private void kickoffSellAutoFillFetch(int itemId)
+	{
+		getRecommendedPrices(itemId);
+	}
+
+	/**
+	 * Called on the client thread when a rec-prices fetch returns. Re-validates
+	 * that the user is still on a sell setup for the same item before arming
+	 * {@link #pendingGeInputPrice} — guards against the user backing out,
+	 * switching items, or starting a buy in the interim.
+	 *
+	 * Uses the same ground-truth checks as {@link #detectAndArmSellSetup}:
+	 * setup widget visible + offer-type varbit == sell + item-id match.
+	 */
+	private void armSellPriceIfStillRelevant(int itemId)
+	{
+		Widget setup = client.getWidget(InterfaceID.GeOffers.SETUP);
+		if (!isSellSetupVisible(setup))
+		{
+			// Setup closed, hidden, or showing a buy screen — never overwrite a
+			// buy price.
+			return;
+		}
+		int current = resolveItemIdFromSetupWidget();
+		if (current != itemId)
+		{
+			return;
+		}
+		long auto = computeAutoSellPrice(itemId);
+		if (auto > 0)
+		{
+			pendingGeInputPrice = auto;
+		}
+	}
+
+	/**
+	 * Fires when a sell either fully consumes the open position for an item
+	 * (good — the flip cycle is done) or is recorded without one ever having
+	 * existed (no-op). Posts the server-side unfreeze and clears the local cache.
+	 * Best-effort — server failures are logged, not propagated.
+	 */
+	private void unfreezeIfPositionClosed(int itemId)
+	{
+		Long cached = frozenSellByItemId.get(itemId);
+		if (cached == null)
+		{
+			return;
+		}
+		// Recompute FIFO state — if the open position for this item is gone
+		// (qty = 0 means every buy lot matched into a sell), the flip cycle
+		// has completed and the freeze can be cleared.
+		com.o7flip.util.ProfitCalculator.Result r = com.o7flip.util.ProfitCalculator.compute(tradeHistory);
+		com.o7flip.util.ProfitCalculator.OpenPosition pos = r.openPositions.get(itemId);
+		if (pos != null && pos.remainingQty > 0)
+		{
+			// Partial sell — leave the freeze in place; remaining qty still
+			// flips with the same target.
+			return;
+		}
+		frozenSellByItemId.remove(itemId);
+		apiClient.postUnfreeze(itemId, null);
+	}
+
 	/** True when a panel right-click is still awaiting the user picking a slot. */
 	public boolean hasOverlayQueue()
 	{
 		return overlayQueueItemId != -1
 			&& System.currentTimeMillis() < overlayQueueExpiresAt;
+	}
+
+	/** Direction of the currently-queued panel action. Only meaningful when {@link #hasOverlayQueue()}. */
+	public boolean overlayQueueIsBuy()
+	{
+		return overlayQueueIsBuy;
 	}
 
 	/** Returns the queued price for the given (itemId, direction) pair, or -1 if none. */
@@ -349,6 +609,7 @@ public class O7FlipPlugin extends Plugin
 
 		loadTradeHistory();
 		loadBlocklist();
+		loadSlotRecordedFills();
 
 		executor = Executors.newSingleThreadScheduledExecutor();
 		fetchAuthStatus();
@@ -359,6 +620,7 @@ public class O7FlipPlugin extends Plugin
 			this::fetchAuthStatus, 15, 15, TimeUnit.MINUTES);
 		executor.execute(() -> fetchAll(true)); // forced — panel not yet visible at startup
 		executor.execute(this::doSyncTrackerHistory);
+		executor.execute(this::doFetchTrackerStats);
 		refreshTask = executor.scheduleAtFixedRate(
 			() -> fetchAll(false),
 			config.refreshIntervalSeconds(),
@@ -402,6 +664,18 @@ public class O7FlipPlugin extends Plugin
 	@Subscribe
 	public void onGameTick(GameTick event)
 	{
+		// Keep activeOffers in sync with the client's view of the GE.
+		// GrandExchangeOfferChanged only fires on state *transitions*, so any
+		// offer placed before the plugin loaded (e.g. user logged in with
+		// offers already running) is invisible to the event-driven path.
+		// Game-tick polling closes that gap — cheap snapshot, hash-compared.
+		syncActiveOffersFromClient();
+
+		// Mirror the buy flow's deterministic queue, but for sells the trigger
+		// is "sell setup screen is visible" — there's no panel right-click to
+		// arm an explicit queue. Idempotent per-setup-instance.
+		detectAndArmSellSetup();
+
 		if (pendingGeBuyItemId == -1)
 		{
 			return;
@@ -411,53 +685,232 @@ public class O7FlipPlugin extends Plugin
 		{
 			return;
 		}
-		// Wait until the user has backed out of any in-progress offer setup —
-		// firing the search into the price-input chatbox would clobber their entry.
-		Widget setup = client.getWidget(InterfaceID.GeOffers.SETUP);
-		if (setup != null && !setup.isHidden())
+		// Only reset the pending queue when fillGeBuyOffer actually types.
+		// The search-input widget only appears AFTER the user clicks an empty
+		// buy slot — until then fillGeBuyOffer returns false and we leave the
+		// queue armed for the next tick. (Previously we also bailed when the
+		// Set-up-offer screen was visible, but that screen IS where the search
+		// chatbox lives, so the bail prevented every successful fire.)
+		if (fillGeBuyOffer(pendingGeBuyItemId, pendingGeBuyPrice, pendingGeBuyName))
 		{
-			return;
+			pendingGeBuyItemId = -1;
+			pendingGeBuyPrice  = -1;
+			pendingGeBuyName   = null;
 		}
-		final int    itemId = pendingGeBuyItemId;
-		final long   price  = pendingGeBuyPrice;
-		final String name   = pendingGeBuyName;
-		pendingGeBuyItemId = -1;
-		pendingGeBuyPrice  = -1;
-		pendingGeBuyName   = null;
-		fillGeBuyOffer(itemId, price, name);
 	}
 
 	// GE search mode integer used by MESLAYERMODE to indicate an active GE item search.
 	private static final int GE_SEARCH_MODE = 14;
 
-	private void fillGeBuyOffer(int itemId, long price, String name)
+	/**
+	 * @return true when the search was actually fired into the chatbox.
+	 *         False means the widget wasn't ready yet — callers should
+	 *         leave any pending-queue state in place so the next opportunity
+	 *         (game tick after the user clicks an empty buy slot) can retry.
+	 */
+	private boolean fillGeBuyOffer(int itemId, long price, String name)
 	{
-		// Pre-fill the search text, then trigger the search by running the chatbox
-		// input widget's own key-listener script — the same mechanism GE Filters uses.
-		client.setVarcStrValue(VarClientID.MESLAYERINPUT, name);
-		client.setVarcIntValue(VarClientID.MESLAYERMODE, GE_SEARCH_MODE);
 		Widget searchBox = client.getWidget(ComponentID.CHATBOX_FULL_INPUT);
-		if (searchBox == null)
+		if (searchBox == null || searchBox.isHidden())
 		{
-			log.debug("[07Flip] GE search box widget not found");
-			return;
+			log.debug("[07Flip] GE search box widget not ready (user hasn't clicked an empty buy slot yet)");
+			return false;
 		}
 		Object[] scriptArgs = searchBox.getOnKeyListener();
 		if (scriptArgs == null)
 		{
 			log.debug("[07Flip] GE search box has no key listener");
-			return;
+			return false;
 		}
+		// Pre-fill the search text, then trigger the search by running the chatbox
+		// input widget's own key-listener script — the same mechanism GE Filters uses.
+		client.setVarcStrValue(VarClientID.MESLAYERINPUT, name);
+		client.setVarcIntValue(VarClientID.MESLAYERMODE, GE_SEARCH_MODE);
 		// Store the price + itemId so onScriptPostFired(GE_OFFERS_SETUP_BUILD) can arm the
 		// highlight only if the user ends up selecting the item we searched for. Without
 		// the itemId guard, any item chosen from search would trigger the highlight.
 		pendingGeSetPrice  = price;
 		pendingGeSetItemId = itemId;
 		client.runScript(scriptArgs);
+		return true;
 	}
 
 	// Script ID 108 fires when the GE price chatbox input opens (after clicking "Enter price").
 	private static final int SCRIPT_CHATBOX_INPUT_OPEN = 108;
+
+	/**
+	 * Game-tick poller for the implicit-sell auto-fill. Mirrors the buy flow's
+	 * deterministic queue: "if a sell setup screen is visible for an item we
+	 * haven't already armed, arm it."
+	 *
+	 * Why this is more reliable than reacting to {@code GE_OFFERS_SETUP_BUILD}:
+	 * <ul>
+	 *   <li>SETUP_BUILD fires multiple times during a single offer screen and
+	 *       sometimes not at all on inventory-click sells.</li>
+	 *   <li>{@code TRADINGPOST_SEARCH} can hold a stale value from an earlier
+	 *       GE search, so it's not a trustworthy buy/sell discriminator.</li>
+	 *   <li>The setup widget itself is the ground truth — if it's visible and
+	 *       the offer-type varbit says sell, this is a sell setup, full stop.</li>
+	 * </ul>
+	 *
+	 * Idempotency: {@link #sellSetupArmedItemId} latches the current item so we
+	 * only arm once per setup instance. The latch clears when the setup widget
+	 * closes, letting the next sell re-arm.
+	 *
+	 * Must run on the game thread.
+	 */
+	private void detectAndArmSellSetup()
+	{
+		Widget setup = client.getWidget(InterfaceID.GeOffers.SETUP);
+		if (setup == null || setup.isHidden())
+		{
+			// Setup closed — reset latch so the next sell setup arms fresh.
+			sellSetupArmedItemId = -1;
+			return;
+		}
+		// The setup widget has a static child whose text is either "Sell offer"
+		// or "Buy offer" — this is the ground truth for which side the screen
+		// represents. We can't trust GE_NEWOFFER_TYPE varbit (semantics aren't
+		// what existing code assumed) or TRADINGPOST_SEARCH (stale values).
+		if (!isSellSetupVisible(setup))
+		{
+			return;
+		}
+		int itemId = resolveItemIdFromSetupWidget();
+		if (itemId <= 0)
+		{
+			log.debug("[07Flip] sell-setup detector: setup visible but itemId resolved to {} — no arm", itemId);
+			return;
+		}
+		if (itemId == sellSetupArmedItemId)
+		{
+			return;
+		}
+		// Latch immediately so we don't re-fetch every tick while the response
+		// is in flight. If the fetch fails we accept the user typing manually.
+		sellSetupArmedItemId = itemId;
+
+		long auto = computeAutoSellPrice(itemId);
+		if (auto > 0)
+		{
+			pendingGeInputPrice = auto;
+			log.debug("[07Flip] sell-setup detector: armed sell price {} for itemId {}", auto, itemId);
+			return;
+		}
+		// No cached recommendation yet — trigger the shared rec-prices fetcher.
+		// Its completion callback runs {@code armSellPriceIfStillRelevant}
+		// which arms pendingGeInputPrice once the response lands.
+		log.debug("[07Flip] sell-setup detector: no cached rec for itemId {}, kicking off fetch", itemId);
+		getRecommendedPrices(itemId);
+	}
+
+	/**
+	 * Ground-truth check for "this setup screen is a sell offer, not a buy".
+	 * Scans the setup widget's child text labels for the string "sell offer"
+	 * (case-insensitive) which Jagex renders at the top-left of the sell setup
+	 * screen. Buy setups render "Buy offer" in the same spot.
+	 *
+	 * Trusted because:
+	 * <ul>
+	 *   <li>The text comes from the actual rendered screen, not a varbit/varp
+	 *       whose semantics we can't probe without breakage.</li>
+	 *   <li>Both buy and sell go through the same setup interface, so widget
+	 *       text is the only thing that actually changes between them.</li>
+	 * </ul>
+	 */
+	private static boolean isSellSetupVisible(Widget setup)
+	{
+		if (setup == null || setup.isHidden())
+		{
+			return false;
+		}
+		return widgetTreeHasText(setup, "sell offer");
+	}
+
+	/** Case-insensitive recursive text search over a widget's child tree. */
+	private static boolean widgetTreeHasText(Widget w, String needle)
+	{
+		if (w == null)
+		{
+			return false;
+		}
+		String text = w.getText();
+		if (text != null && text.toLowerCase().contains(needle))
+		{
+			return true;
+		}
+		Widget[] dyn = w.getDynamicChildren();
+		if (dyn != null)
+		{
+			for (Widget c : dyn)
+			{
+				if (widgetTreeHasText(c, needle)) return true;
+			}
+		}
+		Widget[] stat = w.getStaticChildren();
+		if (stat != null)
+		{
+			for (Widget c : stat)
+			{
+				if (widgetTreeHasText(c, needle)) return true;
+			}
+		}
+		Widget[] nest = w.getNestedChildren();
+		if (nest != null)
+		{
+			for (Widget c : nest)
+			{
+				if (widgetTreeHasText(c, needle)) return true;
+			}
+		}
+		return false;
+	}
+
+	/**
+	 * Scans the GE setup widget tree for the item icon and returns its id.
+	 * Used when the user reaches the sell setup screen via the inventory-click
+	 * path, where {@code TRADINGPOST_SEARCH} is never set. Mirrors the lookup
+	 * that {@link GePriceOverlay#resolveCurrentItemId} runs for the same
+	 * reason — keeping them in sync prevents one surface from working while
+	 * the other silently no-ops.
+	 */
+	private int resolveItemIdFromSetupWidget()
+	{
+		Widget setup = client.getWidget(InterfaceID.GeOffers.SETUP);
+		if (setup == null || setup.isHidden())
+		{
+			return -1;
+		}
+		Widget[] dyn = setup.getDynamicChildren();
+		if (dyn != null)
+		{
+			for (Widget w : dyn)
+			{
+				if (w == null) continue;
+				int id = w.getItemId();
+				if (id > 0) return id;
+			}
+		}
+		Widget[] stat = setup.getStaticChildren();
+		if (stat != null)
+		{
+			for (Widget w : stat)
+			{
+				if (w == null) continue;
+				int id = w.getItemId();
+				if (id > 0) return id;
+				Widget[] grand = w.getDynamicChildren();
+				if (grand == null) continue;
+				for (Widget g : grand)
+				{
+					if (g == null) continue;
+					int gid = g.getItemId();
+					if (gid > 0) return gid;
+				}
+			}
+		}
+		return -1;
+	}
 
 	@Subscribe
 	public void onScriptPostFired(ScriptPostFired event)
@@ -470,7 +923,14 @@ public class O7FlipPlugin extends Plugin
 			// after the user backs out without placing the offer.
 			clearOverlayQueue();
 
-			int currentItemId = client.getVarpValue(VarPlayerID.TRADINGPOST_SEARCH);
+			// TRADINGPOST_SEARCH is only set when the item was picked from the
+			// GE search interface (the buy flow). For inventory-click sells the
+			// user never touches search, so the varp stays 0. We keep the
+			// original varp value as a discriminator between flows further
+			// down, and fall back to scanning the setup widget for the actual
+			// item id when search wasn't used.
+			int searchedItemId = client.getVarpValue(VarPlayerID.TRADINGPOST_SEARCH);
+			int currentItemId = searchedItemId > 0 ? searchedItemId : resolveItemIdFromSetupWidget();
 			long price = -1;
 
 			if (pendingGeSetPrice != -1)
@@ -498,6 +958,29 @@ public class O7FlipPlugin extends Plugin
 				}
 			}
 
+			// The implicit sell-setup flow no longer runs here — SETUP_BUILD
+			// turned out to be too unreliable as a sell trigger (fires multiple
+			// times for buys, sometimes not at all for inventory-click sells).
+			// {@link #detectAndArmSellSetup} polls the setup widget on every
+			// game tick instead, which is the ground truth for "sell screen
+			// open right now" regardless of script-event quirks.
+			//
+			// BUT: we still use SETUP_BUILD as an EARLY signal to kick off the
+			// rec-prices fetch ~600ms ahead of the game-tick detector. The
+			// fetch path is idempotent (in-flight tracking) so triggering it
+			// twice is harmless. This makes the "..." auto-fill feel reliable
+			// instead of inconsistent — the fetch is more likely to have
+			// landed by the time the user clicks "...".
+			Widget setup = client.getWidget(InterfaceID.GeOffers.SETUP);
+			if (setup != null && !setup.isHidden() && isSellSetupVisible(setup))
+			{
+				int sellItemId = resolveItemIdFromSetupWidget();
+				if (sellItemId > 0 && computeAutoSellPrice(sellItemId) <= 0)
+				{
+					getRecommendedPrices(sellItemId);
+				}
+			}
+
 			if (price != -1)
 			{
 				pendingGeInputPrice = price;
@@ -510,14 +993,35 @@ public class O7FlipPlugin extends Plugin
 		// has been armed by the right-click queue or the GePriceOverlay menu.
 		if (event.getScriptId() == SCRIPT_CHATBOX_INPUT_OPEN)
 		{
-			if (pendingGeInputPrice == -1)
-			{
-				return;
-			}
 			Widget setup = client.getWidget(InterfaceID.GeOffers.SETUP);
 			if (setup == null || setup.isHidden())
 			{
 				pendingGeInputPrice = -1;
+				return;
+			}
+
+			// Last-ditch arm: if nothing has been queued for input (e.g. the
+			// user clicked "..." faster than the game-tick detector could fire,
+			// or the rec-prices fetch landed but hit the latch and didn't make
+			// it through), try to compute a sell price right now from the cache.
+			// This is what makes the "..." auto-fill feel reliable instead of
+			// hit-or-miss.
+			if (pendingGeInputPrice == -1 && isSellSetupVisible(setup))
+			{
+				int currentItemId = resolveItemIdFromSetupWidget();
+				if (currentItemId > 0)
+				{
+					long auto = computeAutoSellPrice(currentItemId);
+					if (auto > 0)
+					{
+						pendingGeInputPrice = auto;
+						log.debug("[07Flip] chatbox-open last-ditch armed sell price {} for itemId {}", auto, currentItemId);
+					}
+				}
+			}
+
+			if (pendingGeInputPrice == -1)
+			{
 				return;
 			}
 			final long price = pendingGeInputPrice;
@@ -649,7 +1153,7 @@ public class O7FlipPlugin extends Plugin
 			case "showFlips":
 			case "showDumps":
 			case "showSpikes":
-			case "showDips":
+			case "showItem":
 			case "showAlerts":
 			case "showMoon":
 			case "showBarrows":
@@ -753,18 +1257,6 @@ public class O7FlipPlugin extends Plugin
 			sections.add("spikes", p);
 		}
 
-		if (config.showDips())
-		{
-			JsonObject p = new JsonObject();
-			String sort = panel.getDipsSortKey();
-			if (sort != null && !sort.isEmpty())
-			{
-				p.addProperty("sort", sort);
-			}
-			p.addProperty("page", panel.getDipsPage());
-			sections.add("dips", p);
-		}
-
 		// Dumps: when the source toggle is on the bot-dumps feed we fetch
 		// it via a separate /bot-dumps call below the bundle, so skip the
 		// "dumps" bundle section entirely in that mode.
@@ -798,7 +1290,11 @@ public class O7FlipPlugin extends Plugin
 		if (config.showAlerts())
 		{
 			JsonObject p = new JsonObject();
-			p.addProperty("page", panel.getAlertsPage());
+			// Pagination dropped per the redesign — fetch up to 200 in one shot,
+			// filter pending vs successful client-side. Free users still only
+			// receive successful alerts (server-enforced).
+			p.addProperty("limit", 200);
+			p.addProperty("status", "all");
 			sections.add("alerts", p);
 		}
 
@@ -829,9 +1325,7 @@ public class O7FlipPlugin extends Plugin
 
 		final int flipsPage   = panel.getFlipsPage();
 		final int spikesPage  = panel.getSpikesPage();
-		final int dipsPage    = panel.getDipsPage();
 		final int dumpsPage   = panel.getDumpsPage();
-		final int alertsPage  = panel.getAlertsPage();
 
 		apiClient.fetchBundle(
 			sections,
@@ -844,12 +1338,6 @@ public class O7FlipPlugin extends Plugin
 				rebuildTrackedItems();
 				SwingUtilities.invokeLater(() -> panel.updateSpikes(items, total, spikesPage));
 			} : null,
-			config.showDips() ? (items, total) ->
-			{
-				lastDips = items;
-				rebuildTrackedItems();
-				SwingUtilities.invokeLater(() -> panel.updateDips(items, total, dipsPage));
-			} : null,
 			config.showDumps() ? (items, total) ->
 			{
 				lastDumps = items;
@@ -860,7 +1348,7 @@ public class O7FlipPlugin extends Plugin
 			{
 				lastAlerts = items;
 				rebuildTrackedItems();
-				SwingUtilities.invokeLater(() -> panel.updateAlerts(items, total, alertsPage));
+				SwingUtilities.invokeLater(() -> panel.updateAlerts(items));
 			} : null,
 			(config.showBarrows() && includeSlow) ? sets    -> SwingUtilities.invokeLater(() -> panel.updateBarrows(sets))    : null,
 			(config.showMoon()    && includeSlow) ? sets    -> SwingUtilities.invokeLater(() -> panel.updateMoon(sets))       : null,
@@ -920,7 +1408,7 @@ public class O7FlipPlugin extends Plugin
 		}
 		apiClient.fetchBundle(
 			sections,
-			null, null, null, null, null,
+			null, null, null, null,
 			config.showBarrows() ? sets    -> SwingUtilities.invokeLater(() -> panel.updateBarrows(sets))      : null,
 			config.showMoon()    ? sets    -> SwingUtilities.invokeLater(() -> panel.updateMoon(sets))         : null,
 			config.showDecant()  ? decants -> SwingUtilities.invokeLater(() -> panel.updateDecanting(decants)) : null,
@@ -965,20 +1453,6 @@ public class O7FlipPlugin extends Plugin
 			d.alertSellTarget   = a.sellTarget;
 			d.alertUpsidePct    = a.upsidePct;
 			d.presentIn.add("Alerts");
-		}
-
-		for (DipItem di : lastDips)
-		{
-			TrackedItemData d = map.computeIfAbsent(di.itemId, id ->
-			{
-				TrackedItemData t = new TrackedItemData();
-				t.itemId = id;
-				t.name = di.name;
-				return t;
-			});
-			d.dipBuyPrice = di.buyPrice;
-			d.dipPct      = di.dipPct;
-			d.presentIn.add("Dips");
 		}
 
 		for (DumpItem du : lastDumps)
@@ -1045,6 +1519,90 @@ public class O7FlipPlugin extends Plugin
 	// GE offer tracking — keeps activeOffers in sync and records completions
 	// -------------------------------------------------------------------------
 
+	/** Hash of the last polled offer state — used to skip UI updates when nothing changed. */
+	private long lastActiveOffersHash = 0L;
+
+	/**
+	 * Polls the client's authoritative GE state and updates {@link #activeOffers}
+	 * if anything has changed. Necessary because {@link GrandExchangeOfferChanged}
+	 * only fires on transitions — offers placed before the plugin loaded (or
+	 * before login) don't get events. Cheap: 8-slot array read + 8 ints hashed.
+	 *
+	 * Game-thread only — must run during {@code onGameTick} or via
+	 * {@code clientThread.invoke}. Reading {@code client.getGrandExchangeOffers()}
+	 * from any other thread is a data race.
+	 */
+	private void syncActiveOffersFromClient()
+	{
+		GrandExchangeOffer[] offers = client.getGrandExchangeOffers();
+		if (offers == null)
+		{
+			return;
+		}
+
+		// Build a fresh map of non-empty slots, plus a hash that captures
+		// every field the UI cares about (slot, itemId, qtySold, total, state).
+		// If the hash matches what we cached last tick, nothing rendered
+		// would change — skip the EDT trip entirely.
+		Map<Integer, com.o7flip.model.ActiveOfferSnapshot> next = new HashMap<>();
+		long hash = 0L;
+		for (int slot = 0; slot < offers.length; slot++)
+		{
+			GrandExchangeOffer o = offers[slot];
+			if (o == null || o.getState() == GrandExchangeOfferState.EMPTY)
+			{
+				continue;
+			}
+			next.put(slot, snapshot(slot, o));
+			// Catch partial fills that happen between GrandExchangeOfferChanged
+			// events. Without this, a buy that fills 2 of 6 and then gets sold
+			// before completing would show as a phantom flip in My Trades —
+			// the buy isn't in tradeHistory because BOUGHT hasn't fired yet.
+			if (o.getState() == GrandExchangeOfferState.BUYING
+				|| o.getState() == GrandExchangeOfferState.SELLING)
+			{
+				recordIfNewFills(o, slot);
+			}
+			hash = hash * 31 + slot;
+			hash = hash * 31 + o.getItemId();
+			hash = hash * 31 + o.getQuantitySold();
+			hash = hash * 31 + o.getTotalQuantity();
+			hash = hash * 31 + o.getState().ordinal();
+		}
+
+		if (hash == lastActiveOffersHash)
+		{
+			return;
+		}
+		lastActiveOffersHash = hash;
+		activeOffers = Collections.unmodifiableMap(next);
+
+		final List<TradeRecord> snap = tradeHistory;
+		SwingUtilities.invokeLater(() -> panel.updateMyFlips(snap));
+	}
+
+	/**
+	 * Resolves an item name via {@code Client.getItemDefinition} (legal only
+	 * on the game thread) and packages the offer into an EDT-safe snapshot.
+	 * Always called from the game thread — either {@link #onGameTick} polling
+	 * or the {@code GrandExchangeOfferChanged} event handler.
+	 */
+	private com.o7flip.model.ActiveOfferSnapshot snapshot(int slot, GrandExchangeOffer offer)
+	{
+		String name = "Item " + offer.getItemId();
+		try
+		{
+			name = client.getItemDefinition(offer.getItemId()).getName();
+		}
+		catch (Exception ignored)
+		{
+			// Cache miss / unknown id — keep the placeholder.
+		}
+		return new com.o7flip.model.ActiveOfferSnapshot(
+			slot, offer.getItemId(), name, offer.getPrice(),
+			offer.getQuantitySold(), offer.getTotalQuantity(), offer.getState());
+	}
+
 	@Subscribe
 	public void onGrandExchangeOfferChanged(GrandExchangeOfferChanged event)
 	{
@@ -1052,17 +1610,25 @@ public class O7FlipPlugin extends Plugin
 		int slot = event.getSlot();
 		GrandExchangeOfferState state = offer.getState();
 
-		// Keep activeOffers map in sync.
-		Map<Integer, GrandExchangeOffer> next = new HashMap<>(activeOffers);
+		// Keep activeOffers map in sync — snapshot the offer on the game
+		// thread (this @Subscribe handler runs there) so the panel can
+		// render it from the EDT without crossing thread boundaries.
+		Map<Integer, com.o7flip.model.ActiveOfferSnapshot> next = new HashMap<>(activeOffers);
 		if (state == GrandExchangeOfferState.EMPTY)
 		{
 			next.remove(slot);
 		}
 		else
 		{
-			next.put(slot, offer);
+			next.put(slot, snapshot(slot, offer));
 		}
 		activeOffers = Collections.unmodifiableMap(next);
+
+		// Refresh My Trades panel when the user is on the Active sort —
+		// progress bars and qty-filled numbers update live as offers move.
+		// Cheap because renderMyFlips() is a no-op for tabs other than Active.
+		final List<TradeRecord> snap = tradeHistory;
+		SwingUtilities.invokeLater(() -> panel.updateMyFlips(snap));
 
 		// Clear the overlay queue once the queued offer is actually placed —
 		// stops the empty-slot hints from continuing to cyan-flash.
@@ -1072,30 +1638,26 @@ public class O7FlipPlugin extends Plugin
 			clearOverlayQueue();
 		}
 
-		// Detect completed or partially-filled transactions by comparing to the previous state.
-		GrandExchangeOfferState prev = prevSlotStates.get(slot);
-		if (prev == GrandExchangeOfferState.BUYING && state == GrandExchangeOfferState.BOUGHT)
+		// Record any newly-filled qty since we last looked at this slot. This
+		// catches BOUGHT / SOLD transitions, partial cancellations, AND any
+		// in-flight fills that happened between events — the latter is what
+		// makes a sell of a partially-filled buy match against an in-progress
+		// buy (instead of producing a phantom flip with no buyTotal).
+		if (state == GrandExchangeOfferState.BUYING
+			|| state == GrandExchangeOfferState.SELLING
+			|| state == GrandExchangeOfferState.BOUGHT
+			|| state == GrandExchangeOfferState.SOLD
+			|| state == GrandExchangeOfferState.CANCELLED_BUY
+			|| state == GrandExchangeOfferState.CANCELLED_SELL)
 		{
-			recordTrade(offer, true, false);
-		}
-		else if (prev == GrandExchangeOfferState.SELLING && state == GrandExchangeOfferState.SOLD)
-		{
-			recordTrade(offer, false, false);
-		}
-		else if (prev == GrandExchangeOfferState.BUYING && state == GrandExchangeOfferState.CANCELLED_BUY
-			&& offer.getQuantitySold() > 0)
-		{
-			recordTrade(offer, true, true);
-		}
-		else if (prev == GrandExchangeOfferState.SELLING && state == GrandExchangeOfferState.CANCELLED_SELL
-			&& offer.getQuantitySold() > 0)
-		{
-			recordTrade(offer, false, true);
+			recordIfNewFills(offer, slot);
 		}
 
 		if (state == GrandExchangeOfferState.EMPTY)
 		{
 			prevSlotStates.remove(slot);
+			slotRecordedFills.remove(slot);
+			saveSlotRecordedFills();
 		}
 		else
 		{
@@ -1103,20 +1665,210 @@ public class O7FlipPlugin extends Plugin
 		}
 	}
 
-	private void recordTrade(GrandExchangeOffer offer, boolean isBuy, boolean partial)
+	/**
+	 * Compares the offer's cumulative {@code quantitySold} / {@code spent}
+	 * against what we've previously recorded for this slot and, if there's a
+	 * positive delta, appends a {@link TradeRecord} for that delta.
+	 *
+	 * Treats the trade as {@code partial=true} while the offer is still
+	 * BUYING/SELLING or was cancelled mid-flight, and {@code partial=false}
+	 * once it transitions to BOUGHT/SOLD. Either way the cost basis ends up
+	 * in {@link #tradeHistory} promptly so the FIFO matcher can pair it with
+	 * sells the moment they complete.
+	 *
+	 * Idempotent — if no new fills happened since last call, this is a no-op.
+	 * Game-thread only.
+	 */
+	private void recordIfNewFills(GrandExchangeOffer offer, int slot)
 	{
-		TradeRecord trade = new TradeRecord();
-		trade.itemId    = offer.getItemId();
-		trade.name      = client.getItemDefinition(offer.getItemId()).getName();
-		trade.isBuy     = isBuy;
-		trade.quantity  = offer.getQuantitySold();
-		trade.totalGp   = offer.getSpent();
-		trade.priceEach = trade.quantity > 0 ? trade.totalGp / trade.quantity : offer.getPrice();
-		trade.timestamp = System.currentTimeMillis();
-		trade.partial   = partial;
+		int currentQty = offer.getQuantitySold();
+		long currentGp = offer.getSpent();
+		long[] prev = slotRecordedFills.get(slot);
+		boolean firstObservation = prev == null;
+		long prevQty = prev != null ? prev[0] : 0L;
+		long prevGp  = prev != null ? prev[1] : 0L;
+		long offerInstanceId = prev != null && prev.length >= 3
+			? prev[2]
+			: System.currentTimeMillis() * 10 + slot;
+
+		// Slot reused for a new offer — cumulative dropped below recorded
+		// state. Reset to zero so the new offer starts fresh, with a fresh
+		// offerInstanceId so the new offer's fills don't merge into the
+		// previous offer's TradeRecord row.
+		if (currentQty < prevQty)
+		{
+			prevQty = 0L;
+			prevGp  = 0L;
+			firstObservation = true;
+			offerInstanceId = System.currentTimeMillis() * 10 + slot;
+		}
+
+		int  deltaQty = currentQty - (int) prevQty;
+		long deltaGp  = currentGp  - prevGp;
+		if (deltaQty <= 0)
+		{
+			return;
+		}
+
+		GrandExchangeOfferState state = offer.getState();
+		boolean isBuy = state == GrandExchangeOfferState.BUYING
+			|| state == GrandExchangeOfferState.BOUGHT
+			|| state == GrandExchangeOfferState.CANCELLED_BUY;
+		boolean partial = state == GrandExchangeOfferState.BUYING
+			|| state == GrandExchangeOfferState.SELLING
+			|| state == GrandExchangeOfferState.CANCELLED_BUY
+			|| state == GrandExchangeOfferState.CANCELLED_SELL;
+
+		// On first observation, check if a legacy partial row in tradeHistory
+		// already represents some or all of these fills (written by an older
+		// version of the plugin without offerInstanceId). Adopt the legacy
+		// row by stamping it with our id, and reduce the delta to only the
+		// NEW fills not yet captured. Without this, the legacy row + the new
+		// recordTrade call would double-count the same fills.
+		if (firstObservation)
+		{
+			long fallbackPriceEach = deltaQty > 0 ? deltaGp / deltaQty : offer.getPrice();
+			int legacyIdx = findClaimableLegacyOfferRow(tradeHistory, offer.getItemId(), isBuy, fallbackPriceEach);
+			if (legacyIdx >= 0)
+			{
+				TradeRecord legacy = tradeHistory.get(legacyIdx);
+				// Stamp the legacy with our offerInstanceId so recordTrade
+				// merges subsequent fills into it via the exact-match path.
+				stampLegacyWithOfferInstanceId(legacyIdx, offerInstanceId);
+
+				// Account for the qty/gp the legacy already captured. If the
+				// legacy holds >= the current cumulative, there's nothing new
+				// to record — just align slotRecordedFills with what's
+				// already in tradeHistory and return.
+				int  legacyQty = legacy.quantity;
+				long legacyGp  = legacy.totalGp;
+				if (legacyQty >= currentQty)
+				{
+					slotRecordedFills.put(slot, new long[]{legacyQty, legacyGp, offerInstanceId});
+					saveSlotRecordedFills();
+					return;
+				}
+				deltaQty = currentQty - legacyQty;
+				deltaGp  = currentGp  - legacyGp;
+				// Initial-observation back-dating already happened against
+				// existing trade history; the legacy row is now stamped, so
+				// further fills use current-time and merge by id.
+				firstObservation = false;
+			}
+		}
+
+		// The very first time we observe a slot, the fills we're recording
+		// happened BEFORE the plugin started tracking this offer — which
+		// might be before existing trades of the same item are sitting in
+		// tradeHistory. Back-date the timestamp so the FIFO matcher sees
+		// this buy first and can pair earlier sells with it. Without this,
+		// a sell of items from an already-running buy offer becomes a
+		// phantom flip (sell sorted before buy, queue empty when consumed).
+		long timestamp = firstObservation && isBuy
+			? backdatedTimestampBefore(offer.getItemId())
+			: System.currentTimeMillis();
+
+		recordTrade(offer, isBuy, partial, deltaQty, deltaGp, timestamp, offerInstanceId);
+
+		slotRecordedFills.put(slot, new long[]{currentQty, currentGp, offerInstanceId});
+		saveSlotRecordedFills();
+	}
+
+	/**
+	 * Returns a timestamp strictly older than every existing trade of {@code itemId}
+	 * in {@link #tradeHistory}, so a freshly-recorded initial-observation partial
+	 * buy sorts to the front of the FIFO queue. Falls back to {@code now} when
+	 * there are no prior trades of the item.
+	 */
+	private long backdatedTimestampBefore(int itemId)
+	{
+		long earliest = Long.MAX_VALUE;
+		for (TradeRecord t : tradeHistory)
+		{
+			if (t.itemId == itemId && t.timestamp < earliest)
+			{
+				earliest = t.timestamp;
+			}
+		}
+		if (earliest == Long.MAX_VALUE)
+		{
+			return System.currentTimeMillis();
+		}
+		return earliest - 1000L;
+	}
+
+	/**
+	 * Records an incremental fill on a GE offer. {@code deltaQty} /
+	 * {@code deltaGp} represent the quantity and gp filled SINCE the last
+	 * recording for this offer — not the offer's cumulative state.
+	 *
+	 * If a TradeRecord with the same {@code offerInstanceId} already exists
+	 * in {@link #tradeHistory}, the new fill is MERGED into it (qty/gp added,
+	 * partial flag updated to the latest state) rather than appended as a
+	 * separate row. That keeps the user-facing trade list at one row per
+	 * logical offer — the partial-fill recording is for FIFO accuracy, not
+	 * something the user wants to scroll through fill-by-fill.
+	 *
+	 * The timestamp on a merged record is preserved at the earliest fill so
+	 * the back-dated initial observation continues to sort before any sells
+	 * placed after the offer started.
+	 *
+	 * Use {@link #recordIfNewFills} as the entry point; this method is the
+	 * inner writer.
+	 */
+	private void recordTrade(GrandExchangeOffer offer, boolean isBuy, boolean partial,
+		int deltaQty, long deltaGp, long timestamp, long offerInstanceId)
+	{
+		String itemName = client.getItemDefinition(offer.getItemId()).getName();
+		long fallbackPriceEach = deltaQty > 0 ? deltaGp / deltaQty : offer.getPrice();
+		int  totalQty = offer.getTotalQuantity();
 
 		List<TradeRecord> updated = new ArrayList<>(tradeHistory);
-		updated.add(trade);
+		int existingIdx = findMatchingOfferRow(updated, offerInstanceId);
+		// The legacy-row claim used to live here too, but it double-counted
+		// fills the legacy row already captured. It's now done in
+		// recordIfNewFills BEFORE recordTrade is called — by the time we
+		// reach this method the delta reflects only NEW fills not yet
+		// represented in tradeHistory.
+		TradeRecord posted;
+		if (existingIdx >= 0)
+		{
+			// Merge: bump qty / gp on the existing row, recompute average
+			// priceEach, update the partial flag (a final fill clears it),
+			// keep the earliest timestamp (preserves back-dating for FIFO).
+			TradeRecord existing = updated.get(existingIdx);
+			TradeRecord merged = new TradeRecord();
+			merged.itemId          = existing.itemId;
+			merged.name            = existing.name;
+			merged.isBuy           = existing.isBuy;
+			merged.quantity        = existing.quantity + deltaQty;
+			merged.totalGp         = existing.totalGp  + deltaGp;
+			merged.priceEach       = merged.quantity > 0 ? merged.totalGp / merged.quantity : existing.priceEach;
+			merged.timestamp       = existing.timestamp;
+			merged.partial         = partial;
+			merged.tradeId         = existing.tradeId;
+			merged.offerInstanceId = offerInstanceId;
+			merged.totalQuantity   = totalQty > 0 ? totalQty : existing.totalQuantity;
+			updated.set(existingIdx, merged);
+			posted = merged;
+		}
+		else
+		{
+			TradeRecord trade = new TradeRecord();
+			trade.itemId          = offer.getItemId();
+			trade.name            = itemName;
+			trade.isBuy           = isBuy;
+			trade.quantity        = deltaQty;
+			trade.totalGp         = deltaGp;
+			trade.priceEach       = fallbackPriceEach;
+			trade.timestamp       = timestamp;
+			trade.partial         = partial;
+			trade.offerInstanceId = offerInstanceId;
+			trade.totalQuantity   = totalQty > 0 ? totalQty : null;
+			updated.add(trade);
+			posted = trade;
+		}
+
 		if (updated.size() > MAX_TRADE_HISTORY)
 		{
 			updated = updated.subList(updated.size() - MAX_TRADE_HISTORY, updated.size());
@@ -1130,14 +1882,143 @@ public class O7FlipPlugin extends Plugin
 
 		if (!isBuy && config.showGpDropOverlay())
 		{
-			long profit = computeProfitForSell(trade.timestamp);
+			// GP-drop uses the just-completed fill's profit, not the merged
+			// row's lifetime profit — show the delta to keep the animation
+			// honest about what changed right now.
+			long profit = computeProfitForFill(deltaQty, deltaGp, offer.getItemId(), timestamp);
 			gpDropOverlay.queue(profit);
 		}
 
 		if (config.shareTradeData() && config.apiKey() != null && !config.apiKey().trim().isEmpty())
 		{
-			apiClient.postTradeRecord(trade, null);
+			// Post the per-fill delta to the server, not the merged row —
+			// the server tracks individual fills and dedups on its own key.
+			TradeRecord fillForServer = new TradeRecord();
+			fillForServer.itemId    = offer.getItemId();
+			fillForServer.name      = itemName;
+			fillForServer.isBuy     = isBuy;
+			fillForServer.quantity  = deltaQty;
+			fillForServer.totalGp   = deltaGp;
+			fillForServer.priceEach = fallbackPriceEach;
+			fillForServer.timestamp = timestamp;
+			fillForServer.partial   = partial;
+			apiClient.postTradeRecord(fillForServer, null);
 		}
+
+		// Close out the freeze when a sell fully consumes the buys for this
+		// item — flip cycle done. Partial sells leave the freeze in place.
+		if (!isBuy)
+		{
+			unfreezeIfPositionClosed(posted.itemId);
+		}
+	}
+
+	/**
+	 * Scans tradeHistory from the back for a record sharing this
+	 * {@code offerInstanceId}. Returns -1 when no row matches (first fill of
+	 * a new offer). Walks backward because the most recent record is usually
+	 * the one we want to merge into, so we exit early in the common case.
+	 */
+	private static int findMatchingOfferRow(List<TradeRecord> list, long offerInstanceId)
+	{
+		for (int i = list.size() - 1; i >= 0; i--)
+		{
+			Long id = list.get(i).offerInstanceId;
+			if (id != null && id == offerInstanceId)
+			{
+				return i;
+			}
+		}
+		return -1;
+	}
+
+	/**
+	 * Mutates the {@link TradeRecord} at {@code idx} in {@link #tradeHistory}
+	 * to carry the given {@code offerInstanceId}, so subsequent fills of the
+	 * same offer merge into this row via the exact-id match path in
+	 * {@link #recordTrade}. Replaces the row immutably to keep the list's
+	 * unmodifiable wrapper semantics intact.
+	 */
+	private void stampLegacyWithOfferInstanceId(int idx, long offerInstanceId)
+	{
+		List<TradeRecord> updated = new ArrayList<>(tradeHistory);
+		TradeRecord legacy = updated.get(idx);
+		TradeRecord stamped = new TradeRecord();
+		stamped.itemId          = legacy.itemId;
+		stamped.name            = legacy.name;
+		stamped.isBuy           = legacy.isBuy;
+		stamped.quantity        = legacy.quantity;
+		stamped.totalGp         = legacy.totalGp;
+		stamped.priceEach       = legacy.priceEach;
+		stamped.timestamp       = legacy.timestamp;
+		stamped.partial         = legacy.partial;
+		stamped.tradeId         = legacy.tradeId;
+		stamped.offerInstanceId = offerInstanceId;
+		stamped.totalQuantity   = legacy.totalQuantity;
+		updated.set(idx, stamped);
+		tradeHistory = Collections.unmodifiableList(updated);
+		saveTradeHistory();
+	}
+
+	/**
+	 * Upgrade self-heal: scans tradeHistory back-to-front for the latest
+	 * partial-fill row that LOOKS like the in-progress offer we just
+	 * observed — same item, same direction, same per-item price, no
+	 * {@code offerInstanceId} (i.e. pre-upgrade legacy row), and still
+	 * partial. Returns its index so {@link #recordIfNewFills} can stamp
+	 * it with an offerInstanceId and reduce the new fill's delta to only
+	 * the qty not yet captured.
+	 *
+	 * Conservative on purpose: walks only the tail of the list (last 16
+	 * records) and stops at the first match, so we don't reach back far
+	 * enough to accidentally claim genuinely separate older offers.
+	 */
+	private static int findClaimableLegacyOfferRow(List<TradeRecord> list, int itemId, boolean isBuy, long priceEach)
+	{
+		int searchDepth = Math.min(16, list.size());
+		for (int i = list.size() - 1, scanned = 0; i >= 0 && scanned < searchDepth; i--, scanned++)
+		{
+			TradeRecord t = list.get(i);
+			if (t.offerInstanceId != null) continue;        // already-owned row
+			if (!t.partial)                continue;        // legacy completed — leave alone
+			if (t.itemId != itemId)        continue;
+			if (t.isBuy != isBuy)          continue;
+			if (t.priceEach != priceEach)  continue;
+			return i;
+		}
+		return -1;
+	}
+
+	/**
+	 * Computes the FIFO-matched profit produced by a single incoming sell
+	 * fill, without polluting {@link #computeProfitForSell} (which scans by
+	 * timestamp and would now mis-count merged rows). Runs a one-shot FIFO
+	 * over the current history with the new fill appended virtually.
+	 */
+	private long computeProfitForFill(int deltaQty, long deltaGp, int itemId, long fillTimestamp)
+	{
+		List<TradeRecord> probe = new ArrayList<>(tradeHistory);
+		TradeRecord virtualSell = new TradeRecord();
+		virtualSell.itemId    = itemId;
+		virtualSell.isBuy     = false;
+		virtualSell.quantity  = deltaQty;
+		virtualSell.totalGp   = deltaGp;
+		virtualSell.priceEach = deltaQty > 0 ? deltaGp / deltaQty : 0L;
+		virtualSell.timestamp = fillTimestamp + 1L;  // sort after history
+		// Replace any merged row representing this very fill so the FIFO
+		// doesn't double-count: strip out the row matching our offer.
+		// Not strictly needed for the drop number but keeps the probe honest.
+		probe.add(virtualSell);
+		com.o7flip.util.ProfitCalculator.Result r = com.o7flip.util.ProfitCalculator.compute(probe);
+		long total = 0L;
+		for (com.o7flip.util.ProfitCalculator.CompletedFlip f : r.completedFlips)
+		{
+			if (f.sellTimestamp == virtualSell.timestamp && f.buyTotal > 0)
+			{
+				total += f.profit;
+			}
+		}
+		return total;
 	}
 
 	/**
@@ -1210,7 +2091,75 @@ public class O7FlipPlugin extends Plugin
 		tradeHistory = Collections.emptyList();
 		configManager.unsetConfiguration("o7flip", TRADE_HISTORY_KEY);
 		configManager.unsetConfiguration("o7flip", LAST_TRACKER_SYNC_KEY);
+		// Also reset the per-slot fill ledger — without this, the next time
+		// the user places a fresh offer in a slot we'd compute a delta
+		// against stale state from before the history wipe.
+		slotRecordedFills.clear();
+		configManager.unsetConfiguration("o7flip", SLOT_FILLS_KEY);
 		SwingUtilities.invokeLater(() -> panel.updateMyFlips(Collections.emptyList()));
+	}
+
+	/**
+	 * Persists {@link #slotRecordedFills} as a compact CSV ({@code slot:qty:gp,...})
+	 * so it survives plugin restarts. Without persistence, every plugin reload
+	 * sees active offers as "first observations" and re-records their
+	 * cumulative fills as new partial trades, duplicating the entry in
+	 * tradeHistory.
+	 */
+	private void saveSlotRecordedFills()
+	{
+		if (slotRecordedFills.isEmpty())
+		{
+			configManager.unsetConfiguration("o7flip", SLOT_FILLS_KEY);
+			return;
+		}
+		StringBuilder sb = new StringBuilder();
+		boolean first = true;
+		for (Map.Entry<Integer, long[]> entry : slotRecordedFills.entrySet())
+		{
+			if (!first)
+			{
+				sb.append(',');
+			}
+			long[] v = entry.getValue();
+			long offerId = v.length >= 3 ? v[2] : System.currentTimeMillis();
+			sb.append(entry.getKey()).append(':').append(v[0]).append(':').append(v[1]).append(':').append(offerId);
+			first = false;
+		}
+		configManager.setConfiguration("o7flip", SLOT_FILLS_KEY, sb.toString());
+	}
+
+	private void loadSlotRecordedFills()
+	{
+		String csv = configManager.getConfiguration("o7flip", SLOT_FILLS_KEY);
+		if (csv == null || csv.trim().isEmpty())
+		{
+			return;
+		}
+		for (String tok : csv.split(","))
+		{
+			String[] parts = tok.split(":");
+			// Accept both 3-part (legacy, no offerInstanceId) and 4-part formats
+			// so existing installs upgrade cleanly. Legacy entries get a fresh
+			// offerInstanceId synthesised on load — won't merge with prior
+			// records in tradeHistory (those are also legacy with null id),
+			// but new fills of the same offer will merge correctly.
+			if (parts.length < 3) continue;
+			try
+			{
+				int slot = Integer.parseInt(parts[0]);
+				long qty = Long.parseLong(parts[1]);
+				long gp  = Long.parseLong(parts[2]);
+				long offerId = parts.length >= 4
+					? Long.parseLong(parts[3])
+					: System.currentTimeMillis() * 10 + slot;
+				slotRecordedFills.put(slot, new long[]{qty, gp, offerId});
+			}
+			catch (NumberFormatException ignored)
+			{
+				// Skip malformed entries; resume with the rest.
+			}
+		}
 	}
 
 	// -------------------------------------------------------------------------
@@ -1305,37 +2254,6 @@ public class O7FlipPlugin extends Plugin
 	// Cross-device tracker sync — pulls server history and merges with local
 	// -------------------------------------------------------------------------
 
-	/**
-	 * Toggles the plugin's paused state. While paused, the scheduled auto-refresh
-	 * task is cancelled — manual refreshes via panel pagination/sort still work.
-	 * Re-creates the scheduled task on resume.
-	 */
-	public void togglePaused()
-	{
-		paused = !paused;
-		if (paused)
-		{
-			if (refreshTask != null)
-			{
-				refreshTask.cancel(false);
-				refreshTask = null;
-			}
-		}
-		else
-		{
-			if (executor != null && !executor.isShutdown() && refreshTask == null)
-			{
-				refreshTask = executor.scheduleAtFixedRate(
-					() -> fetchAll(false),
-					config.refreshIntervalSeconds(),
-					config.refreshIntervalSeconds(),
-					TimeUnit.SECONDS
-				);
-			}
-		}
-		final boolean p = paused;
-		SwingUtilities.invokeLater(() -> panel.setPaused(p));
-	}
 
 	/**
 	 * Returns the cached recommended prices for an item, or null if we
@@ -1362,6 +2280,10 @@ public class O7FlipPlugin extends Plugin
 					if (rp != null)
 					{
 						recPriceCache.put(itemId, rp);
+						// Any fresh rec-price arrival is a chance to arm the
+						// implicit-sell auto-fill if the user is still on a
+						// matching sell setup. No-op otherwise.
+						clientThread.invokeLater(() -> armSellPriceIfStillRelevant(itemId));
 					}
 					recPriceFetchedAt.put(itemId, System.currentTimeMillis());
 				}
@@ -1374,6 +2296,41 @@ public class O7FlipPlugin extends Plugin
 		return recPriceCache.get(itemId);
 	}
 
+	/**
+	 * Returns cached item insights for the GE overlay, or null if not yet
+	 * loaded. On a cache miss / stale entry, fires an async fetch — the next
+	 * render frame after the response lands will get the data. Safe to call
+	 * from the EDT (overlay render).
+	 */
+	public com.o7flip.model.ItemInsights getOverlayInsights(int itemId)
+	{
+		if (itemId <= 0)
+		{
+			return null;
+		}
+		Long fetched = overlayInsightsFetchedAt.get(itemId);
+		boolean stale = fetched == null || (System.currentTimeMillis() - fetched) > REC_PRICE_TTL_MS;
+		if (stale && executor != null && !executor.isShutdown() && overlayInsightsInFlight.add(itemId))
+		{
+			executor.execute(() -> apiClient.fetchItemInsights(itemId, ins ->
+			{
+				try
+				{
+					if (ins != null)
+					{
+						overlayInsightsCache.put(itemId, ins);
+					}
+					overlayInsightsFetchedAt.put(itemId, System.currentTimeMillis());
+				}
+				finally
+				{
+					overlayInsightsInFlight.remove(itemId);
+				}
+			}));
+		}
+		return overlayInsightsCache.get(itemId);
+	}
+
 	/** Public entry point used by the My Trades "Sync from server" button. */
 	public void syncTrackerHistory()
 	{
@@ -1382,6 +2339,82 @@ public class O7FlipPlugin extends Plugin
 			return;
 		}
 		executor.execute(this::doSyncTrackerHistory);
+		executor.execute(this::doFetchTrackerStats);
+	}
+
+	/**
+	 * One-shot fetch of server-authoritative My Trades stats. Updates
+	 * {@link #trackerStats} on success (or sets it null on any failure)
+	 * and refreshes the panel. Safe to call from any thread; HTTP runs
+	 * on OkHttp's pool, panel update is marshalled to the EDT.
+	 */
+	public void fetchTrackerStats()
+	{
+		if (executor == null || executor.isShutdown())
+		{
+			return;
+		}
+		executor.execute(this::doFetchTrackerStats);
+	}
+
+	private void doFetchTrackerStats()
+	{
+		if (!config.shareTradeData())
+		{
+			trackerStats = null;
+			final List<TradeRecord> snap = tradeHistory;
+			SwingUtilities.invokeLater(() -> panel.updateMyFlips(snap));
+			return;
+		}
+		apiClient.fetchTrackerStats(stats ->
+		{
+			trackerStats = stats;
+			final List<TradeRecord> snap = tradeHistory;
+			SwingUtilities.invokeLater(() -> panel.updateMyFlips(snap));
+		});
+	}
+
+	/**
+	 * Click target for every item row across the plugin. Switches the panel to
+	 * the Insights tab synchronously (so the user sees an immediate response)
+	 * and kicks off the fetch on the executor. The Insights panel paints a
+	 * loading state for the requested item id until the response arrives.
+	 *
+	 * Safe to call from the EDT — the synchronous part touches only Swing,
+	 * the HTTP call is dispatched to the executor.
+	 */
+	public void openInsights(int itemId, String fallbackName)
+	{
+		if (itemId <= 0)
+		{
+			return;
+		}
+		SwingUtilities.invokeLater(() -> panel.showInsightsLoading(itemId, fallbackName));
+		if (executor == null || executor.isShutdown())
+		{
+			return;
+		}
+		executor.execute(() -> doFetchItemInsights(itemId));
+	}
+
+	private void doFetchItemInsights(int itemId)
+	{
+		apiClient.fetchItemInsights(itemId, insights ->
+		{
+			// Late callbacks from earlier clicks shouldn't overwrite the user's
+			// current selection — only apply if this is still the item the
+			// panel is showing (or no selection yet).
+			com.o7flip.model.ItemInsights existing = currentInsights;
+			if (existing != null && insights != null && existing.itemId == insights.itemId)
+			{
+				currentInsights = insights;
+			}
+			else if (existing == null || (insights != null && existing.itemId == insights.itemId))
+			{
+				currentInsights = insights;
+			}
+			SwingUtilities.invokeLater(() -> panel.showInsights(itemId, insights));
+		});
 	}
 
 	private void doSyncTrackerHistory()
@@ -1548,30 +2581,6 @@ public class O7FlipPlugin extends Plugin
 				}));
 	}
 
-	void onDipsPageChanged(int page)
-	{
-		executor.execute(() ->
-			apiClient.fetchDips(panel.getDipsSortKey(), page,
-				(items, total) ->
-				{
-					lastDips = items;
-					rebuildTrackedItems();
-					SwingUtilities.invokeLater(() -> panel.updateDips(items, total, page));
-				}));
-	}
-
-	void onDipsSortChanged(String sort)
-	{
-		executor.execute(() ->
-			apiClient.fetchDips(sort, 0,
-				(items, total) ->
-				{
-					lastDips = items;
-					rebuildTrackedItems();
-					SwingUtilities.invokeLater(() -> panel.updateDips(items, total, 0));
-				}));
-	}
-
 	void onDumpsPageChanged(int page)
 	{
 		executor.execute(() -> fetchDumpsAtPage(panel.getDumpsSortKey(), page));
@@ -1605,17 +2614,6 @@ public class O7FlipPlugin extends Plugin
 		}
 	}
 
-	void onAlertsPageChanged(int page)
-	{
-		executor.execute(() ->
-			apiClient.fetchAlerts(page,
-				(items, total) ->
-				{
-					lastAlerts = items;
-					rebuildTrackedItems();
-					SwingUtilities.invokeLater(() -> panel.updateAlerts(items, total, page));
-				}));
-	}
 
 	// -------------------------------------------------------------------------
 	// Sort / filter / preset changes (always reset to page 0)

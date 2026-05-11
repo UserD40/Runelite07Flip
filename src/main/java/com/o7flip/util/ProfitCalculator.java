@@ -44,8 +44,68 @@ import java.util.Map;
  */
 public final class ProfitCalculator
 {
+	/**
+	 * Old school bond. Treated specially across the My Trades tab:
+	 * <ul>
+	 *   <li>Bond buys still go through the FIFO loop, so a buy/sell pair
+	 *       still forms a {@link CompletedFlip} and counts in flip stats —
+	 *       people do flip bonds.</li>
+	 *   <li>Unmatched bond buys (the common case — bonds redeemed for
+	 *       membership) are <em>not</em> exposed as open positions. They
+	 *       roll into {@link Stats#bondSpend} / {@link Stats#bondCount}
+	 *       so the panel can show "Membership cost" instead of cluttering
+	 *       the Pending view with 21 × bond rows.</li>
+	 * </ul>
+	 */
+	public static final int BOND_ITEM_ID = 13190;
+
+	// ── GE tax constants ────────────────────────────────────────────────────
+	/** OSRS GE sells 2% sales tax. Buyers pay no tax. */
+	private static final double GE_TAX_RATE = 0.02;
+	/** Items selling for less than 100 gp/item are exempt from the GE tax. */
+	private static final long   GE_TAX_MIN_PRICE_PER_ITEM = 100L;
+	/** Tax is capped at 5,000,000 gp per individual item sold. */
+	private static final long   GE_TAX_CAP_PER_ITEM = 5_000_000L;
+
 	private ProfitCalculator()
 	{
+	}
+
+	/**
+	 * Computes the OSRS GE sales tax that would have been deducted from a sell
+	 * offer. Mirrors the in-game rules:
+	 * <ul>
+	 *   <li>Sells only — buys pay no tax.</li>
+	 *   <li>2% of the per-item sale price, rounded down per item.</li>
+	 *   <li>No tax on items selling for less than 100 gp.</li>
+	 *   <li>Capped at 5,000,000 gp per individual item.</li>
+	 *   <li>Bonds ({@link #BOND_ITEM_ID}) are tax-exempt.</li>
+	 * </ul>
+	 *
+	 * @param itemId    item id of the sell
+	 * @param sellTotal gross sale value (price × qty, before tax) — this is
+	 *                  what {@code GrandExchangeOffer.getSpent()} reports for
+	 *                  a completed sell offer
+	 * @param quantity  number of items sold
+	 * @return total gp deducted as tax across the whole offer
+	 */
+	public static long geTaxFor(int itemId, long sellTotal, int quantity)
+	{
+		if (itemId == BOND_ITEM_ID || quantity <= 0 || sellTotal <= 0)
+		{
+			return 0L;
+		}
+		long pricePerItem = sellTotal / quantity;
+		if (pricePerItem < GE_TAX_MIN_PRICE_PER_ITEM)
+		{
+			return 0L;
+		}
+		long taxPerItem = (long) Math.floor(pricePerItem * GE_TAX_RATE);
+		if (taxPerItem > GE_TAX_CAP_PER_ITEM)
+		{
+			taxPerItem = GE_TAX_CAP_PER_ITEM;
+		}
+		return taxPerItem * quantity;
 	}
 
 	/**
@@ -95,19 +155,36 @@ public final class ProfitCalculator
 		}
 
 		Map<Integer, OpenPosition> openPositions = new HashMap<>();
+		long bondSpend = 0L;
+		int  bondCount = 0;
 		for (Map.Entry<Integer, Deque<OpenLot>> entry : openLotsByItem.entrySet())
 		{
-			OpenPosition pos = OpenPosition.from(entry.getKey(), entry.getValue());
+			int itemId = entry.getKey();
+			Deque<OpenLot> lots = entry.getValue();
+			if (itemId == BOND_ITEM_ID)
+			{
+				// Bond buys that never got sold = membership consumption.
+				// Roll their gp + qty into the bond aggregate; deliberately
+				// skip the openPositions map so they don't appear in Pending.
+				for (OpenLot lot : lots)
+				{
+					if (lot.qty <= 0) continue;
+					bondSpend += lot.gp;
+					bondCount += lot.qty;
+				}
+				continue;
+			}
+			OpenPosition pos = OpenPosition.from(itemId, lots);
 			if (pos != null)
 			{
-				openPositions.put(entry.getKey(), pos);
+				openPositions.put(itemId, pos);
 			}
 		}
 
 		return new Result(
 			Collections.unmodifiableList(completedFlips),
 			Collections.unmodifiableMap(openPositions),
-			Stats.from(completedFlips)
+			Stats.from(completedFlips, bondSpend, bondCount)
 		);
 	}
 
@@ -202,9 +279,15 @@ public final class ProfitCalculator
 		public final int itemId;
 		public final String name;
 		public final int quantity;
+		/** Total gp paid for the buy leg(s), FIFO-matched. */
 		public final long buyTotal;
+		/** Gross sale value — what the buyer paid, BEFORE the GE took its 2% tax. */
 		public final long sellTotal;
+		/** GE sales tax deducted from this sell (always {@code >= 0}). */
+		public final long tax;
+		/** Net realised profit — {@code sellTotal - tax - buyTotal}. */
 		public final long profit;
+		/** ROI computed on net profit over buy cost. */
 		public final double roiPct;
 		public final long firstBuyTimestamp;
 		public final long sellTimestamp;
@@ -217,8 +300,10 @@ public final class ProfitCalculator
 			this.quantity = quantity;
 			this.buyTotal = buyTotal;
 			this.sellTotal = sellTotal;
-			this.profit = sellTotal - buyTotal;
-			this.roiPct = buyTotal > 0 ? (100.0 * (sellTotal - buyTotal) / buyTotal) : 0.0;
+			this.tax = geTaxFor(itemId, sellTotal, quantity);
+			long netSell = sellTotal - this.tax;
+			this.profit = netSell - buyTotal;
+			this.roiPct = buyTotal > 0 ? (100.0 * (netSell - buyTotal) / buyTotal) : 0.0;
 			this.firstBuyTimestamp = firstBuyTimestamp;
 			this.sellTimestamp = sellTimestamp;
 		}
@@ -274,10 +359,14 @@ public final class ProfitCalculator
 
 	public static final class Stats
 	{
-		static final Stats EMPTY = new Stats(0L, 0L, 0, 0, 0, 0, 0.0, 0.0, null, null);
+		static final Stats EMPTY = new Stats(0L, 0L, 0L, 0, 0, 0, 0, 0.0, 0.0, null, null, 0L, 0);
 
+		/** Net realised profit summed across matched flips (sellTotal − tax − buyTotal each). */
 		public final long totalProfit;
+		/** Gross gp sold (pre-tax) summed across matched flips. */
 		public final long totalGpSold;
+		/** Total GE tax paid across matched flips — the authoritative tax figure shown in the stats panel. */
+		public final long totalTaxPaid;
 		public final int completedFlipCount;
 		public final int winCount;
 		public final int lossCount;
@@ -287,13 +376,20 @@ public final class ProfitCalculator
 		public final CompletedFlip bestFlip;
 		public final CompletedFlip worstFlip;
 
-		Stats(long totalProfit, long totalGpSold, int completedFlipCount,
+		/** Total gp spent on bonds that were consumed (not flipped back). Membership cost. */
+		public final long bondSpend;
+		/** Number of consumed bonds — paired with bondSpend for the "Membership cost" stat. */
+		public final int  bondCount;
+
+		Stats(long totalProfit, long totalGpSold, long totalTaxPaid, int completedFlipCount,
 			int winCount, int lossCount, int breakEvenCount,
 			double winRatePct, double avgRoiPct,
-			CompletedFlip bestFlip, CompletedFlip worstFlip)
+			CompletedFlip bestFlip, CompletedFlip worstFlip,
+			long bondSpend, int bondCount)
 		{
 			this.totalProfit = totalProfit;
 			this.totalGpSold = totalGpSold;
+			this.totalTaxPaid = totalTaxPaid;
 			this.completedFlipCount = completedFlipCount;
 			this.winCount = winCount;
 			this.lossCount = lossCount;
@@ -302,16 +398,19 @@ public final class ProfitCalculator
 			this.avgRoiPct = avgRoiPct;
 			this.bestFlip = bestFlip;
 			this.worstFlip = worstFlip;
+			this.bondSpend = bondSpend;
+			this.bondCount = bondCount;
 		}
 
-		static Stats from(List<CompletedFlip> flips)
+		static Stats from(List<CompletedFlip> flips, long bondSpend, int bondCount)
 		{
-			if (flips.isEmpty())
+			if (flips.isEmpty() && bondCount == 0)
 			{
 				return EMPTY;
 			}
 			long totalProfit = 0L;
 			long totalGpSold = 0L;
+			long totalTaxPaid = 0L;
 			int wins = 0, losses = 0, evens = 0;
 			double roiSum = 0.0;
 			int matchedCount = 0;
@@ -331,8 +430,9 @@ public final class ProfitCalculator
 					continue;
 				}
 				matchedCount++;
-				totalProfit += f.profit;
-				totalGpSold += f.sellTotal;
+				totalProfit += f.profit;     // f.profit is NET (post-tax)
+				totalGpSold += f.sellTotal;  // gross sale value
+				totalTaxPaid += f.tax;
 				if (f.profit > 0)
 				{
 					wins++;
@@ -355,13 +455,14 @@ public final class ProfitCalculator
 					worst = f;
 				}
 			}
-			if (matchedCount == 0)
+			if (matchedCount == 0 && bondCount == 0)
 			{
 				return EMPTY;
 			}
-			double winRate = 100.0 * wins / matchedCount;
-			double avgRoi = roiSum / matchedCount;
-			return new Stats(totalProfit, totalGpSold, matchedCount, wins, losses, evens, winRate, avgRoi, best, worst);
+			double winRate = matchedCount > 0 ? 100.0 * wins / matchedCount : 0.0;
+			double avgRoi  = matchedCount > 0 ? roiSum / matchedCount : 0.0;
+			return new Stats(totalProfit, totalGpSold, totalTaxPaid, matchedCount, wins, losses, evens,
+				winRate, avgRoi, best, worst, bondSpend, bondCount);
 		}
 	}
 

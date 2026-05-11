@@ -100,21 +100,26 @@ public class InventoryTooltipOverlay extends WidgetItemOverlay
 			return null;
 		}
 
-		StringBuilder sb = new StringBuilder("<html>");
-		sb.append("<b>07Flip</b>");
+		// RuneLite tooltips use OSRS-style markup, NOT Swing HTML:
+		//   </br>        — line break
+		//   <col=RRGGBB> — coloured text (6-char hex, no leading hash)
+		// Swing's <html>/<b>/<font> tags render as raw text, which is exactly
+		// what the previous version was doing.
+		StringBuilder sb = new StringBuilder();
+		sb.append("<col=ffaa00>07Flip</col>");
 
 		if (tracked != null && tracked.flipSellPrice != null)
 		{
-			sb.append("<br>Sell @ ").append(formatGp(tracked.flipSellPrice)).append(" gp");
+			sb.append("</br>Sell @ ").append(formatGp(tracked.flipSellPrice)).append(" gp");
 		}
 		else if (tracked != null && tracked.alertSellTarget != null)
 		{
-			sb.append("<br>Target @ ").append(formatGp(tracked.alertSellTarget)).append(" gp");
+			sb.append("</br>Target @ ").append(formatGp(tracked.alertSellTarget)).append(" gp");
 		}
 
 		if (unitCostBasis != null)
 		{
-			sb.append("<br>Cost basis ").append(formatGp(unitCostBasis)).append(" gp");
+			sb.append("</br>Cost basis ").append(formatGp(unitCostBasis)).append(" gp");
 
 			Long compareTo = (tracked != null && tracked.flipSellPrice != null)
 				? tracked.flipSellPrice
@@ -122,12 +127,11 @@ public class InventoryTooltipOverlay extends WidgetItemOverlay
 			if (compareTo != null && unitCostBasis > 0)
 			{
 				double pct = 100.0 * (compareTo - unitCostBasis) / unitCostBasis;
-				String hex = pct >= 0 ? hex(PROFIT_COLOR_HEX) : hex(LOSS_COLOR_HEX);
-				sb.append(String.format("<br><font color='%s'>ROI %+.1f%%</font>", hex, pct));
+				String col = pct >= 0 ? colTag(PROFIT_COLOR_HEX) : colTag(LOSS_COLOR_HEX);
+				sb.append(String.format("</br><col=%s>ROI %+.1f%%</col>", col, pct));
 			}
 		}
 
-		sb.append("</html>");
 		return sb.toString();
 	}
 
@@ -147,8 +151,9 @@ public class InventoryTooltipOverlay extends WidgetItemOverlay
 		return String.format("%,d", amount);
 	}
 
-	private static String hex(Color c)
+	/** 6-char hex colour, no leading hash — for OSRS-style {@code <col=...>} tags. */
+	private static String colTag(Color c)
 	{
-		return String.format("#%02x%02x%02x", c.getRed(), c.getGreen(), c.getBlue());
+		return String.format("%02x%02x%02x", c.getRed(), c.getGreen(), c.getBlue());
 	}
 }

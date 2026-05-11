@@ -34,6 +34,7 @@ import net.runelite.client.ui.overlay.Overlay;
 import net.runelite.client.ui.overlay.OverlayLayer;
 import net.runelite.client.ui.overlay.OverlayMenuEntry;
 import net.runelite.client.ui.overlay.OverlayPosition;
+import net.runelite.client.ui.overlay.components.ImageComponent;
 import net.runelite.client.ui.overlay.components.LineComponent;
 import net.runelite.client.ui.overlay.components.PanelComponent;
 import net.runelite.client.ui.overlay.components.TitleComponent;
@@ -41,6 +42,7 @@ import javax.inject.Inject;
 import java.awt.Color;
 import java.awt.Dimension;
 import java.awt.Graphics2D;
+import java.awt.image.BufferedImage;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -69,6 +71,19 @@ public class GePriceOverlay extends Overlay
 
 	/** Maps menu entry option text to the price it represents. Rebuilt every render. */
 	private final Map<String, Long> menuPrices = new LinkedHashMap<>();
+
+	/**
+	 * Most recently rendered mini-chart, keyed by the data it was built from
+	 * so render() can reuse the BufferedImage across frames instead of
+	 * re-rasterising. Overlay render() runs every frame — without this the
+	 * chart would burn ~1ms each tick painting the same pixels.
+	 */
+	private int cachedChartItemId = -1;
+	private int cachedChartDataHash = 0;
+	private BufferedImage cachedChartImage = null;
+
+	private static final int CHART_W = 180;
+	private static final int CHART_H = 38;
 
 	@Inject
 	public GePriceOverlay(Client client, O7FlipPlugin plugin, O7FlipConfig config)
@@ -114,7 +129,7 @@ public class GePriceOverlay extends Overlay
 
 		// Buy = lower side (price to place a buy offer at).
 		// Sell = higher side (price to place a sell offer at).
-		Long buyPrice  = data != null ? firstNonNull(data.flipBuyPrice,  data.dipBuyPrice,  data.spikeBuyPrice, data.dumpBuyPrice) : null;
+		Long buyPrice  = data != null ? firstNonNull(data.flipBuyPrice,  data.spikeBuyPrice, data.dumpBuyPrice) : null;
 		Long sellPrice = data != null ? firstNonNull(data.flipSellPrice, data.dumpSellPrice) : null;
 		String displayName = data != null ? data.name : null;
 
@@ -137,6 +152,18 @@ public class GePriceOverlay extends Overlay
 			}
 		}
 
+		// Frozen sell takes precedence over live rec_sell — but only for
+		// premium users. The freeze is a paid feature (it pins 07Flip's
+		// rec_sell at buy time so projected margin survives market drift),
+		// so free users continue to see the live market sell price.
+		boolean isPremium = plugin.panel != null && plugin.panel.isPremium();
+		Long frozenSell = isPremium ? plugin.getFrozenSell(currentItemId) : null;
+		boolean sellIsFrozen = frozenSell != null;
+		if (sellIsFrozen)
+		{
+			sellPrice = frozenSell;
+		}
+
 		if (buyPrice == null && sellPrice == null)
 		{
 			return null;
@@ -149,11 +176,18 @@ public class GePriceOverlay extends Overlay
 		panel.getChildren().clear();
 		panel.setPreferredSize(new Dimension(180, 0));
 
-		String title = displayName != null ? truncate(displayName, 24) : "07Flip";
-		panel.getChildren().add(TitleComponent.builder()
-			.text(title)
-			.color(HEADER)
-			.build());
+		// Only show the title when we have a resolved item name. Skipping the
+		// "07Flip" fallback keeps the overlay one row shorter when the item
+		// isn't in any tracked list and the user hasn't loaded its insights
+		// yet — the GE setup screen below already labels the item, so the
+		// title is redundant in that state.
+		if (displayName != null)
+		{
+			panel.getChildren().add(TitleComponent.builder()
+				.text(truncate(displayName, 24))
+				.color(HEADER)
+				.build());
+		}
 
 		if (buyPrice != null)
 		{
@@ -171,19 +205,178 @@ public class GePriceOverlay extends Overlay
 
 		if (sellPrice != null)
 		{
-			String optionText = "Set sell price (" + formatGp(sellPrice) + " gp)";
+			String label = sellIsFrozen ? "Sell (locked)" : "Sell";
+			String optionText = (sellIsFrozen ? "Set locked sell price (" : "Set sell price (")
+				+ formatGp(sellPrice) + " gp)";
 			getMenuEntries().add(new OverlayMenuEntry(MenuAction.RUNELITE_OVERLAY, optionText, TARGET));
 			menuPrices.put(optionText, sellPrice);
 
 			panel.getChildren().add(LineComponent.builder()
-				.left("Sell")
-				.leftColor(SELL_GREEN)
+				.left(label)
+				.leftColor(sellIsFrozen ? HEADER : SELL_GREEN)
 				.right(formatGp(sellPrice))
+				.rightColor(sellIsFrozen ? HEADER : INFO_GRAY)
+				.build());
+
+			// When the sell price is the locked-from-buy price, surface the
+			// reasoning + the projected margin against the user's actual cost
+			// basis. Helpful when the user comes back to the GE hours / days
+			// later and needs to remember why this sell number is being
+			// recommended (and what they make per item if they accept it).
+			if (sellIsFrozen)
+			{
+				Long unitCostBasis = openPositionUnitCost(currentItemId);
+				panel.getChildren().add(LineComponent.builder()
+					.left("Locked at your buy")
+					.leftColor(INFO_GRAY)
+					.right("")
+					.build());
+
+				if (unitCostBasis != null && unitCostBasis > 0)
+				{
+					long marginPerItem = sellPrice - unitCostBasis;
+					String sign = marginPerItem >= 0 ? "+" : "";
+					panel.getChildren().add(LineComponent.builder()
+						.left("Margin / item")
+						.leftColor(INFO_GRAY)
+						.right(sign + formatGp(marginPerItem))
+						.rightColor(marginPerItem >= 0 ? SELL_GREEN : BUY_RED)
+						.build());
+				}
+			}
+		}
+
+		// Below the prices: pull in cached item insights — score, hourly
+		// volume, and a compact 24h chart. Fetched lazily by the plugin and
+		// served from cache on subsequent frames; missing data simply omits
+		// the row(s) so the overlay degrades gracefully.
+		com.o7flip.model.ItemInsights insights = plugin.getOverlayInsights(currentItemId);
+		appendInsightsRows(insights, currentItemId);
+		appendInsightsChart(insights, currentItemId);
+
+		return panel.render(graphics);
+	}
+
+	/**
+	 * Adds score + hourly volume rows when the insights data carries them.
+	 * Skipped entirely when both fields are null so the overlay doesn't grow
+	 * a "Score —" placeholder for items the server has no signal on.
+	 */
+	private void appendInsightsRows(com.o7flip.model.ItemInsights insights, int itemId)
+	{
+		// Score: prefer the same flip07Score the Flips panel displays — that's
+		// the merchant score (0-100). ItemInsights.score.confidence is a
+		// different metric from /v2/item/{id} so using it here would create
+		// a visible inconsistency between the panel and the overlay.
+		Integer score = lookupFlip07Score(itemId);
+
+		int hourlyVol = insights != null && insights.volume != null ? insights.volume.hourly : 0;
+		int buyLimit  = insights != null ? insights.buyLimit : 0;
+
+		boolean wantScore    = config.showGeOverlayScore()  && score != null;
+		boolean wantVolume   = config.showGeOverlayVolume() && hourlyVol > 0;
+		boolean wantBuyLimit = config.showGeOverlayBuyLimit() && buyLimit > 0;
+
+		if (!wantScore && !wantVolume && !wantBuyLimit)
+		{
+			return;
+		}
+		if (wantScore)
+		{
+			Color scoreColor = score >= 70 ? SELL_GREEN
+				: score >= 40 ? new Color(0xE8A838) : BUY_RED;
+			panel.getChildren().add(LineComponent.builder()
+				.left("Score")
+				.leftColor(INFO_GRAY)
+				.right(String.valueOf(score))
+				.rightColor(scoreColor)
+				.build());
+		}
+		if (wantBuyLimit)
+		{
+			panel.getChildren().add(LineComponent.builder()
+				.left("Buy limit")
+				.leftColor(INFO_GRAY)
+				.right(formatGp(buyLimit))
 				.rightColor(INFO_GRAY)
 				.build());
 		}
+		if (wantVolume)
+		{
+			panel.getChildren().add(LineComponent.builder()
+				.left("Volume / h")
+				.leftColor(INFO_GRAY)
+				.right(formatGp(hourlyVol))
+				.rightColor(INFO_GRAY)
+				.build());
+		}
+	}
 
-		return panel.render(graphics);
+	/**
+	 * Looks up the 07Flip merchant score for an item from the currently-loaded
+	 * Flips list. Returns null when the item isn't a tracked top flip — the
+	 * overlay then omits the Score row entirely rather than fall back to a
+	 * different metric that would disagree with what the Flips panel shows.
+	 */
+	private Integer lookupFlip07Score(int itemId)
+	{
+		for (com.o7flip.model.FlipItem f : plugin.lastFlips)
+		{
+			if (f.itemId == itemId)
+			{
+				return f.flip07Score;
+			}
+		}
+		return null;
+	}
+
+	/**
+	 * Renders the 24h buy/sell sparkline as an {@link ImageComponent} below
+	 * the data rows. Image is cached between frames keyed by item + a hash
+	 * of the data arrays so we only re-rasterise when the cached series
+	 * actually changes (the chart paints sub-millisecond, but every saved
+	 * paint multiplied by 60fps adds up while the overlay is on screen).
+	 */
+	private void appendInsightsChart(com.o7flip.model.ItemInsights insights, int itemId)
+	{
+		if (insights == null || !config.showGeOverlayChart())
+		{
+			return;
+		}
+		Long[] buy  = insights.sparkline24hBuy;
+		Long[] sell = insights.sparkline24hSell;
+		if ((buy == null || buy.length == 0) && (sell == null || sell.length == 0))
+		{
+			return;
+		}
+		int dataHash = java.util.Arrays.deepHashCode(new Object[]{buy, sell});
+		if (cachedChartImage == null || cachedChartItemId != itemId || cachedChartDataHash != dataHash)
+		{
+			cachedChartImage   = com.o7flip.ui.MiniChart.render(CHART_W, CHART_H, buy, sell);
+			cachedChartItemId  = itemId;
+			cachedChartDataHash = dataHash;
+		}
+		panel.getChildren().add(new ImageComponent(cachedChartImage));
+	}
+
+	/**
+	 * FIFO-derived unit cost basis for the user's still-open position on
+	 * {@code itemId}. Used to show "Margin / item" in the locked-sell view
+	 * so the user can see what each unit will clear if they accept the
+	 * recommended price. Returns null when there's no open position
+	 * (defensive — frozen prices are usually only set while a buy is open,
+	 * but the freeze could lag the position close by a tick or two).
+	 */
+	private Long openPositionUnitCost(int itemId)
+	{
+		com.o7flip.util.ProfitCalculator.Result r =
+			com.o7flip.util.ProfitCalculator.compute(plugin.tradeHistory);
+		com.o7flip.util.ProfitCalculator.OpenPosition pos = r.openPositions.get(itemId);
+		if (pos == null || pos.remainingQty <= 0)
+		{
+			return null;
+		}
+		return pos.remainingCostBasis / pos.remainingQty;
 	}
 
 	/**

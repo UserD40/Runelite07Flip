@@ -2,7 +2,7 @@
 
 ![07Flip](images/banner.png)
 
-A RuneLite plugin that surfaces live Grand Exchange flipping data from [07flip.com](https://07flip.com) directly inside your client. Top flips, dump warnings, price spikes and dips, premium merch alerts, Moon and Barrows armour repair flips, potion decanting profit, plus a local trade tracker — all in one sidebar panel.
+A RuneLite plugin that surfaces live Grand Exchange flipping data from [07flip.com](https://07flip.com) directly inside your client. Top flips, dump warnings, per-item insights, premium merch alerts, Moon and Barrows armour repair flips, potion decanting profit, plus a local trade tracker with automatic price entry on the GE setup screen — all in one sidebar panel.
 
 ## ✅ No account required for the basics
 
@@ -10,8 +10,8 @@ Most of the plugin works out of the box. An API key from [07flip.com](https://07
 
 | Feature | Free | API key |
 |---|:-:|:-:|
-| Flips, Dumps, Spikes, Dips, Decant tabs | ✅ | ✅ |
-| All Grand Exchange overlays | ✅ | ✅ |
+| Flips, Dumps, Item, Decant tabs | ✅ | ✅ |
+| All Grand Exchange overlays and auto price-fill | ✅ | ✅ |
 | Local My Trades history | ✅ | ✅ |
 | Merch Alerts (premium) | — | ✅ paid |
 | Moon armour repair flips | — | ✅ |
@@ -28,7 +28,9 @@ Open the panel from the **07Flip** icon in the RuneLite sidebar. Every tab can b
 
 ### Flips — top GE flip opportunities
 
-The most profitable Grand Exchange flips right now, refreshed in real time. Each row shows the recommended buy and sell prices, profit after the 2% GE tax, ROI, the GE buy limit, and total potential profit across one 4-hour buy-limit cycle. Click any row to open the item's full analysis on 07flip.com, or right-click for quick **Buy on GE** / **Sell on GE** menu options.
+The most profitable Grand Exchange flips right now, refreshed in real time. Each row shows the recommended buy and sell prices, profit after the 2% GE tax, ROI, the GE buy limit, and a margin · limit summary. Left-click any row to open it in the **Item** tab for the full analysis, or right-click for quick **Buy on GE** / **Sell on GE** menu options that guide you through the offer setup.
+
+<img src="images/panel-flips.png" width="245" alt="Flips tab" />
 
 ### Dumps — items being mass-sold
 
@@ -36,25 +38,21 @@ Items that have just been heavily dumped by big traders, often available tempora
 
 <img src="images/panel-dumps.png" width="245" alt="Dumps tab" />
 
-### Spikes — fast-moving price increases
+### Item — full per-item analysis
 
-Items whose price has jumped sharply in a short time window. Surfaces momentum opportunities early, before they appear on common watchlists.
+Left-click any item row anywhere in the plugin to load it in the **Item** tab. The free tier shows live buy/sell prices, a dual-line 24-hour buy/sell sparkline with axes, hourly and daily GE volume, and any active merch alerts on the item. With a premium API key you also get 07flip.com's recommended buy/sell prices, the item's score, 24-hour price range, and the model's projection.
 
-<img src="images/panel-spikes.png" width="245" alt="Spikes tab" />
+<img src="images/panel-item-detail.png" width="245" alt="Item tab" />
 
-### Dips — sharp price drops
-
-The mirror of Spikes — items whose price has just fallen sharply. Useful for buy-the-dip plays on long-term flips and for catching overreactions to short-term news.
-
-<img src="images/panel-dips.png" width="245" alt="Dips tab" />
+Without a selection the tab shows the top three recommended items so you always have something actionable on screen.
 
 ### Alerts — conviction-tier merch alerts *(premium)*
 
-Active merch detector alerts: items where 07flip.com's models have flagged a high-conviction long-hold opportunity. Each row shows the entry price, target sell price, expected upside %, suggested hold time, 90-day high/low and the current drawdown from the 90-day high.
+Active merch detector alerts: items where 07flip.com's models have flagged a high-conviction long-hold opportunity. Each card shows the target sell price, the current price, the starting price when the alert fired, expected hold time, and a per-card sparkline. A **Successful** tab tracks alerts that have hit their targets with the achieved price, realised ROI and per-item profit.
 
 <img src="images/panel-alerts.png" width="245" alt="Alerts tab" />
 
-Requires an API key on a premium 07flip.com plan.
+Free users can view the Successful tab. Active alerts require an API key on a premium 07flip.com plan.
 
 ### Moon — Moon armour repair flips
 
@@ -74,15 +72,15 @@ Requires an API key.
 
 ### Decant — potion decanting profit
 
-The most profitable potion (4) → (3) → (2) → (1) decanting opportunities right now, computed across the whole live GE potion market. Click a row for the full breakdown on 07flip.com.
+The most profitable potion (4) → (3) → (2) → (1) decanting opportunities right now, computed across the whole live GE potion market. Click a row to view the full breakdown in the Item tab or on 07flip.com.
 
 ### My Trades — local trade tracker
 
-Automatically records every Grand Exchange buy and sell that completes while the plugin is running. Stored locally — your history persists across sessions and is yours alone.
+Automatically records every Grand Exchange buy and sell that completes while the plugin is running. The tab shows your live GE state with progress bars on every active offer, completed flip history with FIFO-matched profit per row, a stats section (total / today / best / worst profit, win rate, average ROI, GE tax paid, membership cost), and an activity section (this week / this month). Sort by Recent / Margin / Active and paginate five rows at a time.
 
 <img src="images/panel-mytrades.png" width="245" alt="My Trades tab" />
 
-If you have an API key and opt in to **Share trade data with 07flip.com** in config, the plugin will also send each completed trade to your account on the website so you can browse your full history under the Tracker feature there. Only `item ID`, `quantity` and `price` are sent — your account name is never included.
+History is stored locally and persists across sessions. If you have an API key and opt in to **Share trade data with 07flip.com** in config, the plugin will also send each completed trade to your account on the website so you can browse your full history under the Tracker feature there. Only `item ID`, `quantity` and `price` are sent — your account name is never included.
 
 ## 🎯 Grand Exchange integration
 
@@ -91,18 +89,27 @@ The plugin layers helpful overlays directly into the GE interface. None of these
 ### Movable price overlay on the GE setup screen
 While placing an offer, a small movable overlay shows 07Flip's recommended buy and sell prices for the current item. **Right-click either price** to instantly fill it into the custom price input — no typing.
 
-### Slot price colouring
-On the GE main screen, your active slot prices are tinted **green** when they're at or better than 07Flip's recommended price, **red** when they're worse. At-a-glance feedback on whether your offers are likely to fill at a good price.
+### Guided Buy on GE workflow
+Right-click a flip in the panel → **Buy on GE**. The plugin highlights the next correct empty slot in cyan, auto-types the item name into the GE search the moment you click it, glows the *Enter price* button yellow once you reach the offer setup screen, and fills the recommended buy price as soon as you open the custom-price input. Confirm and you're done.
 
-### "Enter price" button highlight
-After right-clicking a flip in the panel and choosing **Buy on GE** or **Sell on GE**, the in-game *Enter price* button glows yellow as a reminder to use a custom price rather than instant-buy or instant-sell. Helpful when you're new to the workflow.
+### Guided Sell on GE workflow
+Click any item in your inventory to start a sell offer. The plugin detects the sell setup screen, glows the *Enter price* button yellow, and fills the recommended sell price (or your frozen-on-buy price, whichever is higher) when you open the custom-price input.
+
+### Frozen sell prices
+When you queue a buy via the panel, 07Flip pins the recommended sell price at that moment. If the market drifts down before your buy completes, the frozen price still appears on the sell setup so you don't accidentally undercut yourself out of the projected margin. The freeze clears automatically once you fully sell the position.
+
+### Inventory tooltip with cost basis and ROI
+Hover any item in your inventory to see 07Flip's recommended sell price, your FIFO-matched cost basis from local trade history, and the live ROI if you sold right now. Coloured green when you're in profit, red when you're underwater.
+
+### GP drop animation on completed offers
+Each time a flip completes, a fading **+X gp** / **−X gp** number drops near the GE interface so you get instant visual feedback on the trade's outcome — no need to switch to a separate panel to confirm the profit.
 
 ### Inventory check on Sell
 The right-click **Sell on GE** option only appears when the item is actually in your inventory, keeping the menu clean and preventing accidental clicks.
 
 ## ⚙️ Configuration
 
-Open the RuneLite config (wrench icon) → **07Flip**. Settings are grouped into four sections.
+Open the RuneLite config (wrench icon) → **07Flip**. Settings are grouped into five sections.
 
 <img src="images/panel-config.png" width="245" alt="Configuration sections" />
 
@@ -110,14 +117,18 @@ Open the RuneLite config (wrench icon) → **07Flip**. Settings are grouped into
 - **API key** — your 07flip.com key (optional; unlocks premium features)
 - **Refresh interval** — how often to fetch new data (60–600 s, default 90)
 - **Smithing level** — used to calculate POH repair cost for Moon and Barrows
+- **Personalised flips by cash stack** — filter Flips to items you can afford, with cash rounded down to the nearest 100k gp before it leaves your machine
 
-**Panel tabs** — show or hide each of the nine tabs individually.
+**Panel tabs** — show or hide each of the eight tabs individually.
+
+**Tab order** — open a small dialog to drag tabs into your preferred left-to-right order.
 
 **Grand Exchange integration**
-- **Slot price colouring** — green/red tinting on active GE slots
 - **Show price overlay on GE setup** — movable overlay with right-click auto-fill
-- **Highlight 'Enter price' button** — yellow ring after right-clicking a flip
+- **Highlight 'Enter price' button** — yellow ring when an auto-fill is queued
 - **Hide 'Sell on GE' when not carrying item** — keeps the right-click menu clean
+- **Show GP drop animation on completed sells** — fading profit number on the GE interface
+- **Show inventory tooltip with cost basis** — hover an item to see your basis and recommended sell
 
 **Trade tracker**
 - **Share trade data with 07flip.com** — opt-in website sync (item ID + qty + price only, no account name; requires API key)
@@ -131,10 +142,11 @@ Open the RuneLite config (wrench icon) → **07Flip**. Settings are grouped into
 
 ## 💡 Tips
 
-- **Use right-click on the GE overlay** to auto-fill the recommended buy or sell price — it's the fastest way to place a precisely-priced offer.
+- **Right-click the GE overlay** to auto-fill the recommended price — the fastest way to place a precisely-priced offer.
+- **Click any item row** anywhere in the plugin to open it in the Item tab for the full chart, volume and recommendation breakdown.
 - **Hide tabs you don't use** in the Panel tabs config section to keep the panel compact.
 - **Set your Smithing level** in General config so Moon and Barrows profits are accurate to your repair cost.
-- **The Decant tab updates live** — small price changes can flip a potion conversion from profitable to not, so refresh before placing decant orders.
+- **Watch the GP-drop animation** on the GE for live feedback on each completed offer.
 - **My Trades persists locally** — even if you close RuneLite, your tracked history is still there next session.
 
 ## 🛠️ Troubleshooting
@@ -143,9 +155,8 @@ Open the RuneLite config (wrench icon) → **07Flip**. Settings are grouped into
 - Check your API key is pasted correctly into General → API key.
 - Make sure your 07flip.com plan covers the tab you're trying to use (Alerts is premium-only).
 
-**Slot price colouring isn't showing**
-- Confirm **Slot price colouring** is enabled in the Grand Exchange integration config section.
-- The colouring only appears once 07Flip has loaded recommended prices for that item; give it a few seconds after opening the GE.
+**The 'Enter price' button isn't highlighting on a sell**
+- The highlight only fires when 07Flip has a recommended sell price for the item — give it a few seconds after the sell setup screen appears for the first fetch to complete.
 
 **My Trades isn't recording new trades**
 - Trades are only recorded while the plugin is running and you're logged into OSRS.

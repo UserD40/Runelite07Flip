@@ -24,6 +24,7 @@
  */
 package com.o7flip.ui;
 
+import com.o7flip.O7FlipPlugin;
 import com.o7flip.model.DecantItem;
 import com.o7flip.util.Fonts;
 import com.o7flip.util.ItemIds;
@@ -50,7 +51,7 @@ public class DecantItemPanel extends JPanel
 	private static final Color HOVER_BG = new Color(0x3A3A3A);
 	private static final Color ORANGE   = new Color(0xFF981F);
 
-	public DecantItemPanel(DecantItem item, ItemManager itemManager, boolean odd)
+	public DecantItemPanel(DecantItem item, ItemManager itemManager, boolean odd, O7FlipPlugin plugin)
 	{
 		Color bg = odd ? ODD_BG : ColorScheme.DARK_GRAY_COLOR;
 
@@ -106,6 +107,8 @@ public class DecantItemPanel extends JPanel
 		add(textPanel, BorderLayout.CENTER);
 		add(roiLabel,  BorderLayout.EAST);
 
+		ClickRouter.attach(this, plugin, item.itemId, item.potionName);
+
 		addMouseListener(new MouseAdapter()
 		{
 			@Override
@@ -119,14 +122,6 @@ public class DecantItemPanel extends JPanel
 			{
 				setBackground(bg);
 				textPanel.setBackground(bg);
-			}
-			@Override
-			public void mouseClicked(MouseEvent e)
-			{
-				if (SwingUtilities.isLeftMouseButton(e))
-				{
-					FlipItemPanel.openUrl("https://07flip.com/item/" + item.itemId);
-				}
 			}
 		});
 		setMaximumSize(new Dimension(Integer.MAX_VALUE, getPreferredSize().height));

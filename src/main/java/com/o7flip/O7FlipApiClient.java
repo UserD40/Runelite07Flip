@@ -33,14 +33,15 @@ import com.o7flip.model.AuthStatus;
 import com.o7flip.model.BarrowsItem;
 import com.o7flip.model.BarrowsSet;
 import com.o7flip.model.DecantItem;
-import com.o7flip.model.DipItem;
 import com.o7flip.model.DumpItem;
 import com.o7flip.model.FlipItem;
+import com.o7flip.model.ItemInsights;
 import com.o7flip.model.MoonItem;
 import com.o7flip.model.MoonSet;
 import com.o7flip.model.RecommendedPrices;
 import com.o7flip.model.SearchResultItem;
 import com.o7flip.model.SpikeItem;
+import com.o7flip.model.TrackerStats;
 import com.o7flip.model.TradeRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -310,6 +311,386 @@ public class O7FlipApiClient
 		});
 	}
 
+	/**
+	 * Server-authoritative My Trades stats — merges plugin trade_records with
+	 * website-logged tracker_entries and de-dupes via flip_trade_links so the
+	 * plugin doesn't have to. Requires an API key; returns null on any failure
+	 * (no key, network, 401, parse error, 404 if endpoint not yet deployed).
+	 *
+	 * Callers should treat null as "fall back to local FIFO ProfitCalculator
+	 * result" — same UX as a user with no key.
+	 */
+	public void fetchTrackerStats(Consumer<TrackerStats> callback)
+	{
+		String key = sanitizedApiKey();
+		if (key == null)
+		{
+			callback.accept(null);
+			return;
+		}
+		fetch(BASE_URL + "/tracker/stats", new Callback()
+		{
+			@Override
+			public void onFailure(Call call, IOException e)
+			{
+				log.warn("[07Flip] fetchTrackerStats failed: {}", e.getMessage());
+				callback.accept(null);
+			}
+
+			@Override
+			public void onResponse(Call call, Response response) throws IOException
+			{
+				try
+				{
+					if (response.code() == 429)
+					{
+						markRateLimited();
+					}
+					if (!response.isSuccessful() || response.body() == null)
+					{
+						// 404 is expected until the server deploys the endpoint —
+						// log at debug, not warn, to avoid scaring early users.
+						if (response.code() == 404)
+						{
+							log.debug("[07Flip] /tracker/stats not yet available (404)");
+						}
+						else
+						{
+							log.warn("[07Flip] fetchTrackerStats HTTP {}", response.code());
+						}
+						callback.accept(null);
+						return;
+					}
+					JsonObject json = gson.fromJson(response.body().string(), JsonObject.class);
+					TrackerStats stats = new TrackerStats();
+					stats.totalRealisedProfit = getLong(json, "total_realised_profit", 0L);
+					stats.verifiedProfit      = getLong(json, "verified_profit",        0L);
+					stats.declaredProfit      = getLong(json, "declared_profit",        0L);
+					stats.totalInvestedOpen   = getLong(json, "total_invested_open",    0L);
+					stats.closedCount         = getInt(json,  "closed_count",           0);
+					stats.openCount           = getInt(json,  "open_count",             0);
+					stats.winRate             = getDouble(json, "win_rate",             0.0);
+					stats.hitRate             = getDouble(json, "hit_rate",             0.0);
+					stats.updatedAt           = getString(json, "updated_at",           "");
+
+					JsonElement bestEl = json.get("best_flip");
+					if (bestEl != null && !bestEl.isJsonNull() && bestEl.isJsonObject())
+					{
+						JsonObject best = bestEl.getAsJsonObject();
+						TrackerStats.BestFlip bf = new TrackerStats.BestFlip();
+						bf.entryId       = getString(best, "entry_id",         "");
+						bf.itemId        = getInt(best,    "item_id",          0);
+						bf.name          = getString(best, "name",             "");
+						bf.profit        = getLong(best,   "profit",           0L);
+						bf.source        = getString(best, "source",           "declared");
+						bf.fullyClosedAt = getString(best, "fully_closed_at",  "");
+						stats.bestFlip = bf;
+					}
+
+					callback.accept(stats);
+				}
+				catch (Exception e)
+				{
+					log.warn("[07Flip] fetchTrackerStats parse error: {}", e.getMessage());
+					callback.accept(null);
+				}
+				finally
+				{
+					response.close();
+				}
+			}
+		});
+	}
+
+	/**
+	 * Pins the current 07Flip rec_buy / rec_sell prices for an item to the
+	 * user's account. Sell-side overlay later reads these via the {@code frozen}
+	 * field on {@code /v2/item/{id}} so projected margin survives market drift
+	 * between buy placement and sell setup. Best-effort — server-side state
+	 * matters, the callback exists only for log / retry hooks.
+	 */
+	public void postFreeze(int itemId, long frozenBuy, long frozenSell, Consumer<Boolean> callback)
+	{
+		String key = sanitizedApiKey();
+		if (key == null)
+		{
+			if (callback != null) callback.accept(false);
+			return;
+		}
+		JsonObject body = new JsonObject();
+		body.addProperty("frozen_buy",  frozenBuy);
+		body.addProperty("frozen_sell", frozenSell);
+		RequestBody requestBody = RequestBody.create(MEDIA_TYPE_JSON, gson.toJson(body));
+		Request.Builder builder = new Request.Builder()
+			.url(BASE_URL + "/v2/item/" + itemId + "/freeze")
+			.post(requestBody)
+			.header("User-Agent", USER_AGENT)
+			.header("Authorization", "Bearer " + key);
+		okHttpClient.newCall(builder.build()).enqueue(new Callback()
+		{
+			@Override
+			public void onFailure(Call call, IOException e)
+			{
+				log.warn("[07Flip] postFreeze({}) failed: {}", itemId, e.getMessage());
+				if (callback != null) callback.accept(false);
+			}
+			@Override
+			public void onResponse(Call call, Response response) throws IOException
+			{
+				boolean ok = response.isSuccessful();
+				response.close();
+				if (!ok)
+				{
+					log.warn("[07Flip] postFreeze({}) HTTP {}", itemId, response.code());
+				}
+				if (callback != null) callback.accept(ok);
+			}
+		});
+	}
+
+	/**
+	 * Clears any active freeze for an item. Silent no-op server-side if none
+	 * existed. Called by the plugin after a sell FIFO-matches a buy in
+	 * tradeHistory, closing out the flip cycle.
+	 */
+	public void postUnfreeze(int itemId, Consumer<Boolean> callback)
+	{
+		String key = sanitizedApiKey();
+		if (key == null)
+		{
+			if (callback != null) callback.accept(false);
+			return;
+		}
+		// Empty JSON body — server only needs the {itemId, userId} pair.
+		RequestBody requestBody = RequestBody.create(MEDIA_TYPE_JSON, "{}");
+		Request.Builder builder = new Request.Builder()
+			.url(BASE_URL + "/v2/item/" + itemId + "/unfreeze")
+			.post(requestBody)
+			.header("User-Agent", USER_AGENT)
+			.header("Authorization", "Bearer " + key);
+		okHttpClient.newCall(builder.build()).enqueue(new Callback()
+		{
+			@Override
+			public void onFailure(Call call, IOException e)
+			{
+				log.warn("[07Flip] postUnfreeze({}) failed: {}", itemId, e.getMessage());
+				if (callback != null) callback.accept(false);
+			}
+			@Override
+			public void onResponse(Call call, Response response) throws IOException
+			{
+				boolean ok = response.isSuccessful();
+				response.close();
+				if (!ok)
+				{
+					log.warn("[07Flip] postUnfreeze({}) HTTP {}", itemId, response.code());
+				}
+				if (callback != null) callback.accept(ok);
+			}
+		});
+	}
+
+	/**
+	 * Fetches the per-item Insights blob shown on the Insights tab. Premium
+	 * fields ({@code rec_*}, {@code score.signal}, {@code projection}) come
+	 * back as null for free users — callers must check {@code premiumLocked}
+	 * to decide whether to show the upsell card.
+	 *
+	 * Open to free + premium API keys, and even to anonymous requests
+	 * (server returns the open subset). Callback receives null on any
+	 * failure: 404 (unknown item), 400 (non-numeric id), network, parse.
+	 */
+	public void fetchItemInsights(int itemId, Consumer<ItemInsights> callback)
+	{
+		fetch(BASE_URL + "/v2/item/" + itemId, new Callback()
+		{
+			@Override
+			public void onFailure(Call call, IOException e)
+			{
+				log.warn("[07Flip] fetchItemInsights({}) failed: {}", itemId, e.getMessage());
+				callback.accept(null);
+			}
+
+			@Override
+			public void onResponse(Call call, Response response) throws IOException
+			{
+				try
+				{
+					if (response.code() == 429)
+					{
+						markRateLimited();
+					}
+					if (!response.isSuccessful() || response.body() == null)
+					{
+						log.warn("[07Flip] fetchItemInsights({}) HTTP {}", itemId, response.code());
+						callback.accept(null);
+						return;
+					}
+					JsonObject root = gson.fromJson(response.body().string(), JsonObject.class);
+					callback.accept(parseItemInsights(root));
+				}
+				catch (Exception e)
+				{
+					log.warn("[07Flip] fetchItemInsights({}) parse error: {}", itemId, e.getMessage());
+					callback.accept(null);
+				}
+				finally
+				{
+					response.close();
+				}
+			}
+		});
+	}
+
+	private ItemInsights parseItemInsights(JsonObject root)
+	{
+		ItemInsights out = new ItemInsights();
+		out.itemId        = getInt(root, "item_id", 0);
+		out.name          = getString(root, "name", "Unknown");
+		out.members       = getBool(root, "members", false);
+		out.buyLimit      = getInt(root, "buy_limit", 0);
+		out.highAlch      = getIntOrNull(root, "high_alch");
+		out.lowAlch       = getIntOrNull(root, "low_alch");
+		out.premiumLocked = getBool(root, "premium_locked", false);
+		out.upgradeUrl    = getString(root, "upgrade_url", "");
+		out.updatedAt     = getString(root, "updated_at", "");
+
+		JsonObject cur = optObject(root, "current");
+		if (cur != null)
+		{
+			ItemInsights.Current c = new ItemInsights.Current();
+			c.buyPrice       = getLong(cur, "buy_price",  0L);
+			c.sellPrice      = getLong(cur, "sell_price", 0L);
+			c.margin         = getLong(cur, "margin",     0L);
+			c.tax            = getLong(cur, "tax",        0L);
+			c.profit         = getLong(cur, "profit",     0L);
+			c.roiPct         = getDouble(cur, "roi_pct",  0.0);
+			c.recBuy         = getLongOrNull(cur, "rec_buy");
+			c.recSell        = getLongOrNull(cur, "rec_sell");
+			c.recProfit      = getLongOrNull(cur, "rec_profit");
+			c.buyAgeMinutes  = getIntOrNull(cur, "buy_age_minutes");
+			c.sellAgeMinutes = getIntOrNull(cur, "sell_age_minutes");
+			out.current = c;
+		}
+
+		JsonObject vol = optObject(root, "volume");
+		if (vol != null)
+		{
+			ItemInsights.Volume v = new ItemInsights.Volume();
+			v.hourly = getInt(vol, "hourly", 0);
+			v.daily  = getInt(vol, "daily",  0);
+			out.volume = v;
+		}
+
+		JsonObject rng = optObject(root, "ranges");
+		if (rng != null)
+		{
+			ItemInsights.Ranges r = new ItemInsights.Ranges();
+			r.high24h            = getLong(rng, "high_24h", 0L);
+			r.low24h             = getLong(rng, "low_24h",  0L);
+			r.high7d             = getLong(rng, "high_7d",  0L);
+			r.low7d              = getLong(rng, "low_7d",   0L);
+			r.high90d            = getLong(rng, "high_90d", 0L);
+			r.low90d             = getLong(rng, "low_90d",  0L);
+			r.position90dPct     = getDoubleOrNull(rng, "position_90d_pct");
+			r.drawdownPctFrom90d = getDoubleOrNull(rng, "drawdown_pct_from_90d");
+			out.ranges = r;
+		}
+
+		JsonObject sc = optObject(root, "score");
+		if (sc != null)
+		{
+			ItemInsights.Score s = new ItemInsights.Score();
+			s.confidence = getInt(sc, "confidence", 0);
+			s.tier       = getString(sc, "tier", "");
+			s.signal     = sc.has("signal") && !sc.get("signal").isJsonNull() ? sc.get("signal").getAsString() : null;
+			out.score = s;
+		}
+
+		JsonObject al = optObject(root, "alerts");
+		if (al != null)
+		{
+			ItemInsights.Alerts a = new ItemInsights.Alerts();
+			a.activeMerch = getBool(al, "active_merch", false);
+			a.merchTarget = getLongOrNull(al, "merch_target");
+			a.merchTier   = al.has("merch_tier") && !al.get("merch_tier").isJsonNull() ? al.get("merch_tier").getAsString() : null;
+			a.spikePct24h = getDoubleOrNull(al, "spike_pct_24h");
+			a.dipPct24h   = getDoubleOrNull(al, "dip_pct_24h");
+			out.alerts = a;
+		}
+
+		JsonObject proj = optObject(root, "projection");
+		if (proj != null)
+		{
+			ItemInsights.Projection p = new ItemInsights.Projection();
+			p.band30d = parseBand(optObject(proj, "30d"));
+			p.band3m  = parseBand(optObject(proj, "3m"));
+			out.projection = p;
+		}
+
+		JsonObject fz = optObject(root, "frozen");
+		if (fz != null)
+		{
+			ItemInsights.Frozen f = new ItemInsights.Frozen();
+			f.buy      = getLong(fz, "buy",  0L);
+			f.sell     = getLong(fz, "sell", 0L);
+			f.frozenAt = getString(fz, "frozen_at", "");
+			out.frozen = f;
+		}
+
+		out.sparkline24hBuy   = parseNullableLongArray(root, "sparkline_24h_buy");
+		out.sparkline24hSell  = parseNullableLongArray(root, "sparkline_24h_sell");
+		out.sparkline24hStart = getString(root, "sparkline_24h_start", "");
+
+		return out;
+	}
+
+	/**
+	 * Parses a JSON number array where individual elements may be null —
+	 * preserved as Java nulls so callers can distinguish "no data here" from
+	 * a real zero. Used for the buy/sell sparkline arrays where the current
+	 * incomplete hour is sent as null.
+	 */
+	private Long[] parseNullableLongArray(JsonObject parent, String key)
+	{
+		if (parent == null || !parent.has(key) || parent.get(key).isJsonNull() || !parent.get(key).isJsonArray())
+		{
+			return new Long[0];
+		}
+		JsonArray arr = parent.getAsJsonArray(key);
+		Long[] out = new Long[arr.size()];
+		for (int i = 0; i < arr.size(); i++)
+		{
+			JsonElement el = arr.get(i);
+			out[i] = (el == null || el.isJsonNull()) ? null : el.getAsLong();
+		}
+		return out;
+	}
+
+	private ItemInsights.Band parseBand(JsonObject obj)
+	{
+		if (obj == null)
+		{
+			return null;
+		}
+		ItemInsights.Band b = new ItemInsights.Band();
+		b.mid     = getLong(obj, "mid",  0L);
+		b.low     = getLong(obj, "low",  0L);
+		b.high    = getLong(obj, "high", 0L);
+		b.hitRate = getDouble(obj, "hit_rate", 0.0);
+		return b;
+	}
+
+	private JsonObject optObject(JsonObject parent, String key)
+	{
+		if (parent == null || !parent.has(key))
+		{
+			return null;
+		}
+		JsonElement el = parent.get(key);
+		return (el == null || el.isJsonNull() || !el.isJsonObject()) ? null : el.getAsJsonObject();
+	}
+
 	// -------------------------------------------------------------------------
 	// Auth
 	// -------------------------------------------------------------------------
@@ -519,31 +900,6 @@ public class O7FlipApiClient
 		});
 	}
 
-	public void fetchDips(String sort, int page, BiConsumer<List<DipItem>, Integer> callback)
-	{
-		StringBuilder url = new StringBuilder(BASE_URL + "/dips?limit=").append(PAGE_LIMIT)
-			.append("&page=").append(page);
-		if (sort != null && !sort.isEmpty())
-		{
-			url.append("&sort=").append(sort);
-		}
-		fetch(url.toString(), new Callback()
-		{
-			@Override
-			public void onFailure(Call call, IOException e)
-			{
-				log.warn("[07Flip] fetchDips failed: {}", e.getMessage());
-				callback.accept(new ArrayList<>(), 0);
-			}
-
-			@Override
-			public void onResponse(Call call, Response response) throws IOException
-			{
-				parsePagedResponse(response, "dips", O7FlipApiClient.this::parseDipItem, callback);
-			}
-		});
-	}
-
 	public void fetchDumps(String sort, long minProfit, long priceMin, long priceMax,
 	                       int page, BiConsumer<List<DumpItem>, Integer> callback)
 	{
@@ -626,9 +982,16 @@ public class O7FlipApiClient
 		});
 	}
 
-	public void fetchAlerts(int page, BiConsumer<List<AlertItem>, Integer> callback)
+	/**
+	 * Loads alerts in one shot — pagination dropped per the redesign. Server
+	 * caps at 200; pending vs successful filtering happens client-side from
+	 * the {@code status} field. Free users only ever receive successful
+	 * alerts regardless of the {@code ?status=} query, so callers don't need
+	 * to gate the request.
+	 */
+	public void fetchAlerts(BiConsumer<List<AlertItem>, Integer> callback)
 	{
-		String url = BASE_URL + "/alerts?limit=" + PAGE_LIMIT + "&page=" + page;
+		String url = BASE_URL + "/alerts?limit=200&status=all";
 		fetch(url, new Callback()
 		{
 			@Override
@@ -654,7 +1017,6 @@ public class O7FlipApiClient
 		JsonObject sections,
 		BiConsumer<List<FlipItem>, Integer>  onFlips,
 		BiConsumer<List<SpikeItem>, Integer> onSpikes,
-		BiConsumer<List<DipItem>, Integer>   onDips,
 		BiConsumer<List<DumpItem>, Integer>  onDumps,
 		BiConsumer<List<AlertItem>, Integer> onAlerts,
 		Consumer<List<BarrowsSet>>           onBarrows,
@@ -717,12 +1079,6 @@ public class O7FlipApiClient
 						JsonObject sec = root.getAsJsonObject("spikes");
 						List<SpikeItem> items = parseArray(sec, "spikes", O7FlipApiClient.this::parseSpikeItem);
 						onSpikes.accept(items, getInt(sec, "total", items.size()));
-					}
-					if (onDips != null && root.has("dips"))
-					{
-						JsonObject sec = root.getAsJsonObject("dips");
-						List<DipItem> items = parseArray(sec, "dips", O7FlipApiClient.this::parseDipItem);
-						onDips.accept(items, getInt(sec, "total", items.size()));
 					}
 					if (onDumps != null && root.has("dumps"))
 					{
@@ -1028,22 +1384,6 @@ public class O7FlipApiClient
 		return item;
 	}
 
-	private DipItem parseDipItem(JsonObject obj)
-	{
-		DipItem item = new DipItem();
-		item.itemId       = getInt(obj, "item_id", 0);
-		item.name         = getString(obj, "name", "Unknown");
-		item.buyPrice     = getLong(obj, "buy_price", 0);
-		item.avg24hBuy    = getLong(obj, "avg_24h_buy", 0);
-		item.dipPct       = getDouble(obj, "dip_pct", 0);
-		item.hourlyVolume = getInt(obj, "hourly_volume", 0);
-		item.dailyVolume  = getInt(obj, "daily_volume", 0);
-		item.buyLimit     = getInt(obj, "buy_limit", 0);
-		item.members      = getBool(obj, "members", true);
-		item.lastUpdated  = getString(obj, "last_updated", "");
-		return item;
-	}
-
 	private DumpItem parseDumpItem(JsonObject obj)
 	{
 		DumpItem item = new DumpItem();
@@ -1072,17 +1412,38 @@ public class O7FlipApiClient
 	private AlertItem parseAlertItem(JsonObject obj)
 	{
 		AlertItem alert = new AlertItem();
-		alert.itemId       = getInt(obj, "item_id", 0);
-		alert.name         = getString(obj, "name", "Unknown");
-		alert.tier         = getString(obj, "tier", "");
-		alert.currentPrice = getLong(obj, "current_price", 0);
-		alert.sellTarget   = getLong(obj, "sell_target", 0);
-		alert.upsidePct    = getDouble(obj, "upside_pct", 0);
-		alert.holdTime     = getString(obj, "hold_time", "");
-		alert.high90d      = getLong(obj, "high_90d", 0);
-		alert.low90d       = getLong(obj, "low_90d", 0);
-		alert.drawdownPct  = getDouble(obj, "drawdown_pct", 0);
-		alert.detectedAt   = getString(obj, "detected_at", "");
+		alert.itemId         = getInt(obj, "item_id", 0);
+		alert.name           = getString(obj, "name", "Unknown");
+		alert.tier           = getString(obj, "tier", "");
+
+		// Prefer the new starting_price field; fall back to current_price for the
+		// short window between client and server deploys when one side might be
+		// stale. After the next plugin release the fallback can be dropped.
+		alert.startingPrice  = getLong(obj, "starting_price", getLong(obj, "current_price", 0L));
+		alert.currentPrice   = alert.startingPrice;   // legacy mirror
+		alert.livePrice      = getLongOrNull(obj, "live_price");
+		alert.sellTarget     = getLong(obj, "sell_target", 0L);
+		alert.upsidePct      = getDouble(obj, "upside_pct", 0.0);
+		alert.holdTime       = getString(obj, "hold_time", "");
+		alert.high90d        = getLong(obj, "high_90d", 0L);
+		alert.low90d         = getLong(obj, "low_90d", 0L);
+		alert.drawdownPct    = getDouble(obj, "drawdown_pct", 0.0);
+		alert.detectedAt     = getString(obj, "detected_at", "");
+
+		alert.status         = getString(obj, "status", "pending");
+		alert.achievedPrice  = getLongOrNull(obj, "achieved_price");
+		alert.achievedAt     = obj.has("achieved_at") && !obj.get("achieved_at").isJsonNull()
+			? obj.get("achieved_at").getAsString() : null;
+		alert.realisedProfit = getLongOrNull(obj, "realised_profit");
+		alert.realisedRoiPct = getDoubleOrNull(obj, "realised_roi_pct");
+
+		// Server picks timeframe per-alert: daily-since-detection for older
+		// alerts, last-24h hourly fallback for any alert detected within
+		// the past day. Same field names either way — plugin renders blind
+		// to which path was chosen.
+		alert.sparklineBuy   = parseNullableLongArray(obj, "sparkline_buy");
+		alert.sparklineSell  = parseNullableLongArray(obj, "sparkline_sell");
+		alert.sparklineStart = getString(obj, "sparkline_start", "");
 		return alert;
 	}
 

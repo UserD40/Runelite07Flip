@@ -107,6 +107,8 @@ public class SpikeItemPanel extends JPanel
 		add(textPanel,  BorderLayout.CENTER);
 		add(spikeBadge, BorderLayout.EAST);
 
+		ClickRouter.attach(this, plugin, item.itemId, item.name);
+
 		addMouseListener(new MouseAdapter()
 		{
 			@Override
@@ -122,17 +124,9 @@ public class SpikeItemPanel extends JPanel
 				textPanel.setBackground(bg);
 			}
 			@Override
-			public void mouseClicked(MouseEvent e)
-			{
-				if (SwingUtilities.isLeftMouseButton(e))
-				{
-					FlipItemPanel.openUrl("https://07flip.com/item/" + item.itemId);
-				}
-			}
-			@Override
 			public void mousePressed(MouseEvent e)
 			{
-				if (SwingUtilities.isRightMouseButton(e) && plugin != null)
+				if (SwingUtilities.isRightMouseButton(e) && !e.isShiftDown() && plugin != null)
 				{
 					JPopupMenu menu = new JPopupMenu();
 					JMenuItem buyItem = new JMenuItem("Buy on GE \u2014 " + FlipItemPanel.formatGp(item.buyPrice));

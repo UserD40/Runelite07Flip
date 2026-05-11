@@ -46,11 +46,6 @@ public class O7FlipOverlay extends Overlay
 	private static final Color HIGHLIGHT_FILL   = new Color(255, 215, 0, 80);
 	private static final Color HIGHLIGHT_BORDER = new Color(255, 215, 0, 200);
 
-	private static final Color GREEN_FILL   = new Color(0, 255, 0,  50);
-	private static final Color GREEN_BORDER = new Color(0, 200, 0, 180);
-	private static final Color RED_FILL     = new Color(255, 0,  0,  50);
-	private static final Color RED_BORDER   = new Color(200, 0,  0, 180);
-
 	private static final Color QUEUE_HINT_FILL   = new Color(0, 200, 255, 60);
 	private static final Color QUEUE_HINT_BORDER = new Color(0, 200, 255, 200);
 
@@ -69,19 +64,14 @@ public class O7FlipOverlay extends Overlay
 	@Override
 	public Dimension render(Graphics2D graphics)
 	{
-		// Pass 1 — slot price colouring on existing offers.
-		if (plugin.getConfig().showGePriceColouring())
-		{
-			renderSlotColouring(graphics);
-		}
-
-		// Pass 2 — empty-slot hint when a panel right-click is awaiting a slot pick.
+		// Pass 1 — empty-slot hint when a panel right-click is awaiting a slot pick.
 		if (plugin.hasOverlayQueue())
 		{
 			renderEmptySlotHints(graphics);
 		}
 
-		// Pass 3 — yellow highlight on the "Enter price" button when an auto-fill is armed.
+		// Pass 2 — yellow highlight on the "Enter price" / custom-price button
+		// when an auto-fill is armed (covers both buy and sell setup screens).
 		if (plugin.pendingGeInputPrice != -1 && plugin.getConfig().showGePriceHint())
 		{
 			renderEnterPriceHighlight(graphics);
@@ -141,31 +131,114 @@ public class O7FlipOverlay extends Overlay
 			return;
 		}
 
-		Widget[] children = geSetup.getDynamicChildren();
-		if (children == null)
+		// Walk static + dynamic children (the custom-price button on the sell
+		// screen sits in a different sub-widget tree than the buy screen's
+		// "Enter price" button). Match any action whose lowered label looks
+		// like a custom-price entry — covers "Enter price", "Set custom price",
+		// and any future variants without needing exact strings.
+		Widget target = findCustomPriceButton(geSetup);
+		if (target == null)
+		{
+			dumpSetupActionsOnce(geSetup);
+			return;
+		}
+		Rectangle bounds = target.getBounds();
+		if (bounds == null)
 		{
 			return;
 		}
+		graphics.setColor(HIGHLIGHT_FILL);
+		graphics.fill(bounds);
+		graphics.setColor(HIGHLIGHT_BORDER);
+		graphics.draw(bounds);
+	}
 
-		for (Widget w : children)
+	private static Widget findCustomPriceButton(Widget parent)
+	{
+		if (parent == null) return null;
+		if (hasCustomPriceAction(parent)) return parent;
+		Widget[] dyn = parent.getDynamicChildren();
+		if (dyn != null)
 		{
-			String[] actions = w.getActions();
-			if (actions == null)
+			for (Widget c : dyn)
 			{
-				continue;
+				if (c == null || c.isHidden()) continue;
+				Widget found = findCustomPriceButton(c);
+				if (found != null) return found;
 			}
-			for (String action : actions)
+		}
+		Widget[] stat = parent.getStaticChildren();
+		if (stat != null)
+		{
+			for (Widget c : stat)
 			{
-				if ("Enter price".equals(action))
-				{
-					Rectangle bounds = w.getBounds();
-					graphics.setColor(HIGHLIGHT_FILL);
-					graphics.fill(bounds);
-					graphics.setColor(HIGHLIGHT_BORDER);
-					graphics.draw(bounds);
-					return;
-				}
+				if (c == null || c.isHidden()) continue;
+				Widget found = findCustomPriceButton(c);
+				if (found != null) return found;
 			}
+		}
+		return null;
+	}
+
+	private static boolean hasCustomPriceAction(Widget w)
+	{
+		String[] actions = w.getActions();
+		if (actions == null) return false;
+		for (String a : actions)
+		{
+			if (a == null) continue;
+			String lower = a.toLowerCase();
+			// "Enter price" (buy setup), "Set custom price" / "Custom price"
+			// (sell setup variants), all match. Avoid plain "price" so we
+			// don't catch the "Price per item:" header.
+			if (lower.equals("enter price")
+				|| lower.contains("custom price")
+				|| lower.equals("set price"))
+			{
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/**
+	 * Diagnostic that fires up to 4 times if we land on a setup screen and
+	 * can't find the custom-price button. Logs every action across the widget
+	 * tree so we can update the matcher with the real label. Capped low to
+	 * avoid log spam once the matcher does work.
+	 */
+	private static int dumpCount = 0;
+	private static void dumpSetupActionsOnce(Widget root)
+	{
+		if (dumpCount++ >= 4 || root == null) return;
+		org.slf4j.LoggerFactory.getLogger("com.o7flip.O7FlipOverlay").info(
+			"[07Flip] custom-price button NOT found — dumping every action in the setup widget tree:");
+		dumpActionsRecursive(root, "");
+	}
+
+	private static void dumpActionsRecursive(Widget w, String indent)
+	{
+		if (w == null) return;
+		String[] acts = w.getActions();
+		if (acts != null)
+		{
+			java.util.List<String> nonEmpty = new java.util.ArrayList<>();
+			for (String a : acts) if (a != null && !a.isEmpty()) nonEmpty.add(a);
+			if (!nonEmpty.isEmpty())
+			{
+				org.slf4j.LoggerFactory.getLogger("com.o7flip.O7FlipOverlay").info(
+					"[07Flip] {}actions={}", indent, nonEmpty);
+			}
+		}
+		Widget[] dyn = w.getDynamicChildren();
+		if (dyn != null)
+		{
+			for (Widget c : dyn) dumpActionsRecursive(c, indent + "  ");
+		}
+		Widget[] stat = w.getStaticChildren();
+		if (stat != null)
+		{
+			for (Widget c : stat) dumpActionsRecursive(c, indent + "  ");
 		}
 	}
 
@@ -183,7 +256,12 @@ public class O7FlipOverlay extends Overlay
 			return;
 		}
 
-		Map<Integer, GrandExchangeOffer> offers = plugin.activeOffers;
+		// Only highlight the button matching the queued direction — Buy slot
+		// for queued buys, Sell slot for queued sells. Painting both would
+		// suggest either is a valid target when only one actually is.
+		boolean wantBuy = plugin.overlayQueueIsBuy();
+
+		Map<Integer, com.o7flip.model.ActiveOfferSnapshot> offers = plugin.activeOffers;
 		int baseId = InterfaceID.GeOffers.INDEX_0;
 		for (int i = 0; i < 8; i++)
 		{
@@ -196,11 +274,14 @@ public class O7FlipOverlay extends Overlay
 			{
 				continue;
 			}
-			if (!isSlotActionable(slot))
-			{
-				continue;
-			}
-			Rectangle bounds = slot.getBounds();
+			// Position-based detection: empty slot has 2 icon buttons laid out
+			// left-to-right (Buy on left, Sell on right). Action-label matching
+			// was unreliable because OSRS exposes both directions on shared
+			// widgets; widget bounds are deterministic.
+			Widget btn = pickDirectionalButton(slot, wantBuy);
+			if (btn == null) continue;
+			Rectangle bounds = btn.getBounds();
+			if (bounds == null) continue;
 			graphics.setColor(QUEUE_HINT_FILL);
 			graphics.fill(bounds);
 			graphics.setColor(QUEUE_HINT_BORDER);
@@ -208,21 +289,210 @@ public class O7FlipOverlay extends Overlay
 		}
 	}
 
+	private static int pickerLogCount = 0;
+
 	/**
-	 * A GE slot is actionable when one of its children exposes a
-	 * "Create ... Offer" menu action — locked F2P slots are visible widgets but
-	 * have no such action, so we skip them.
+	 * Picks the Buy or Sell icon-button inside a GE empty slot.
+	 *
+	 * Two-tier heuristic, in priority order:
+	 * <ol>
+	 *   <li><b>Action-keyword match.</b> Find widgets whose action text contains
+	 *       the wanted direction's keyword ("buy" / "sell") and not the
+	 *       opposite. This is the most reliable — OSRS labels its
+	 *       create-offer actions distinctly per button.</li>
+	 *   <li><b>Position fallback.</b> If no widget has a directional action
+	 *       label (the widget tree exposes only generic "Make-offer" text),
+	 *       sort the icon-sized candidates by X and pick leftmost for Buy,
+	 *       rightmost for Sell.</li>
+	 * </ol>
+	 *
+	 * Returns null when no candidate matches either path so we don't draw
+	 * the highlight on the wrong button — a visible mistake (wrong direction
+	 * highlighted) is worse than no hint at all.
 	 */
-	private static boolean isSlotActionable(Widget slot)
+	private static Widget pickDirectionalButton(Widget slot, boolean wantBuy)
 	{
-		if (hasCreateOfferAction(slot)) return true;
+		java.util.List<Widget> clickable = new java.util.ArrayList<>();
+		collectClickable(slot, clickable);
+
+		// Tier 1: action-keyword match. Prefer a widget whose action text
+		// names the direction unambiguously. Tracks which widgets matched so
+		// the position fallback can run only when tier 1 finds nothing.
+		String wantWord  = wantBuy ? "buy"  : "sell";
+		String otherWord = wantBuy ? "sell" : "buy";
+		Widget keywordHit = null;
+		int keywordHitArea = 0;
+		for (Widget c : clickable)
+		{
+			if (!actionMatchesDirection(c, wantWord, otherWord))
+			{
+				continue;
+			}
+			// If multiple widgets carry the direction keyword (e.g. icon +
+			// container), prefer the largest visible one — the actual button
+			// icon usually has the biggest hitbox among directional matches.
+			Rectangle b = c.getBounds();
+			int area = b == null ? 0 : b.width * b.height;
+			if (keywordHit == null || area > keywordHitArea)
+			{
+				keywordHit = c;
+				keywordHitArea = area;
+			}
+		}
+		if (keywordHit != null)
+		{
+			logPick("keyword", wantBuy, keywordHit, clickable);
+			return keywordHit;
+		}
+
+		// Tier 2: position fallback over visible icon candidates only.
+		//
+		// The full clickable list also contains non-icon widgets (invisible
+		// anchor children, tooltip-zone overlays, slot frames) whose bounds
+		// don't correspond to anything the user can see. Sorting all of them
+		// by X and grabbing the extreme has been unreliable because those
+		// invisible widgets land at unexpected coordinates and push the real
+		// Buy / Sell icons out of the leftmost / rightmost slots.
+		//
+		// Filter to widgets that actually render an icon — those have a
+		// non-default spriteId (i.e. > -1). Visually leftmost of THAT subset
+		// is the Buy icon in OSRS's empty-slot layout.
+		java.util.List<Widget> withSprite = new java.util.ArrayList<>();
+		for (Widget c : clickable)
+		{
+			if (c.getSpriteId() > 0)
+			{
+				withSprite.add(c);
+			}
+		}
+		java.util.List<Widget> bySize = withSprite.isEmpty() ? clickable : withSprite;
+		if (bySize.size() < 2)
+		{
+			return null;
+		}
+		bySize.sort((a, b) ->
+		{
+			Rectangle ra = a.getBounds(), rb = b.getBounds();
+			int ax = ra == null ? 0 : ra.x;
+			int bx = rb == null ? 0 : rb.x;
+			return Integer.compare(ax, bx);
+		});
+		Widget posHit = wantBuy ? bySize.get(0) : bySize.get(bySize.size() - 1);
+		logPick(withSprite.isEmpty() ? "position-fallback" : "position-sprite", wantBuy, posHit, bySize);
+		return posHit;
+	}
+
+	/**
+	 * True when widget {@code w}'s primary (first / left-click) action contains
+	 * {@code wantWord} (case-insensitive) and not {@code otherWord}. Checking
+	 * the primary action only — not the whole menu — is more discriminating
+	 * because OSRS slot buttons often expose every related option (Buy / Sell /
+	 * Cancel / Examine) as menu siblings, while their primary left-click action
+	 * is direction-specific.
+	 */
+	private static boolean actionMatchesDirection(Widget w, String wantWord, String otherWord)
+	{
+		String[] actions = w.getActions();
+		if (actions == null || actions.length == 0) return false;
+		String primary = actions[0];
+		if (primary == null || primary.isEmpty()) return false;
+		String lower = primary.toLowerCase();
+		return lower.contains(wantWord) && !lower.contains(otherWord);
+	}
+
+	/**
+	 * Diagnostic. Logs each pick decision so we can verify (or debug) which
+	 * tier fired and what the candidate set looked like. Deduped per chosen
+	 * widget bounds — same widget chosen repeatedly across frames stays quiet,
+	 * but a DIFFERENT widget (different bounds = different slot) emits a new
+	 * log line so we can see every slot's pick independently.
+	 */
+	private static String lastPickKey = "";
+
+	private static void logPick(String tier, boolean wantBuy, Widget chosen, java.util.List<Widget> all)
+	{
+		Rectangle bounds = chosen.getBounds();
+		String boundsStr = bounds == null ? "null" : (bounds.x + "," + bounds.y);
+		String key = tier + "|" + wantBuy + "|" + boundsStr;
+		if (key.equals(lastPickKey)) return;
+		lastPickKey = key;
+		pickerLogCount++;
+		org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger("com.o7flip.O7FlipOverlay");
+		log.info("[07Flip] pickDirectionalButton[{}]: wantBuy={}, chosen spriteId={} bounds={} actions={}",
+			tier, wantBuy, chosen.getSpriteId(), chosen.getBounds(),
+			chosen.getActions() == null ? "(none)" : java.util.Arrays.toString(chosen.getActions()));
+		for (int i = 0; i < all.size(); i++)
+		{
+			Widget c = all.get(i);
+			log.info("[07Flip]   candidate[{}] spriteId={} itemId={} bounds={} actions={}",
+				i, c.getSpriteId(), c.getItemId(), c.getBounds(),
+				c.getActions() == null ? "(none)" : java.util.Arrays.toString(c.getActions()));
+		}
+	}
+
+	private static void collectClickable(Widget w, java.util.List<Widget> out)
+	{
+		if (w == null || w.isHidden()) return;
+		Widget[] dyn = w.getDynamicChildren();
+		if (dyn != null)
+		{
+			for (Widget c : dyn)
+			{
+				if (c == null || c.isHidden()) continue;
+				if (isIconSizedButton(c)) out.add(c);
+				collectClickable(c, out);
+			}
+		}
+		Widget[] stat = w.getStaticChildren();
+		if (stat != null)
+		{
+			for (Widget c : stat)
+			{
+				if (c == null || c.isHidden()) continue;
+				if (isIconSizedButton(c)) out.add(c);
+				collectClickable(c, out);
+			}
+		}
+	}
+
+	/**
+	 * Icon-button heuristic: has at least one non-empty action AND a roughly
+	 * square / icon-sized bounds (the Buy and Sell icons in OSRS GE are
+	 * approx 32×32 px). Excludes the "Empty" label and slot-spanning bg
+	 * widgets that share menu options with the buttons.
+	 */
+	private static boolean isIconSizedButton(Widget w)
+	{
+		String[] actions = w.getActions();
+		if (actions == null) return false;
+		boolean hasAction = false;
+		for (String a : actions)
+		{
+			if (a != null && !a.isEmpty()) { hasAction = true; break; }
+		}
+		if (!hasAction) return false;
+		Rectangle b = w.getBounds();
+		if (b == null) return false;
+		return b.width > 8 && b.height > 8 && b.width < 80 && b.height < 80;
+	}
+
+	@SuppressWarnings("unused")
+	private static int collectLogCount = 0;
+
+	@SuppressWarnings("unused")
+	private static java.util.List<Widget> collectCreateOfferButtons(Widget slot, boolean wantBuy)
+	{
+		// Kept as a reference / fallback. The position-based pickDirectionalButton
+		// above is the active path. Action-label matching was unreliable so this
+		// helper is no longer called from the render loop.
+		java.util.List<Widget> out = new java.util.ArrayList<>(1);
 		Widget[] dyn = slot.getDynamicChildren();
 		if (dyn != null)
 		{
 			for (Widget c : dyn)
 			{
 				if (c == null || c.isHidden()) continue;
-				if (hasCreateOfferAction(c)) return true;
+				if (matchesCreateOfferAction(c, wantBuy)) out.add(c);
 			}
 		}
 		Widget[] stat = slot.getStaticChildren();
@@ -231,21 +501,23 @@ public class O7FlipOverlay extends Overlay
 			for (Widget c : stat)
 			{
 				if (c == null || c.isHidden()) continue;
-				if (hasCreateOfferAction(c)) return true;
+				if (matchesCreateOfferAction(c, wantBuy)) out.add(c);
 			}
 		}
-		return false;
+		return out;
 	}
 
-	private static boolean hasCreateOfferAction(Widget w)
+	@SuppressWarnings("unused")
+	private static boolean matchesCreateOfferAction(Widget w, boolean wantBuy)
 	{
 		String[] actions = w.getActions();
 		if (actions == null) return false;
+		String wanted = wantBuy ? "buy" : "sell";
 		for (String a : actions)
 		{
 			if (a == null) continue;
 			String lower = a.toLowerCase();
-			if (lower.contains("create") && lower.contains("offer"))
+			if (lower.contains("create") && lower.contains("offer") && lower.contains(wanted))
 			{
 				return true;
 			}
@@ -253,87 +525,4 @@ public class O7FlipOverlay extends Overlay
 		return false;
 	}
 
-	private void renderSlotColouring(Graphics2D graphics)
-	{
-		Map<Integer, GrandExchangeOffer> offers = plugin.activeOffers;
-		if (offers.isEmpty())
-		{
-			return;
-		}
-
-		// Don't paint when the main GE view isn't showing. Do NOT wipe activeOffers
-		// here — offers persist in-game across UI close/open, and GrandExchangeOfferChanged
-		// only fires on state changes, so wiping would leave us empty until the next change
-		// and falsely treat occupied slots as free.
-		Widget firstSlot = client.getWidget(InterfaceID.GeOffers.INDEX_0);
-		if (firstSlot == null || firstSlot.isHidden())
-		{
-			return;
-		}
-
-		// Compute cost-basis once per render (single ProfitCalculator pass) so all
-		// 8 slots can share the open-position lookup.
-		ProfitCalculator.Result fifo = ProfitCalculator.compute(plugin.tradeHistory);
-
-		// Slot widgets INDEX_0 through INDEX_7 are sequential integers.
-		int baseId = InterfaceID.GeOffers.INDEX_0;
-
-		for (Map.Entry<Integer, GrandExchangeOffer> entry : offers.entrySet())
-		{
-			int slotIndex = entry.getKey();
-			if (slotIndex < 0 || slotIndex > 7)
-			{
-				continue;
-			}
-
-			GrandExchangeOffer offer = entry.getValue();
-			TrackedItemData tracked = plugin.trackedItems.get(offer.getItemId());
-
-			boolean isBuy = offer.getState() == GrandExchangeOfferState.BUYING
-				|| offer.getState() == GrandExchangeOfferState.BOUGHT;
-
-			Long comparePrice = null;
-			if (!isBuy)
-			{
-				// Sells: prefer cost-basis from the user's actual trade history. This
-				// turns the slot colour into "is this offer profitable for me?"
-				ProfitCalculator.OpenPosition pos = fifo.openPositions.get(offer.getItemId());
-				if (pos != null && pos.remainingQty > 0)
-				{
-					comparePrice = pos.remainingCostBasis / pos.remainingQty;
-				}
-				else if (tracked != null)
-				{
-					comparePrice = tracked.flipSellPrice;
-				}
-			}
-			else if (tracked != null)
-			{
-				comparePrice = tracked.flipBuyPrice != null ? tracked.flipBuyPrice
-					: tracked.spikeBuyPrice != null ? tracked.spikeBuyPrice
-					: tracked.dipBuyPrice;
-			}
-
-			if (comparePrice == null)
-			{
-				continue;
-			}
-
-			boolean isGood = isBuy
-				? offer.getPrice() <= comparePrice
-				: offer.getPrice() >= comparePrice;
-
-			Widget slotWidget = client.getWidget(baseId + slotIndex);
-			if (slotWidget == null || slotWidget.isHidden())
-			{
-				continue;
-			}
-
-			Rectangle bounds = slotWidget.getBounds();
-			graphics.setColor(isGood ? GREEN_FILL : RED_FILL);
-			graphics.fill(bounds);
-			graphics.setColor(isGood ? GREEN_BORDER : RED_BORDER);
-			graphics.draw(bounds);
-		}
-	}
 }

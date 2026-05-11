@@ -165,13 +165,13 @@ public interface O7FlipConfig extends Config
 	}
 
 	@ConfigItem(
-		keyName = "showDips",
-		name = "Show Dips tab",
-		description = "Show the Dips tab in the panel.",
+		keyName = "showItem",
+		name = "Show Item tab",
+		description = "Show the Item tab in the panel — left-click any item row to populate it with insights.",
 		section = tabsSection,
 		position = 3
 	)
-	default boolean showDips()
+	default boolean showInsights()
 	{
 		return true;
 	}
@@ -268,18 +268,6 @@ public interface O7FlipConfig extends Config
 	// ── Grand Exchange integration ─────────────────────────────────────────
 
 	@ConfigItem(
-		keyName = "showGePriceColouring",
-		name = "Slot price colouring",
-		description = "Colour GE slot prices green/red based on 07Flip recommended buy/sell prices.",
-		section = geSection,
-		position = 0
-	)
-	default boolean showGePriceColouring()
-	{
-		return true;
-	}
-
-	@ConfigItem(
 		keyName = "showGeOfferOverlay",
 		name = "Show price overlay on GE setup",
 		description = "Show a movable 07Flip overlay on the GE setup screen with recommended buy/sell prices for the current item. Right-click the overlay and pick a price to auto-fill the custom price input.",
@@ -335,6 +323,54 @@ public interface O7FlipConfig extends Config
 		position = 5
 	)
 	default boolean showInventoryTooltip()
+	{
+		return true;
+	}
+
+	@ConfigItem(
+		keyName = "showGeOverlayScore",
+		name = "Overlay: show Score row",
+		description = "Show the 07Flip merchant score row inside the GE setup overlay. Turn off for a smaller overlay.",
+		section = geSection,
+		position = 6
+	)
+	default boolean showGeOverlayScore()
+	{
+		return true;
+	}
+
+	@ConfigItem(
+		keyName = "showGeOverlayBuyLimit",
+		name = "Overlay: show Buy limit row",
+		description = "Show the 4-hour GE buy limit inside the GE setup overlay.",
+		section = geSection,
+		position = 7
+	)
+	default boolean showGeOverlayBuyLimit()
+	{
+		return true;
+	}
+
+	@ConfigItem(
+		keyName = "showGeOverlayVolume",
+		name = "Overlay: show Volume row",
+		description = "Show hourly GE volume inside the GE setup overlay. Turn off for a smaller overlay.",
+		section = geSection,
+		position = 8
+	)
+	default boolean showGeOverlayVolume()
+	{
+		return true;
+	}
+
+	@ConfigItem(
+		keyName = "showGeOverlayChart",
+		name = "Overlay: show 24h chart",
+		description = "Show the compact 24h buy/sell sparkline inside the GE setup overlay. Turn off for a much smaller overlay.",
+		section = geSection,
+		position = 9
+	)
+	default boolean showGeOverlayChart()
 	{
 		return true;
 	}

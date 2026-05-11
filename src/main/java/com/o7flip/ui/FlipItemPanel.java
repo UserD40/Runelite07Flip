@@ -57,6 +57,13 @@ public class FlipItemPanel extends JPanel
 	{
 		Color bg = odd ? ODD_BG : ColorScheme.DARK_GRAY_COLOR;
 
+		// 07Flip's rec_buy / rec_sell prices are the patient-flipper p10/p90
+		// targets — a paid signal. Free users see the market bid/ask only and
+		// their right-click queues at the matching market price, so they get
+		// the queue UX without the rec data.
+		final boolean isPremium = plugin != null && plugin.panel != null && plugin.panel.isPremium();
+		final boolean showRecPrices = isPremium;
+
 		setLayout(new BorderLayout(8, 0));
 		setBackground(bg);
 		setBorder(new EmptyBorder(8, 10, 8, 10));
@@ -98,7 +105,7 @@ public class FlipItemPanel extends JPanel
 
 		// ── BUY (red) ─────────────────────────────────────────────────────────
 		String buyHtml = "<html><b>Buy:</b>  " + formatGpCompact(flip.buyPrice);
-		if (flip.recBuyPrice != null)
+		if (showRecPrices && flip.recBuyPrice != null)
 		{
 			buyHtml += "  <font color='#888888'>· Rec " + formatGpCompact(flip.recBuyPrice) + "</font>";
 		}
@@ -113,29 +120,24 @@ public class FlipItemPanel extends JPanel
 		{
 			buyTip.append("07Flip rec: <font color='#FF981F'>").append(formatGp(flip.recBuyPrice)).append("</font><br>");
 		}
-		buyTip.append("<font color='#888888'>Right-click to queue this price into the GE</font></html>");
+		buyTip.append("<font color='#666666'>Right-click anywhere to queue a Buy on the GE · Click for insights · Shift+click or double-click to open on 07flip.com</font></html>");
 		buyLabel.setToolTipText(buyTip.toString());
 		buyLabel.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
-		// Right-click on the Buy line queues a buy at the recommended price
-		// (or the live sell-side price if no rec data) — no menu, direct action.
-		final long buyTarget = (flip.recBuyPrice != null && flip.recBuyPrice > 0)
+		// Per-line right-click direct actions used to live here but were too
+		// easy to trigger by accident — clicking the green Sell line queued
+		// a Sell when the user meant to Buy from the row's menu. Right-click
+		// is now exclusively the row-level menu, single source of truth.
+		//
+		// Premium users get the 07Flip rec_buy price (the patient-flipper
+		// target). Free users get the market sell price (the instant-fill
+		// target) — same queue UX, just at the live market price instead of
+		// the gated rec target.
+		final long buyTarget = (showRecPrices && flip.recBuyPrice != null && flip.recBuyPrice > 0)
 			? flip.recBuyPrice : flip.sellPrice;
-		buyLabel.addMouseListener(new MouseAdapter()
-		{
-			@Override
-			public void mousePressed(MouseEvent e)
-			{
-				if (SwingUtilities.isRightMouseButton(e) && plugin != null)
-				{
-					plugin.queueGeBuy(flip.itemId, buyTarget, flip.name);
-					e.consume();
-				}
-			}
-		});
 
 		// ── SELL (green) ──────────────────────────────────────────────────────
 		String sellHtml = "<html><b>Sell:</b>  " + formatGpCompact(flip.sellPrice);
-		if (flip.recSellPrice != null)
+		if (showRecPrices && flip.recSellPrice != null)
 		{
 			sellHtml += "  <font color='#888888'>· Rec " + formatGpCompact(flip.recSellPrice) + "</font>";
 		}
@@ -150,23 +152,14 @@ public class FlipItemPanel extends JPanel
 		{
 			sellTip.append("07Flip rec: <font color='#FF981F'>").append(formatGp(flip.recSellPrice)).append("</font><br>");
 		}
-		sellTip.append("<font color='#888888'>Right-click to queue this price into the GE</font></html>");
+		sellTip.append("<font color='#666666'>Right-click anywhere to queue a Buy on the GE · Click for insights · Shift+click or double-click to open on 07flip.com</font></html>");
 		sellLabel.setToolTipText(sellTip.toString());
 		sellLabel.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
-		final long sellTarget = (flip.recSellPrice != null && flip.recSellPrice > 0)
+		// Per-line right-click direct actions removed — see the matching
+		// comment above the Buy block. Same premium-gating: premium gets
+		// rec_sell, free users get the market buy price.
+		final long sellTarget = (showRecPrices && flip.recSellPrice != null && flip.recSellPrice > 0)
 			? flip.recSellPrice : flip.buyPrice;
-		sellLabel.addMouseListener(new MouseAdapter()
-		{
-			@Override
-			public void mousePressed(MouseEvent e)
-			{
-				if (SwingUtilities.isRightMouseButton(e) && plugin != null)
-				{
-					plugin.queueGeSell(flip.itemId, sellTarget, flip.name);
-					e.consume();
-				}
-			}
-		});
 
 		// ── PROFIT + ROI ───────────────────────────────────────────────────────
 		// Compact single line: "+158.0K · L70". ROI, 07F margin and
@@ -219,6 +212,47 @@ public class FlipItemPanel extends JPanel
 		add(iconLabel, BorderLayout.WEST);
 		add(textPanel, BorderLayout.CENTER);
 
+		ClickRouter.attach(this, plugin, flip.itemId, flip.name);
+
+		// Each price label intercepts its own mouse events for the right-click
+		// "queue this price" action, which means click events on those labels
+		// never reach the panel-level ClickRouter. Attach a click-only handler
+		// so shift+click / double-click for navigation works across the row.
+		ClickRouter.attachClickOnly(buyLabel,    plugin, flip.itemId, flip.name);
+		ClickRouter.attachClickOnly(sellLabel,   plugin, flip.itemId, flip.name);
+		ClickRouter.attachClickOnly(profitLabel, plugin, flip.itemId, flip.name);
+		ClickRouter.attachClickOnly(nameLabel,   plugin, flip.itemId, flip.name);
+		if (scoreLabel != null)
+		{
+			ClickRouter.attachClickOnly(scoreLabel, plugin, flip.itemId, flip.name);
+		}
+
+		// Swing doesn't bubble mouse events: a right-click on the inner
+		// Buy/Sell/profit labels never reaches the row's MouseListener. Forward
+		// the right-click to the same queueGeBuy call so the entire row
+		// surface — labels included — is a single click target for queuing
+		// the buy.
+		MouseAdapter rightClickQueueBuy = new MouseAdapter()
+		{
+			@Override
+			public void mousePressed(MouseEvent e)
+			{
+				if (SwingUtilities.isRightMouseButton(e) && !e.isShiftDown() && plugin != null)
+				{
+					plugin.queueGeBuy(flip.itemId, buyTarget, flip.name);
+					e.consume();
+				}
+			}
+		};
+		buyLabel.addMouseListener(rightClickQueueBuy);
+		sellLabel.addMouseListener(rightClickQueueBuy);
+		profitLabel.addMouseListener(rightClickQueueBuy);
+		nameLabel.addMouseListener(rightClickQueueBuy);
+		if (scoreLabel != null)
+		{
+			scoreLabel.addMouseListener(rightClickQueueBuy);
+		}
+
 		addMouseListener(new MouseAdapter()
 		{
 			@Override
@@ -234,41 +268,20 @@ public class FlipItemPanel extends JPanel
 				textPanel.setBackground(bg);
 			}
 			@Override
-			public void mouseClicked(MouseEvent e)
-			{
-				if (SwingUtilities.isLeftMouseButton(e))
-				{
-					openUrl("https://07flip.com/item/" + flip.itemId);
-				}
-			}
-			@Override
 			public void mousePressed(MouseEvent e)
 			{
-				if (SwingUtilities.isRightMouseButton(e) && plugin != null)
+				// Shift+right-click is the website-open gesture handled by
+				// ClickRouter — skip the context menu so it doesn't open on
+				// top of the browser navigation.
+				if (SwingUtilities.isRightMouseButton(e) && !e.isShiftDown() && plugin != null)
 				{
-					JPopupMenu menu = new JPopupMenu();
-					// Prefer 07Flip recommended prices (rec_buy / rec_sell) when
-					// available \u2014 they target the patient-flipper p10/p90 entry
-					// points. Fall back to the instant-fill market prices when
-					// the server hasn't computed recommendations for this item.
-					// buyTarget / sellTarget are computed once at constructor scope above.
-					JMenuItem buyItem = new JMenuItem("Buy on GE \u2014 " + formatGp(buyTarget));
-					buyItem.addActionListener(ae -> plugin.queueGeBuy(flip.itemId, buyTarget, flip.name));
-					menu.add(buyItem);
-					boolean inInventory = plugin.inventoryItemIds.contains(flip.itemId);
-					if (!plugin.getConfig().inventoryCheckOnSell() || inInventory)
-					{
-						JMenuItem sellItem = new JMenuItem("Sell on GE \u2014 " + formatGp(sellTarget));
-						sellItem.addActionListener(ae -> plugin.queueGeSell(flip.itemId, sellTarget, flip.name));
-						menu.add(sellItem);
-					}
-					JMenuItem detailsItem = new JMenuItem("Details\u2026");
-					detailsItem.addActionListener(ae ->
-						ItemDetailDialog.show(FlipItemPanel.this, flip, plugin, itemManager));
-					menu.add(detailsItem);
-					menu.addSeparator();
-					addHideMenuItem(menu, plugin, flip.itemId, flip.name);
-					menu.show(e.getComponent(), e.getX(), e.getY());
+					// Flips tab is about buy opportunities \u2014 a plain right-
+					// click anywhere on the row queues a Buy directly, no
+					// menu. Avoids the previous trap where clicking near the
+					// green Sell line accidentally queued a Sell when the
+					// user meant to buy. Sell from-inventory still works via
+					// inventory-click in the GE itself.
+					plugin.queueGeBuy(flip.itemId, buyTarget, flip.name);
 				}
 			}
 		});

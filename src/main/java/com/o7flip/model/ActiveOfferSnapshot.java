@@ -24,16 +24,43 @@
  */
 package com.o7flip.model;
 
-public class DipItem
+import net.runelite.api.GrandExchangeOfferState;
+
+/**
+ * Immutable, EDT-safe snapshot of a live GE offer. Captured on the game
+ * thread (where {@link net.runelite.api.Client#getItemDefinition} is legal)
+ * so the panel can render rows without crossing thread boundaries.
+ *
+ * Replaces direct use of {@link net.runelite.api.GrandExchangeOffer} from
+ * Swing code — that class works fine for primitive accessors but resolving
+ * the item name requires the client thread and asserts otherwise.
+ */
+public class ActiveOfferSnapshot
 {
-	public int     itemId;
-	public String  name;
-	public long    buyPrice;
-	public long    avg24hBuy;
-	public double  dipPct;
-	public int     hourlyVolume;
-	public int     dailyVolume;
-	public int     buyLimit;
-	public boolean members;
-	public String  lastUpdated;
+	public final int slot;
+	public final int itemId;
+	public final String name;
+	public final long price;
+	public final int quantitySold;
+	public final int totalQuantity;
+	public final GrandExchangeOfferState state;
+
+	public ActiveOfferSnapshot(int slot, int itemId, String name, long price,
+		int quantitySold, int totalQuantity, GrandExchangeOfferState state)
+	{
+		this.slot          = slot;
+		this.itemId        = itemId;
+		this.name          = name != null ? name : "Item " + itemId;
+		this.price         = price;
+		this.quantitySold  = quantitySold;
+		this.totalQuantity = totalQuantity;
+		this.state         = state;
+	}
+
+	public boolean isBuy()
+	{
+		return state == GrandExchangeOfferState.BUYING
+			|| state == GrandExchangeOfferState.BOUGHT
+			|| state == GrandExchangeOfferState.CANCELLED_BUY;
+	}
 }
