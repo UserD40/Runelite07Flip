@@ -2039,10 +2039,19 @@ public class O7FlipPanel extends PluginPanel
 		{
 			insightsPanel = new com.o7flip.ui.InsightsPanel(itemManager, plugin);
 			insightsHost.add(insightsPanel);
-			// Seed the empty-state recommendations with whatever's currently
-			// loaded in the Flips list. Subsequent flips refreshes flow through
-			// updateFlips() which calls back into setRecommended.
-			pushInsightsRecommendations();
+			// If the user had an item loaded before this panel was torn down
+			// (e.g. by an auth-refresh rebuilding the tabs), restore it so
+			// data refreshes don't blank the Item tab. Otherwise seed the
+			// empty-state recommendations from the Flips list.
+			com.o7flip.model.ItemInsights loaded = plugin != null ? plugin.currentInsights : null;
+			if (loaded != null)
+			{
+				insightsPanel.show(loaded);
+			}
+			else
+			{
+				pushInsightsRecommendations();
+			}
 		}
 		return insightsPanel;
 	}
@@ -2078,6 +2087,18 @@ public class O7FlipPanel extends PluginPanel
 		if (p != null)
 		{
 			p.showLoading(itemId, fallbackName);
+		}
+		// If the search overlay is currently showing (user clicked a search
+		// result), swap the CardLayout back to the tabs view so the Item tab's
+		// content is actually visible — otherwise selectTab() picks the right
+		// tab underneath but the search card stays on top.
+		CardLayout cl = (CardLayout) mainArea.getLayout();
+		cl.show(mainArea, "tabs");
+		// Clear the search field so the next character the user types starts
+		// a fresh search instead of re-triggering on the lingering query.
+		if (searchField != null)
+		{
+			searchField.setText("");
 		}
 		selectTab("Item");
 	}
