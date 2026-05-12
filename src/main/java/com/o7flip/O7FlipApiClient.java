@@ -113,7 +113,7 @@ public class O7FlipApiClient
 		String cleaned = raw.replaceAll("[^A-Za-z0-9-]", "");
 		if (!loggedKeySanitisation && raw.length() != cleaned.length())
 		{
-			log.info("[07Flip] API key sanitised: raw length {} -> cleaned length {}",
+			log.debug("[07Flip] API key sanitised: raw length {} -> cleaned length {}",
 				raw.length(), cleaned.length());
 			loggedKeySanitisation = true;
 		}
@@ -733,7 +733,7 @@ public class O7FlipApiClient
 						// guard our server uses after a deploy, plus 502/504 from
 						// the gateway during the same window. Schedule a retry;
 						// don't change the user-facing auth state in the meantime.
-						log.info("[07Flip] /auth returned {} — transient server error, will retry", code);
+						log.debug("[07Flip] /auth returned {} — transient server error, will retry", code);
 						if (onTransient != null)
 						{
 							onTransient.run();
@@ -868,7 +868,7 @@ public class O7FlipApiClient
 		{
 			response.close();
 		}
-		log.info("[07Flip] Premium preset rejected (403). Upgrade URL: {}", upgradeUrl);
+		log.debug("[07Flip] Premium preset rejected (403). Upgrade URL: {}", upgradeUrl);
 		if (onPremiumRequired != null)
 		{
 			onPremiumRequired.accept(upgradeUrl);

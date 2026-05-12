@@ -627,7 +627,7 @@ public class O7FlipPlugin extends Plugin
 			config.refreshIntervalSeconds(),
 			TimeUnit.SECONDS
 		);
-		log.info("[07Flip] Started, refreshing every {}s", config.refreshIntervalSeconds());
+		log.debug("[07Flip] Started, refreshing every {}s", config.refreshIntervalSeconds());
 	}
 
 	@Override
@@ -650,7 +650,7 @@ public class O7FlipPlugin extends Plugin
 		overlayManager.remove(gpDropOverlay);
 		overlayManager.remove(inventoryTooltipOverlay);
 		clientToolbar.removeNavigation(navButton);
-		log.info("[07Flip] Stopped");
+		log.debug("[07Flip] Stopped");
 	}
 
 	// -------------------------------------------------------------------------
@@ -2521,7 +2521,7 @@ public class O7FlipPlugin extends Plugin
 			writeLastSyncTimestamp(maxTs);
 		}
 
-		log.info("[07Flip] Tracker sync: +{} new, {} reconciled, total {}", added, reconciled, snapshot.size());
+		log.debug("[07Flip] Tracker sync: +{} new, {} reconciled, total {}", added, reconciled, snapshot.size());
 
 		final List<TradeRecord> snap = tradeHistory;
 		SwingUtilities.invokeLater(() -> panel.updateMyFlips(snap));

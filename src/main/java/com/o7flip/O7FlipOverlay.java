@@ -211,7 +211,7 @@ public class O7FlipOverlay extends Overlay
 	private static void dumpSetupActionsOnce(Widget root)
 	{
 		if (dumpCount++ >= 4 || root == null) return;
-		org.slf4j.LoggerFactory.getLogger("com.o7flip.O7FlipOverlay").info(
+		org.slf4j.LoggerFactory.getLogger("com.o7flip.O7FlipOverlay").debug(
 			"[07Flip] custom-price button NOT found — dumping every action in the setup widget tree:");
 		dumpActionsRecursive(root, "");
 	}
@@ -226,7 +226,7 @@ public class O7FlipOverlay extends Overlay
 			for (String a : acts) if (a != null && !a.isEmpty()) nonEmpty.add(a);
 			if (!nonEmpty.isEmpty())
 			{
-				org.slf4j.LoggerFactory.getLogger("com.o7flip.O7FlipOverlay").info(
+				org.slf4j.LoggerFactory.getLogger("com.o7flip.O7FlipOverlay").debug(
 					"[07Flip] {}actions={}", indent, nonEmpty);
 			}
 		}
@@ -418,13 +418,13 @@ public class O7FlipOverlay extends Overlay
 		lastPickKey = key;
 		pickerLogCount++;
 		org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger("com.o7flip.O7FlipOverlay");
-		log.info("[07Flip] pickDirectionalButton[{}]: wantBuy={}, chosen spriteId={} bounds={} actions={}",
+		log.debug("[07Flip] pickDirectionalButton[{}]: wantBuy={}, chosen spriteId={} bounds={} actions={}",
 			tier, wantBuy, chosen.getSpriteId(), chosen.getBounds(),
 			chosen.getActions() == null ? "(none)" : java.util.Arrays.toString(chosen.getActions()));
 		for (int i = 0; i < all.size(); i++)
 		{
 			Widget c = all.get(i);
-			log.info("[07Flip]   candidate[{}] spriteId={} itemId={} bounds={} actions={}",
+			log.debug("[07Flip]   candidate[{}] spriteId={} itemId={} bounds={} actions={}",
 				i, c.getSpriteId(), c.getItemId(), c.getBounds(),
 				c.getActions() == null ? "(none)" : java.util.Arrays.toString(c.getActions()));
 		}
