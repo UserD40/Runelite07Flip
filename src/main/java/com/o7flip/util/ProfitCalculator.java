@@ -45,17 +45,15 @@ import java.util.Map;
 public final class ProfitCalculator
 {
 	/**
-	 * Old school bond. Treated specially across the My Trades tab:
-	 * <ul>
-	 *   <li>Bond buys still go through the FIFO loop, so a buy/sell pair
-	 *       still forms a {@link CompletedFlip} and counts in flip stats —
-	 *       people do flip bonds.</li>
-	 *   <li>Unmatched bond buys (the common case — bonds redeemed for
-	 *       membership) are <em>not</em> exposed as open positions. They
-	 *       roll into {@link Stats#bondSpend} / {@link Stats#bondCount}
-	 *       so the panel can show "Membership cost" instead of cluttering
-	 *       the Pending view with 21 × bond rows.</li>
-	 * </ul>
+	 * Old school bond. Skipped entirely by the FIFO loop — bonds aren't
+	 * flips, they're a one-way membership purchase. The lifetime
+	 * gp/count tally backing the panel's "Membership cost" row lives in
+	 * {@link com.o7flip.util.BondLedger}, persisted by O7FlipPlugin
+	 * outside the 200-row trade-history sliding window so it survives a
+	 * year of heavy flipping. ProfitCalculator just leaves bond rows alone:
+	 * no completed flips, no open positions, no contribution to totalProfit
+	 * or win-rate. A bond that does get sold back to GE is also skipped
+	 * here; the ledger handles the decrement.
 	 */
 	public static final int BOND_ITEM_ID = 13190;
 
@@ -142,6 +140,13 @@ public final class ProfitCalculator
 			{
 				continue;
 			}
+			// Bonds are tracked by BondLedger, not as flips. Skip them
+			// entirely — no completed flips, no open positions, no
+			// pollution of totalProfit/winRate by membership purchases.
+			if (trade.itemId == BOND_ITEM_ID)
+			{
+				continue;
+			}
 			if (trade.isBuy)
 			{
 				openLotsByItem
@@ -155,36 +160,19 @@ public final class ProfitCalculator
 		}
 
 		Map<Integer, OpenPosition> openPositions = new HashMap<>();
-		long bondSpend = 0L;
-		int  bondCount = 0;
 		for (Map.Entry<Integer, Deque<OpenLot>> entry : openLotsByItem.entrySet())
 		{
-			int itemId = entry.getKey();
-			Deque<OpenLot> lots = entry.getValue();
-			if (itemId == BOND_ITEM_ID)
-			{
-				// Bond buys that never got sold = membership consumption.
-				// Roll their gp + qty into the bond aggregate; deliberately
-				// skip the openPositions map so they don't appear in Pending.
-				for (OpenLot lot : lots)
-				{
-					if (lot.qty <= 0) continue;
-					bondSpend += lot.gp;
-					bondCount += lot.qty;
-				}
-				continue;
-			}
-			OpenPosition pos = OpenPosition.from(itemId, lots);
+			OpenPosition pos = OpenPosition.from(entry.getKey(), entry.getValue());
 			if (pos != null)
 			{
-				openPositions.put(itemId, pos);
+				openPositions.put(entry.getKey(), pos);
 			}
 		}
 
 		return new Result(
 			Collections.unmodifiableList(completedFlips),
 			Collections.unmodifiableMap(openPositions),
-			Stats.from(completedFlips, bondSpend, bondCount)
+			Stats.from(completedFlips)
 		);
 	}
 
@@ -359,7 +347,7 @@ public final class ProfitCalculator
 
 	public static final class Stats
 	{
-		static final Stats EMPTY = new Stats(0L, 0L, 0L, 0, 0, 0, 0, 0.0, 0.0, null, null, 0L, 0);
+		static final Stats EMPTY = new Stats(0L, 0L, 0L, 0, 0, 0, 0, 0.0, 0.0, null, null);
 
 		/** Net realised profit summed across matched flips (sellTotal − tax − buyTotal each). */
 		public final long totalProfit;
@@ -376,16 +364,10 @@ public final class ProfitCalculator
 		public final CompletedFlip bestFlip;
 		public final CompletedFlip worstFlip;
 
-		/** Total gp spent on bonds that were consumed (not flipped back). Membership cost. */
-		public final long bondSpend;
-		/** Number of consumed bonds — paired with bondSpend for the "Membership cost" stat. */
-		public final int  bondCount;
-
 		Stats(long totalProfit, long totalGpSold, long totalTaxPaid, int completedFlipCount,
 			int winCount, int lossCount, int breakEvenCount,
 			double winRatePct, double avgRoiPct,
-			CompletedFlip bestFlip, CompletedFlip worstFlip,
-			long bondSpend, int bondCount)
+			CompletedFlip bestFlip, CompletedFlip worstFlip)
 		{
 			this.totalProfit = totalProfit;
 			this.totalGpSold = totalGpSold;
@@ -398,13 +380,11 @@ public final class ProfitCalculator
 			this.avgRoiPct = avgRoiPct;
 			this.bestFlip = bestFlip;
 			this.worstFlip = worstFlip;
-			this.bondSpend = bondSpend;
-			this.bondCount = bondCount;
 		}
 
-		static Stats from(List<CompletedFlip> flips, long bondSpend, int bondCount)
+		static Stats from(List<CompletedFlip> flips)
 		{
-			if (flips.isEmpty() && bondCount == 0)
+			if (flips.isEmpty())
 			{
 				return EMPTY;
 			}
@@ -455,14 +435,14 @@ public final class ProfitCalculator
 					worst = f;
 				}
 			}
-			if (matchedCount == 0 && bondCount == 0)
+			if (matchedCount == 0)
 			{
 				return EMPTY;
 			}
-			double winRate = matchedCount > 0 ? 100.0 * wins / matchedCount : 0.0;
-			double avgRoi  = matchedCount > 0 ? roiSum / matchedCount : 0.0;
+			double winRate = 100.0 * wins / matchedCount;
+			double avgRoi  = roiSum / matchedCount;
 			return new Stats(totalProfit, totalGpSold, totalTaxPaid, matchedCount, wins, losses, evens,
-				winRate, avgRoi, best, worst, bondSpend, bondCount);
+				winRate, avgRoi, best, worst);
 		}
 	}
 

@@ -284,6 +284,14 @@ public class O7FlipPlugin extends Plugin
 	public volatile List<TradeRecord> tradeHistory = Collections.emptyList();
 
 	/**
+	 * Lifetime bond ledger backing the "Membership cost" stat. Independent
+	 * of {@link #tradeHistory} so a year of heavy flipping doesn't recycle
+	 * the user's bond history out from under the panel. See
+	 * {@link com.o7flip.util.BondLedger} for semantics.
+	 */
+	public volatile com.o7flip.util.BondLedger bondLedger = com.o7flip.util.BondLedger.EMPTY;
+
+	/**
 	 * Latest server-authoritative My Trades stats. Null when no API key is
 	 * set, sharing is off, or the endpoint hasn't responded yet — in which
 	 * case the panel falls back to a local FIFO ProfitCalculator result.
@@ -299,15 +307,55 @@ public class O7FlipPlugin extends Plugin
 	 * cleared when the matching sell closes out the open position. The GE
 	 * setup overlay reads this map to override live rec_sell — projected
 	 * margin survives market drift between buy placement and sell setup.
+	 *
+	 * Each entry carries the price AND the timestamp the freeze was placed
+	 * so that stale freezes (item sitting unsold past
+	 * {@link O7FlipConfig#frozenSellStaleAfterHours()}) can be refreshed
+	 * with the current live recommendation on read — keeps the suggested
+	 * target tracking the market when the original projection becomes
+	 * unattainable.
 	 */
-	private final java.util.concurrent.ConcurrentHashMap<Integer, Long> frozenSellByItemId
+	private final java.util.concurrent.ConcurrentHashMap<Integer, FrozenSell> frozenSellByItemId
 		= new java.util.concurrent.ConcurrentHashMap<>();
+
+	/**
+	 * Small immutable holder for a frozen sell-price + the moment it was
+	 * stamped. Stamps live in millis to match every other timestamp in this
+	 * plugin (System.currentTimeMillis).
+	 */
+	private static final class FrozenSell
+	{
+		final long price;
+		final long frozenAtMillis;
+
+		FrozenSell(long price, long frozenAtMillis)
+		{
+			this.price = price;
+			this.frozenAtMillis = frozenAtMillis;
+		}
+	}
 
 	private static final int MAX_TRADE_HISTORY = 200;
 	private static final String TRADE_HISTORY_KEY = "tradeHistory";
 	private static final String LAST_TRACKER_SYNC_KEY = "lastTrackerSync";
 	private static final String BLOCKLIST_KEY = "blocklistItemIds";
 	private static final String SLOT_FILLS_KEY = "slotRecordedFills";
+	private static final String BOND_LEDGER_SPEND_KEY = "bondLedgerSpend";
+	private static final String BOND_LEDGER_COUNT_KEY = "bondLedgerCount";
+	private static final String BOND_LEDGER_MIGRATED_KEY = "bondLedgerMigrated";
+	private static final String MEMBERSHIP_HIDDEN_KEY = "membershipCostHidden";
+	private static final String TRADE_HISTORY_HEALED_KEY = "tradeHistoryHealed";
+	/**
+	 * Version stamp on the scrub pass — bumped when the dedup rules grow to
+	 * cover a new failure mode (e.g. v2 added the stuck-partial-duplicate
+	 * pass for offers re-observed across sessions). Users who migrated on
+	 * an older version run the new scrub once when they upgrade.
+	 */
+	private static final String SCRUB_VERSION_KEY = "tradeHistoryScrubVersion";
+	// v3: 2-row stuck-observation pairs at ≥ 48 h span also collapse —
+	// covers the case where the first pass already removed older
+	// duplicates and only a couple remain.
+	private static final String SCRUB_VERSION_CURRENT = "3";
 
 	/** Item IDs the user has hidden from Flips/Dumps/Spikes/Dips/Alerts panels. */
 	public volatile Set<Integer> blocklist = Collections.emptySet();
@@ -437,35 +485,64 @@ public class O7FlipPlugin extends Plugin
 		// waiting for the server round trip. If the POST eventually fails the
 		// local cache stays — the next sell still gets the right number, and
 		// the server miss matters only across plugin restarts.
-		frozenSellByItemId.put(itemId, recSell);
+		frozenSellByItemId.put(itemId, new FrozenSell(recSell, System.currentTimeMillis()));
 		apiClient.postFreeze(itemId, recBuy, recSell, null);
 	}
 
-	/** Returns the locally-tracked frozen sell price for an item, or null if none. */
+	/**
+	 * Returns the locally-tracked frozen sell price for an item, or null if
+	 * none. If the freeze is older than
+	 * {@link O7FlipConfig#frozenSellStaleAfterHours()} and a current live
+	 * rec_sell is available, the stored value is REFRESHED to the live
+	 * price (with a fresh timestamp) before being returned — so an item
+	 * that's been sitting unsold for hours stops suggesting an
+	 * unattainable target. If no live value is available we keep the
+	 * stale frozen as a fallback rather than blank out the overlay.
+	 */
 	public Long getFrozenSell(int itemId)
 	{
-		return frozenSellByItemId.get(itemId);
+		FrozenSell f = frozenSellByItemId.get(itemId);
+		if (f == null)
+		{
+			return null;
+		}
+		long staleAfterMs = (long) config.frozenSellStaleAfterHours() * 60L * 60L * 1000L;
+		if (System.currentTimeMillis() - f.frozenAtMillis <= staleAfterMs)
+		{
+			return f.price;
+		}
+		Long live = lookupLiveRecSell(itemId);
+		if (live == null || live <= 0)
+		{
+			return f.price;
+		}
+		// Replace the stored freeze with the current live so subsequent
+		// reads see a fresh target and a fresh timestamp. The server-side
+		// freeze isn't re-posted here — it gets re-stamped on the next
+		// actual buy of this item, which is the only moment when a
+		// genuine new projected margin is being committed to.
+		FrozenSell refreshed = new FrozenSell(live, System.currentTimeMillis());
+		frozenSellByItemId.put(itemId, refreshed);
+		return live;
 	}
 
 	/**
 	 * Picks the best sell price the plugin knows of for an item, used by the
 	 * implicit-sell auto-fill when the user clicks an inventory item directly
-	 * (no panel right-click). Order of precedence:
-	 * <ol>
-	 *   <li>{@code max(frozen, liveRec)} — frozen preserves the projected
-	 *       margin from when the buy was placed; live rec captures any upward
-	 *       drift so the user takes the better number.</li>
-	 *   <li>Live rec alone, if no freeze exists.</li>
-	 *   <li>Frozen alone, if live rec is missing.</li>
-	 *   <li>-1 — nothing recommended; the user types their own price.</li>
-	 * </ol>
+	 * (no panel right-click).
+	 *
+	 * Returns {@code max(frozen-or-refreshed, live)} — {@link #getFrozenSell}
+	 * has already refreshed a stale freeze with the current live value, so
+	 * a market drop after the buy now resolves to the live (achievable)
+	 * price once the staleness threshold passes. Market rises during the
+	 * wait still surface as live > frozen and win the max.
 	 */
 	long computeAutoSellPrice(int itemId)
 	{
-		Long frozen = frozenSellByItemId.get(itemId);
+		Long frozen = getFrozenSell(itemId);
 		Long live   = lookupLiveRecSell(itemId);
 		long best   = -1L;
-		if (frozen != null && frozen > 0)        best = frozen;
+		if (frozen != null && frozen > 0)                best = frozen;
 		if (live   != null && live   > 0 && live > best) best = live;
 		return best;
 	}
@@ -540,7 +617,7 @@ public class O7FlipPlugin extends Plugin
 	 */
 	private void unfreezeIfPositionClosed(int itemId)
 	{
-		Long cached = frozenSellByItemId.get(itemId);
+		FrozenSell cached = frozenSellByItemId.get(itemId);
 		if (cached == null)
 		{
 			return;
@@ -608,6 +685,7 @@ public class O7FlipPlugin extends Plugin
 		overlayManager.add(inventoryTooltipOverlay);
 
 		loadTradeHistory();
+		loadBondLedger();
 		loadBlocklist();
 		loadSlotRecordedFills();
 
@@ -1653,6 +1731,23 @@ public class O7FlipPlugin extends Plugin
 			recordIfNewFills(offer, slot);
 		}
 
+		// When the offer terminates (BOUGHT/SOLD) with no extra fill delta
+		// since the last record, recordIfNewFills bails early and the local
+		// merged row keeps {@code partial=true}. That stale flag is what the
+		// dedup uses to tell a fresh terminal observation from a stale one;
+		// leaving it stuck on every-already-fully-recorded offer breaks
+		// duplicate detection downstream. Clear it here so the row reflects
+		// the offer's actual terminal state.
+		if (state == GrandExchangeOfferState.BOUGHT
+			|| state == GrandExchangeOfferState.SOLD)
+		{
+			long[] slotState = slotRecordedFills.get(slot);
+			if (slotState != null && slotState.length >= 3)
+			{
+				clearPartialFlag(slotState[2]);
+			}
+		}
+
 		if (state == GrandExchangeOfferState.EMPTY)
 		{
 			prevSlotStates.remove(slot);
@@ -1719,82 +1814,69 @@ public class O7FlipPlugin extends Plugin
 			|| state == GrandExchangeOfferState.CANCELLED_BUY
 			|| state == GrandExchangeOfferState.CANCELLED_SELL;
 
-		// On first observation, check if a legacy partial row in tradeHistory
-		// already represents some or all of these fills (written by an older
-		// version of the plugin without offerInstanceId). Adopt the legacy
-		// row by stamping it with our id, and reduce the delta to only the
-		// NEW fills not yet captured. Without this, the legacy row + the new
-		// recordTrade call would double-count the same fills.
+		// On first observation, check if a partial row in tradeHistory already
+		// represents this offer. Two flavours:
+		//   1. Legacy partial row (no offerInstanceId) — pre-upgrade data.
+		//   2. Stuck partial row (has offerInstanceId) — same active offer
+		//      observed in a previous session, where slotRecordedFills was
+		//      lost so we'd otherwise mint a new oId and double-record.
+		// In both cases we adopt the existing row by stamping it with our
+		// fresh offerInstanceId and shrink the delta to just the fills not
+		// yet captured. Without this, a stuck SELL 1/2 primordial offer
+		// gets re-recorded as a fresh row every time the plugin restarts —
+		// the on-disk symptom: 14 identical SELL 1 rows for the same offer.
 		if (firstObservation)
 		{
 			long fallbackPriceEach = deltaQty > 0 ? deltaGp / deltaQty : offer.getPrice();
-			int legacyIdx = findClaimableLegacyOfferRow(tradeHistory, offer.getItemId(), isBuy, fallbackPriceEach);
-			if (legacyIdx >= 0)
+			int  totalQtyForLookup = offer.getTotalQuantity();
+			int existingIdx = findClaimableLegacyOfferRow(tradeHistory, offer.getItemId(), isBuy, fallbackPriceEach);
+			if (existingIdx < 0)
 			{
-				TradeRecord legacy = tradeHistory.get(legacyIdx);
-				// Stamp the legacy with our offerInstanceId so recordTrade
+				existingIdx = findReObservableActiveOfferRow(tradeHistory,
+					offer.getItemId(), isBuy, fallbackPriceEach, totalQtyForLookup);
+			}
+			if (existingIdx >= 0)
+			{
+				TradeRecord existing = tradeHistory.get(existingIdx);
+				// Stamp the existing row with our offerInstanceId so recordTrade
 				// merges subsequent fills into it via the exact-match path.
-				stampLegacyWithOfferInstanceId(legacyIdx, offerInstanceId);
+				stampLegacyWithOfferInstanceId(existingIdx, offerInstanceId);
 
-				// Account for the qty/gp the legacy already captured. If the
-				// legacy holds >= the current cumulative, there's nothing new
+				// Account for the qty/gp the existing row already captured.
+				// If it holds >= the current cumulative, there's nothing new
 				// to record — just align slotRecordedFills with what's
 				// already in tradeHistory and return.
-				int  legacyQty = legacy.quantity;
-				long legacyGp  = legacy.totalGp;
-				if (legacyQty >= currentQty)
+				int  existingQty = existing.quantity;
+				long existingGp  = existing.totalGp;
+				if (existingQty >= currentQty)
 				{
-					slotRecordedFills.put(slot, new long[]{legacyQty, legacyGp, offerInstanceId});
+					slotRecordedFills.put(slot, new long[]{existingQty, existingGp, offerInstanceId});
 					saveSlotRecordedFills();
 					return;
 				}
-				deltaQty = currentQty - legacyQty;
-				deltaGp  = currentGp  - legacyGp;
-				// Initial-observation back-dating already happened against
-				// existing trade history; the legacy row is now stamped, so
-				// further fills use current-time and merge by id.
+				deltaQty = currentQty - existingQty;
+				deltaGp  = currentGp  - existingGp;
 				firstObservation = false;
 			}
 		}
 
-		// The very first time we observe a slot, the fills we're recording
-		// happened BEFORE the plugin started tracking this offer — which
-		// might be before existing trades of the same item are sitting in
-		// tradeHistory. Back-date the timestamp so the FIFO matcher sees
-		// this buy first and can pair earlier sells with it. Without this,
-		// a sell of items from an already-running buy offer becomes a
-		// phantom flip (sell sorted before buy, queue empty when consumed).
-		long timestamp = firstObservation && isBuy
-			? backdatedTimestampBefore(offer.getItemId())
-			: System.currentTimeMillis();
+		// Timestamp the fill at the moment we observed it. Earlier versions
+		// back-dated the FIRST observation of a buy to 1 second before the
+		// EARLIEST existing trade of the same item, hoping to pair with a
+		// pre-existing phantom sell. In practice that arbitrarily reorders
+		// FIFO whenever the user places a fresh buy after a sell — the
+		// brand-new buy gets shoved before yesterday's matched buy, and
+		// already-realised flip profits silently change at the moment the
+		// new buy completes. That's the "Today jumped up after a buy" bug
+		// the user reported. A phantom flip from a pre-plugin offer is the
+		// better trade-off: it's visible to the user and bounded to the
+		// affected sell, vs invisibly rewriting old flip math.
+		long timestamp = System.currentTimeMillis();
 
 		recordTrade(offer, isBuy, partial, deltaQty, deltaGp, timestamp, offerInstanceId);
 
 		slotRecordedFills.put(slot, new long[]{currentQty, currentGp, offerInstanceId});
 		saveSlotRecordedFills();
-	}
-
-	/**
-	 * Returns a timestamp strictly older than every existing trade of {@code itemId}
-	 * in {@link #tradeHistory}, so a freshly-recorded initial-observation partial
-	 * buy sorts to the front of the FIFO queue. Falls back to {@code now} when
-	 * there are no prior trades of the item.
-	 */
-	private long backdatedTimestampBefore(int itemId)
-	{
-		long earliest = Long.MAX_VALUE;
-		for (TradeRecord t : tradeHistory)
-		{
-			if (t.itemId == itemId && t.timestamp < earliest)
-			{
-				earliest = t.timestamp;
-			}
-		}
-		if (earliest == Long.MAX_VALUE)
-		{
-			return System.currentTimeMillis();
-		}
-		return earliest - 1000L;
 	}
 
 	/**
@@ -1877,6 +1959,34 @@ public class O7FlipPlugin extends Plugin
 
 		saveTradeHistory();
 
+		// Update the lifetime bond ledger by the FILL DELTA. Using the
+		// delta (not the merged row's cumulative qty/gp) keeps the count
+		// correct when a single bond offer fills in multiple chunks — every
+		// invocation of recordTrade represents one delta, so we apply once
+		// per delta. No-op for non-bond trades.
+		if (posted.itemId == com.o7flip.util.BondLedger.BOND_ITEM_ID && deltaQty > 0)
+		{
+			TradeRecord delta = new TradeRecord();
+			delta.itemId   = posted.itemId;
+			delta.isBuy    = posted.isBuy;
+			delta.quantity = deltaQty;
+			delta.totalGp  = deltaGp;
+			updateBondLedgerFor(delta);
+		}
+
+		// Warm the rec-prices cache for this item the moment a buy fill
+		// lands. The user is overwhelmingly likely to sell this item next,
+		// and computeAutoSellPrice on the sell-setup screen otherwise has
+		// to wait on a fresh server round trip when the item isn't in
+		// lastFlips (anything outside the top-10 cheap flips list — e.g.
+		// Primordial boots — falls into this gap). Async fetch; the
+		// in-flight guard inside getRecommendedPrices deduplicates back-
+		// to-back calls for multi-fill offers.
+		if (isBuy)
+		{
+			getRecommendedPrices(offer.getItemId());
+		}
+
 		final List<TradeRecord> snapshot = tradeHistory;
 		SwingUtilities.invokeLater(() -> panel.updateMyFlips(snapshot));
 
@@ -1889,20 +1999,36 @@ public class O7FlipPlugin extends Plugin
 			gpDropOverlay.queue(profit);
 		}
 
-		if (config.shareTradeData() && config.apiKey() != null && !config.apiKey().trim().isEmpty())
+		// Only post to the server when this fill brings the offer to a
+		// terminal state — i.e. BOUGHT/SOLD (partial=false) or one of the
+		// CANCELLED states (no more fills will ever land here). Earlier
+		// versions posted every partial delta, which the server stored as
+		// separate rows; the next sync echoed them back and the local merged
+		// row + each server-fill row both ended up in tradeHistory, doubling
+		// the FIFO input and inflating Today/Worst figures. One terminal
+		// post per offer is enough — fingerprint dedup on the next sync now
+		// matches it against the local merged row instead of duplicating.
+		net.runelite.api.GrandExchangeOfferState st = offer.getState();
+		boolean terminal = !partial
+			|| st == net.runelite.api.GrandExchangeOfferState.CANCELLED_BUY
+			|| st == net.runelite.api.GrandExchangeOfferState.CANCELLED_SELL;
+		if (terminal
+			&& posted.quantity > 0
+			&& config.shareTradeData()
+			&& config.apiKey() != null
+			&& !config.apiKey().trim().isEmpty())
 		{
-			// Post the per-fill delta to the server, not the merged row —
-			// the server tracks individual fills and dedups on its own key.
-			TradeRecord fillForServer = new TradeRecord();
-			fillForServer.itemId    = offer.getItemId();
-			fillForServer.name      = itemName;
-			fillForServer.isBuy     = isBuy;
-			fillForServer.quantity  = deltaQty;
-			fillForServer.totalGp   = deltaGp;
-			fillForServer.priceEach = fallbackPriceEach;
-			fillForServer.timestamp = timestamp;
-			fillForServer.partial   = partial;
-			apiClient.postTradeRecord(fillForServer, null);
+			TradeRecord rowForServer = new TradeRecord();
+			rowForServer.itemId        = posted.itemId;
+			rowForServer.name          = posted.name;
+			rowForServer.isBuy         = posted.isBuy;
+			rowForServer.quantity      = posted.quantity;
+			rowForServer.totalGp       = posted.totalGp;
+			rowForServer.priceEach     = posted.quantity > 0 ? posted.totalGp / posted.quantity : posted.priceEach;
+			rowForServer.timestamp     = posted.timestamp;
+			rowForServer.partial       = posted.partial;
+			rowForServer.totalQuantity = posted.totalQuantity;
+			apiClient.postTradeRecord(rowForServer, null);
 		}
 
 		// Close out the freeze when a sell fully consumes the buys for this
@@ -1930,6 +2056,48 @@ public class O7FlipPlugin extends Plugin
 			}
 		}
 		return -1;
+	}
+
+	/**
+	 * Clears {@code partial=true} on the row for the given
+	 * {@code offerInstanceId} when the offer has reached BOUGHT/SOLD. The
+	 * normal merge path in {@link #recordTrade} updates the partial flag
+	 * automatically, but only when a state transition arrives WITH a
+	 * non-zero fill delta. Many offers — a single bond redemption is the
+	 * classic case — fill entirely during the BUYING state and then go to
+	 * BOUGHT with no extra delta; the merge never fires and the row stays
+	 * stuck at partial=true. The dedup uses the partial flag to tell stale
+	 * vs terminal observations apart, so the stuck flag has to be cleaned
+	 * up here.
+	 */
+	private void clearPartialFlag(long offerInstanceId)
+	{
+		int idx = findMatchingOfferRow(tradeHistory, offerInstanceId);
+		if (idx < 0)
+		{
+			return;
+		}
+		TradeRecord existing = tradeHistory.get(idx);
+		if (!existing.partial)
+		{
+			return;
+		}
+		List<TradeRecord> updated = new ArrayList<>(tradeHistory);
+		TradeRecord cleared = new TradeRecord();
+		cleared.itemId          = existing.itemId;
+		cleared.name            = existing.name;
+		cleared.isBuy           = existing.isBuy;
+		cleared.quantity        = existing.quantity;
+		cleared.totalGp         = existing.totalGp;
+		cleared.priceEach       = existing.priceEach;
+		cleared.timestamp       = existing.timestamp;
+		cleared.partial         = false;
+		cleared.tradeId         = existing.tradeId;
+		cleared.offerInstanceId = existing.offerInstanceId;
+		cleared.totalQuantity   = existing.totalQuantity;
+		updated.set(idx, cleared);
+		tradeHistory = Collections.unmodifiableList(updated);
+		saveTradeHistory();
 	}
 
 	/**
@@ -1984,6 +2152,45 @@ public class O7FlipPlugin extends Plugin
 			if (t.itemId != itemId)        continue;
 			if (t.isBuy != isBuy)          continue;
 			if (t.priceEach != priceEach)  continue;
+			return i;
+		}
+		return -1;
+	}
+
+	/**
+	 * Companion to {@link #findClaimableLegacyOfferRow} that hunts for a
+	 * STILL-ACTIVE local row representing the same offer we're now
+	 * observing fresh. Triggered when {@code slotRecordedFills} has no
+	 * entry for the slot — typically after a plugin restart that lost the
+	 * per-slot ledger but the GE offer is still partial-filled in-game.
+	 *
+	 * Without this, every restart re-records the same offer as a brand-new
+	 * row with a fresh offerInstanceId, and tradeHistory accumulates one
+	 * duplicate per session for as long as the offer sits stuck.
+	 *
+	 * Matches on the offer's SHAPE — same item, side, per-item price, and
+	 * total quantity — rather than on the recorded fill count. The fill
+	 * count is allowed to differ (the row's quantity may be less than the
+	 * current observation if more items have filled since the row was
+	 * last touched).
+	 */
+	private static int findReObservableActiveOfferRow(
+		List<TradeRecord> list, int itemId, boolean isBuy, long priceEach, int totalQuantity)
+	{
+		if (totalQuantity <= 0)
+		{
+			return -1;
+		}
+		int searchDepth = Math.min(32, list.size());
+		for (int i = list.size() - 1, scanned = 0; i >= 0 && scanned < searchDepth; i--, scanned++)
+		{
+			TradeRecord t = list.get(i);
+			if (t.offerInstanceId == null) continue;          // need a locally-merged row
+			if (!t.partial)                continue;          // terminal row isn't this active offer
+			if (t.itemId != itemId)        continue;
+			if (t.isBuy != isBuy)          continue;
+			if (t.priceEach != priceEach)  continue;
+			if (t.totalQuantity == null || t.totalQuantity != totalQuantity) continue;
 			return i;
 		}
 		return -1;
@@ -2061,7 +2268,62 @@ public class O7FlipPlugin extends Plugin
 						list.add(r);
 					}
 				}
-				tradeHistory = Collections.unmodifiableList(list);
+				// Scrub: removes server-fill duplicates, stale-partial twins,
+				// and stuck-partial re-observations of the same offer (each
+				// case described in TradeHistoryDedup). Gated by a scrub
+				// version so users who migrated on an older build pick up
+				// new dedup rules when they upgrade.
+				int before = list.size();
+				String prevScrub = configManager.getConfiguration("o7flip", SCRUB_VERSION_KEY);
+				boolean needsScrub = !SCRUB_VERSION_CURRENT.equals(prevScrub);
+				if (needsScrub)
+				{
+					list = com.o7flip.util.TradeHistoryDedup.scrub(list);
+					configManager.setConfiguration("o7flip", SCRUB_VERSION_KEY, SCRUB_VERSION_CURRENT);
+				}
+				int removed = before - list.size();
+
+				// One-time heal: an earlier plugin version back-dated freshly
+				// observed buy timestamps to 1 second before the earliest
+				// existing trade of the same item, in an attempt to pair them
+				// with phantom sells. That mis-ordered FIFO so a NEW buy
+				// could sort before an OLDER buy of the same item, and a
+				// later sell would attribute cost basis to the wrong lot.
+				// The heal recovers the real observation time from
+				// offerInstanceId (which is millis*10 + slot) and rewrites
+				// the row's timestamp. Gated on a config flag so it doesn't
+				// re-run unnecessarily.
+				int healed = 0;
+				if (!"true".equals(configManager.getConfiguration("o7flip", TRADE_HISTORY_HEALED_KEY)))
+				{
+					List<TradeRecord> healedList = com.o7flip.util.TradeHistoryDedup.healBackdatedTimestamps(list);
+					for (int i = 0; i < list.size(); i++)
+					{
+						if (list.get(i) != healedList.get(i))
+						{
+							healed++;
+						}
+					}
+					list = healedList;
+					if (healed > 0)
+					{
+						list.sort(java.util.Comparator.comparingLong(t -> t.timestamp));
+					}
+					configManager.setConfiguration("o7flip", TRADE_HISTORY_HEALED_KEY, "true");
+				}
+
+				if (removed > 0 || healed > 0)
+				{
+					log.debug("[07Flip] Trade history load: scrubbed={}, healed back-dated timestamps={}", removed, healed);
+					// Persist the cleaned/healed list so we don't redo the same
+					// work on every startup.
+					tradeHistory = Collections.unmodifiableList(list);
+					saveTradeHistory();
+				}
+				else
+				{
+					tradeHistory = Collections.unmodifiableList(list);
+				}
 			}
 			catch (Exception e)
 			{
@@ -2096,7 +2358,111 @@ public class O7FlipPlugin extends Plugin
 		// against stale state from before the history wipe.
 		slotRecordedFills.clear();
 		configManager.unsetConfiguration("o7flip", SLOT_FILLS_KEY);
+		// The bond ledger represents a lifetime stat (account-wide
+		// membership spend) and is preserved across history clears — it
+		// isn't backed by the rows we're wiping. A user clearing their
+		// recent trade list shouldn't lose their year-of-bonds tally.
 		SwingUtilities.invokeLater(() -> panel.updateMyFlips(Collections.emptyList()));
+	}
+
+	/**
+	 * Loads the persistent bond ledger from config. On first run after the
+	 * ledger was introduced, seeds it from any bond rows still sitting in
+	 * {@code tradeHistory} (a one-shot migration so existing installs don't
+	 * see their "Membership cost" stat drop to zero on upgrade), then marks
+	 * itself migrated.
+	 *
+	 * Called once on plugin start, AFTER {@link #loadTradeHistory()} so the
+	 * seed has the freshly-scrubbed list to work with.
+	 */
+	private void loadBondLedger()
+	{
+		String migrated = configManager.getConfiguration("o7flip", BOND_LEDGER_MIGRATED_KEY);
+		String spendStr = configManager.getConfiguration("o7flip", BOND_LEDGER_SPEND_KEY);
+		String countStr = configManager.getConfiguration("o7flip", BOND_LEDGER_COUNT_KEY);
+
+		long spend = 0L;
+		int  count = 0;
+		try
+		{
+			if (spendStr != null && !spendStr.trim().isEmpty()) spend = Long.parseLong(spendStr.trim());
+			if (countStr != null && !countStr.trim().isEmpty()) count = Integer.parseInt(countStr.trim());
+		}
+		catch (NumberFormatException e)
+		{
+			log.warn("[07Flip] Bond ledger config malformed, resetting: {}", e.getMessage());
+			spend = 0L;
+			count = 0;
+		}
+		bondLedger = new com.o7flip.util.BondLedger(spend, count);
+
+		if (!"true".equals(migrated))
+		{
+			com.o7flip.util.BondLedger seeded = com.o7flip.util.BondLedger.seedFromHistory(tradeHistory);
+			if (seeded.spend > 0L || seeded.count > 0)
+			{
+				bondLedger = seeded;
+				log.debug("[07Flip] Bond ledger migrated from tradeHistory: {} gp · {} bonds",
+					seeded.spend, seeded.count);
+			}
+			configManager.setConfiguration("o7flip", BOND_LEDGER_MIGRATED_KEY, "true");
+			saveBondLedger();
+		}
+	}
+
+	private void saveBondLedger()
+	{
+		configManager.setConfiguration("o7flip", BOND_LEDGER_SPEND_KEY, String.valueOf(bondLedger.spend));
+		configManager.setConfiguration("o7flip", BOND_LEDGER_COUNT_KEY, String.valueOf(bondLedger.count));
+	}
+
+	/**
+	 * Replaces the lifetime bond ledger with explicit values, used by the
+	 * "Adjust lifetime…" panel action so the user can recover the historic
+	 * bond ledger that the migration couldn't find (rows that had already
+	 * been evicted from the 200-row tradeHistory window before the ledger
+	 * existed). Marks the ledger as migrated so the auto-seed won't
+	 * overwrite the value on next load. Triggers a panel refresh.
+	 */
+	public void setBondLedger(long spend, int count)
+	{
+		bondLedger = new com.o7flip.util.BondLedger(spend, count);
+		saveBondLedger();
+		configManager.setConfiguration("o7flip", BOND_LEDGER_MIGRATED_KEY, "true");
+		final List<TradeRecord> snapshot = tradeHistory;
+		SwingUtilities.invokeLater(() -> panel.updateMyFlips(snapshot));
+	}
+
+	public boolean isMembershipCostHidden()
+	{
+		return "true".equals(configManager.getConfiguration("o7flip", MEMBERSHIP_HIDDEN_KEY));
+	}
+
+	public void setMembershipCostHidden(boolean hidden)
+	{
+		configManager.setConfiguration("o7flip", MEMBERSHIP_HIDDEN_KEY, hidden ? "true" : "false");
+		final List<TradeRecord> snapshot = tradeHistory;
+		SwingUtilities.invokeLater(() -> panel.updateMyFlips(snapshot));
+	}
+
+	/**
+	 * Apply a freshly-recorded trade to the bond ledger if it's a bond.
+	 * No-op for non-bond trades. Game thread is fine; persists immediately
+	 * so a crash mid-session doesn't lose the bond update.
+	 */
+	private void updateBondLedgerFor(TradeRecord trade)
+	{
+		if (trade == null || trade.itemId != com.o7flip.util.BondLedger.BOND_ITEM_ID)
+		{
+			return;
+		}
+		com.o7flip.util.BondLedger next = bondLedger.apply(trade);
+		if (next.spend == bondLedger.spend && next.count == bondLedger.count)
+		{
+			return;
+		}
+		bondLedger = next;
+		saveBondLedger();
 	}
 
 	/**
@@ -2509,6 +2875,13 @@ public class O7FlipPlugin extends Plugin
 		}
 
 		snapshot.sort(java.util.Comparator.comparingLong(t -> t.timestamp));
+		// Catch any server fills the loop above appended that overlap with a
+		// pre-existing local merged row. Without this scrub a newly-arrived
+		// per-fill payload from the server would re-introduce the duplicates
+		// loadTradeHistory cleaned out.
+		int beforeScrub = snapshot.size();
+		snapshot = new ArrayList<>(com.o7flip.util.TradeHistoryDedup.scrub(snapshot));
+		int scrubbed = beforeScrub - snapshot.size();
 		if (snapshot.size() > MAX_TRADE_HISTORY)
 		{
 			snapshot = new ArrayList<>(snapshot.subList(snapshot.size() - MAX_TRADE_HISTORY, snapshot.size()));
@@ -2521,7 +2894,8 @@ public class O7FlipPlugin extends Plugin
 			writeLastSyncTimestamp(maxTs);
 		}
 
-		log.debug("[07Flip] Tracker sync: +{} new, {} reconciled, total {}", added, reconciled, snapshot.size());
+		log.debug("[07Flip] Tracker sync: +{} new, {} reconciled, {} scrubbed, total {}",
+			added, reconciled, scrubbed, snapshot.size());
 
 		final List<TradeRecord> snap = tradeHistory;
 		SwingUtilities.invokeLater(() -> panel.updateMyFlips(snap));

@@ -258,6 +258,13 @@ public class O7FlipPanel extends PluginPanel
 	private int myFlipsSortIdx = 0;  // 0=Active 1=Recent 2=Margin
 	private int myFlipsPage    = 0;
 	private static final int MY_FLIPS_PAGE_SIZE = 5;
+	/** Secondary sort applied inside the Margin view: 0=Profit (desc), 1=Recent, 2=ROI% (desc). */
+	private int myFlipsMarginSortIdx = 0;
+	/** Secondary sort applied inside the Recent view: 0=Profit (desc), 1=ROI (desc), 2=Quantity (desc). */
+	private int myFlipsRecentSortIdx = 0;
+	/** Currently selected period for the stats panel — Daily by default. */
+	private com.o7flip.ui.MyTradesStatsPanel.Period myFlipsPeriod =
+		com.o7flip.ui.MyTradesStatsPanel.Period.DAILY;
 
 	// -------------------------------------------------------------------------
 	// Page state (server-paginated tabs track total from server)
@@ -297,6 +304,11 @@ public class O7FlipPanel extends PluginPanel
 	private JButton[] dumpsSortBtns;
 	private JButton[] barrowsSortBtns;
 	private JButton[] myFlipsSortBtns;
+	private JButton[] myFlipsMarginSortBtns;
+	private JButton[] myFlipsRecentSortBtns;
+	private JPanel    myFlipsMarginSortBar;
+	private JPanel    myFlipsRecentSortBar;
+	private JButton   myFlipsPeriodButton;
 	private JButton[] moonFilterBtns;
 	private JButton[] decantSortBtns;
 	private JButton[] alertsSortBtns;
@@ -1291,7 +1303,12 @@ public class O7FlipPanel extends PluginPanel
 
 		if (myFlipsStatsPanel != null)
 		{
-			myFlipsStatsPanel.update(result, plugin != null ? plugin.trackerStats : null);
+			myFlipsStatsPanel.update(
+				result,
+				plugin != null ? plugin.trackerStats : null,
+				plugin != null ? plugin.bondLedger  : com.o7flip.util.BondLedger.EMPTY,
+				myFlipsPeriod,
+				plugin != null && plugin.isMembershipCostHidden());
 			if (myFlipsStatsPanel.isVisible())
 			{
 				myFlipsListPanel.add(myFlipsStatsPanel);
@@ -1327,42 +1344,88 @@ public class O7FlipPanel extends PluginPanel
 		myFlipsListPanel.repaint();
 	}
 
-	/** Recent: per-leg trade list (newest first), with profit on matched sells. */
+	/**
+	 * Recent: per-leg trade list, filtered by the selected period and sorted
+	 * by the inline Profit / ROI / Quantity selector that sits above the
+	 * items. Bonds are excluded — they're tracked separately by
+	 * {@link com.o7flip.util.BondLedger}.
+	 */
 	private void renderMyFlipsByRecent(com.o7flip.util.ProfitCalculator.Result result)
 	{
-		// Bond legs are hidden from the per-leg view — they're aggregated into
-		// "Membership cost" in the stats panel instead. Bond flips (buy + sell
-		// pair) still surface in Margin via the matched-flip path.
-		List<TradeRecord> filtered = new ArrayList<>();
-		for (TradeRecord t : allMyFlips)
-		{
-			if (t.itemId == com.o7flip.util.ProfitCalculator.BOND_ITEM_ID)
-			{
-				continue;
-			}
-			filtered.add(t);
-		}
-
-		if (filtered.isEmpty())
-		{
-			myFlipsListPanel.add(emptyLabel("No trades recorded yet", "Completed GE buys and sells appear here"));
-			return;
-		}
-
-		// Per-sell-timestamp profit, summed over every CompletedFlip whose sell
-		// matches that timestamp. Phantom flips (buyTotal == 0) are excluded so
-		// unmatched sells stay number-less rather than showing an inflated gross.
+		// Per-sell-timestamp profit, summed over every CompletedFlip whose
+		// sell matches that timestamp. Phantom flips (buyTotal == 0) are
+		// excluded so unmatched sells stay number-less rather than showing
+		// an inflated gross. Also needed for the Profit/ROI sort comparators.
 		Map<Long, Long> profitBySellTimestamp = new HashMap<>();
 		for (com.o7flip.util.ProfitCalculator.CompletedFlip f : result.completedFlips)
 		{
-			if (f.buyTotal <= 0)
-			{
-				continue;
-			}
+			if (f.buyTotal <= 0) continue;
 			profitBySellTimestamp.merge(f.sellTimestamp, f.profit, Long::sum);
 		}
+		// ROI uses the matched buy cost for the sell timestamp. Multiple
+		// CompletedFlips can share a sell timestamp (FIFO split across
+		// buy lots), so sum buyTotal across them too.
+		Map<Long, Long> buyTotalBySellTimestamp = new HashMap<>();
+		for (com.o7flip.util.ProfitCalculator.CompletedFlip f : result.completedFlips)
+		{
+			if (f.buyTotal <= 0) continue;
+			buyTotalBySellTimestamp.merge(f.sellTimestamp, f.buyTotal, Long::sum);
+		}
 
-		Collections.reverse(filtered);
+		long fromMs = periodStartMillis();
+		List<TradeRecord> filtered = new ArrayList<>();
+		for (TradeRecord t : allMyFlips)
+		{
+			if (t.itemId == com.o7flip.util.ProfitCalculator.BOND_ITEM_ID) continue;
+			if (t.timestamp < fromMs) continue;
+			filtered.add(t);
+		}
+
+		// Sort row is added BEFORE the empty-state check so the row stays
+		// visible (the user can re-sort even when zero rows match the
+		// current period, e.g., they widen the period and rows reappear).
+		myFlipsListPanel.add(myFlipsRecentSortBar);
+		myFlipsListPanel.add(sep());
+
+		if (filtered.isEmpty())
+		{
+			myFlipsListPanel.add(emptyLabel(
+				"No trades in " + myFlipsPeriod.label.toLowerCase(),
+				"Widen the time filter or place an offer to see rows here"));
+			return;
+		}
+
+		switch (myFlipsRecentSortIdx)
+		{
+			case 1: // ROI desc — sells with matched buys first, then everything else by qty desc
+				filtered.sort((a, b) ->
+				{
+					double ra = roiFor(a, profitBySellTimestamp, buyTotalBySellTimestamp);
+					double rb = roiFor(b, profitBySellTimestamp, buyTotalBySellTimestamp);
+					int cmp = Double.compare(rb, ra);
+					if (cmp != 0) return cmp;
+					return Long.compare(b.timestamp, a.timestamp);
+				});
+				break;
+			case 2: // Quantity desc
+				filtered.sort((a, b) ->
+				{
+					int cmp = Integer.compare(b.quantity, a.quantity);
+					if (cmp != 0) return cmp;
+					return Long.compare(b.timestamp, a.timestamp);
+				});
+				break;
+			default: // Profit desc — sells with matched profit first; buys (no profit) by timestamp
+				filtered.sort((a, b) ->
+				{
+					long pa = profitFor(a, profitBySellTimestamp);
+					long pb = profitFor(b, profitBySellTimestamp);
+					int cmp = Long.compare(pb, pa);
+					if (cmp != 0) return cmp;
+					return Long.compare(b.timestamp, a.timestamp);
+				});
+				break;
+		}
 
 		int total      = filtered.size();
 		int totalPages = pageCount(total);
@@ -1381,24 +1444,90 @@ public class O7FlipPanel extends PluginPanel
 		appendPageBar(total, totalPages);
 	}
 
-	/** Margin: closed flips only, sorted by profit desc. Phantoms excluded. */
+	/** Period-start millis for the currently selected My Trades window. */
+	private long periodStartMillis()
+	{
+		switch (myFlipsPeriod)
+		{
+			case DAILY:
+				return java.time.LocalDate.now()
+					.atStartOfDay(java.time.ZoneId.systemDefault())
+					.toInstant().toEpochMilli();
+			case WEEKLY:
+				return java.time.LocalDate.now().minusDays(7)
+					.atStartOfDay(java.time.ZoneId.systemDefault())
+					.toInstant().toEpochMilli();
+			case MONTHLY:
+				return java.time.LocalDate.now().minusDays(30)
+					.atStartOfDay(java.time.ZoneId.systemDefault())
+					.toInstant().toEpochMilli();
+			default: // ALL_TIME
+				return Long.MIN_VALUE;
+		}
+	}
+
+	private static long profitFor(TradeRecord t, Map<Long, Long> profitBySellTimestamp)
+	{
+		if (t.isBuy) return Long.MIN_VALUE; // buys sort below sells when sorting by profit desc
+		Long p = profitBySellTimestamp.get(t.timestamp);
+		return p != null ? p : Long.MIN_VALUE;
+	}
+
+	private static double roiFor(TradeRecord t, Map<Long, Long> profitByTs, Map<Long, Long> buyTotalByTs)
+	{
+		if (t.isBuy) return -Double.MAX_VALUE;
+		Long buy    = buyTotalByTs.get(t.timestamp);
+		Long profit = profitByTs.get(t.timestamp);
+		if (buy == null || buy <= 0 || profit == null) return -Double.MAX_VALUE;
+		return 100.0 * profit / buy;
+	}
+
+	/**
+	 * Margin: closed flips only, filtered by the active period. The inline
+	 * sub-sort selector above the items picks the ordering:
+	 * <ul>
+	 *   <li>0 — Profit desc (default; surfaces the biggest wins)</li>
+	 *   <li>1 — Recent first (most recently closed sell at the top)</li>
+	 *   <li>2 — ROI% desc (efficiency view — small flips with high margin)</li>
+	 * </ul>
+	 * Phantom flips (sells with no matching buy in tracked history) are
+	 * excluded regardless of sort.
+	 */
 	private void renderMyFlipsByMargin(com.o7flip.util.ProfitCalculator.Result result)
 	{
+		long fromMs = periodStartMillis();
 		List<com.o7flip.util.ProfitCalculator.CompletedFlip> matched = new ArrayList<>();
 		for (com.o7flip.util.ProfitCalculator.CompletedFlip f : result.completedFlips)
 		{
-			if (f.buyTotal > 0)
-			{
-				matched.add(f);
-			}
+			if (f.buyTotal <= 0) continue;
+			if (f.sellTimestamp < fromMs) continue;
+			matched.add(f);
 		}
+
+		// Sort row is added BEFORE the empty-state check so the user can
+		// still re-sort when the current period has no matching flips.
+		myFlipsListPanel.add(myFlipsMarginSortBar);
+		myFlipsListPanel.add(sep());
+
 		if (matched.isEmpty())
 		{
-			myFlipsListPanel.add(emptyLabel("No completed flips yet",
-				"Buy/sell pairs the plugin has matched will appear here"));
+			myFlipsListPanel.add(emptyLabel(
+				"No completed flips in " + myFlipsPeriod.label.toLowerCase(),
+				"Widen the time filter or close more buy/sell pairs to populate this list"));
 			return;
 		}
-		matched.sort((a, b) -> Long.compare(b.profit, a.profit));
+		switch (myFlipsMarginSortIdx)
+		{
+			case 1:
+				matched.sort((a, b) -> Long.compare(b.sellTimestamp, a.sellTimestamp));
+				break;
+			case 2:
+				matched.sort((a, b) -> Double.compare(b.roiPct, a.roiPct));
+				break;
+			default:
+				matched.sort((a, b) -> Long.compare(b.profit, a.profit));
+				break;
+		}
 
 		int total      = matched.size();
 		int totalPages = pageCount(total);
@@ -2117,19 +2246,28 @@ public class O7FlipPanel extends PluginPanel
 	{
 		myFlipsListPanel = listPanel();
 		myFlipsStatsPanel = new com.o7flip.ui.MyTradesStatsPanel();
+		// Wire the membership cost row callbacks. The stats panel deliberately
+		// stays decoupled from plugin config and dialog UI; this glue lives
+		// here in the parent panel where dialogs and config are already in scope.
+		myFlipsStatsPanel.setOnMembershipToggle(() ->
+		{
+			if (plugin != null)
+			{
+				plugin.setMembershipCostHidden(!plugin.isMembershipCostHidden());
+			}
+		});
+		myFlipsStatsPanel.setOnMembershipAdjust(this::openMembershipAdjustDialog);
 
-		// Three-way sort sits as the only header element. Sync is implicit
-		// (fires on plugin start + tab open via fetchTrackerStats). Clear
-		// lives on the list's right-click popup so it's reachable but not
-		// foot-gun. Web button removed — full trade history is on the
-		// website only when the user actively wants to navigate there;
-		// keeping it pinned to the panel ate vertical space without earning it.
+		// Header is two stacked rows: the existing Active/Recent/Margin
+		// switcher with a trailing Filter pill (period selector), and a
+		// second row that only appears when Margin is the active view to
+		// expose the Profit/Recent/ROI sub-sort. Keeping the sub-sort out
+		// of the main row stops it cluttering Active and Recent where it
+		// has no meaning.
 		myFlipsSortBtns = new JButton[3];
 		// requiresSignIn=false — all three views (Active / Recent / Margin) read
 		// from local state (tradeHistory + activeOffers). Anonymous/free users
 		// must be able to switch between them without an auth gate eating the click.
-		// Active is the default so users see live GE state the moment they open
-		// the tab — historical sorts are one click away.
 		JPanel sortBar = buildSortBar(myFlipsSortBtns,
 			new String[]{"Active", "Recent", "Margin"},
 			() -> myFlipsSortIdx,
@@ -2141,6 +2279,61 @@ public class O7FlipPanel extends PluginPanel
 			},
 			false);
 
+		// Period filter pill sits at the right edge of the sort bar — opens
+		// a small popup with Daily / Weekly / Monthly / All time so the
+		// user can re-target every stat in MyTradesStatsPanel at once.
+		// Daily is the default since that's the most-checked window.
+		myFlipsPeriodButton = pillButton(periodPillLabel());
+		myFlipsPeriodButton.setToolTipText("Click to choose the stats time window: Today / This week / This month / All time");
+		myFlipsPeriodButton.addActionListener(e -> showMyFlipsPeriodMenu());
+		JPanel sortBarTrail = new JPanel(new java.awt.BorderLayout());
+		sortBarTrail.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+		sortBarTrail.setBorder(new javax.swing.border.MatteBorder(0, 0, 1, 0, new Color(0x3A3A3A)));
+		sortBarTrail.add(sortBar, java.awt.BorderLayout.CENTER);
+		JPanel filterWrap = new JPanel(new FlowLayout(FlowLayout.RIGHT, 4, 4));
+		filterWrap.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+		filterWrap.add(myFlipsPeriodButton);
+		sortBarTrail.add(filterWrap, java.awt.BorderLayout.EAST);
+
+		// Sub-sort rows for Margin and Recent. Built once, kept as fields,
+		// and the renderers add the matching one to the list panel right
+		// after the stats card. Placing the sub-sort INSIDE the scrolling
+		// list keeps it logically grouped with the items it sorts and
+		// stops it cluttering Active where it has no meaning.
+		myFlipsMarginSortBtns = new JButton[3];
+		myFlipsMarginSortBar = buildSortBar(myFlipsMarginSortBtns,
+			new String[]{"Profit", "Recent", "ROI%"},
+			() -> myFlipsMarginSortIdx,
+			i ->
+			{
+				myFlipsMarginSortIdx = i;
+				myFlipsPage = 0;
+				renderMyFlips();
+			},
+			false);
+		// LEFT_ALIGNMENT is mandatory before adding to the listPanel — its
+		// BoxLayout otherwise treats this bar's default CENTER_ALIGNMENT as
+		// the layout anchor for any narrower neighbour, shifting the stats
+		// card to the right (the "ghost row" the user spotted).
+		myFlipsMarginSortBar.setAlignmentX(Component.LEFT_ALIGNMENT);
+		myFlipsMarginSortBar.setMaximumSize(
+			new Dimension(Integer.MAX_VALUE, myFlipsMarginSortBar.getPreferredSize().height));
+
+		myFlipsRecentSortBtns = new JButton[3];
+		myFlipsRecentSortBar = buildSortBar(myFlipsRecentSortBtns,
+			new String[]{"Profit", "ROI", "Quantity"},
+			() -> myFlipsRecentSortIdx,
+			i ->
+			{
+				myFlipsRecentSortIdx = i;
+				myFlipsPage = 0;
+				renderMyFlips();
+			},
+			false);
+		myFlipsRecentSortBar.setAlignmentX(Component.LEFT_ALIGNMENT);
+		myFlipsRecentSortBar.setMaximumSize(
+			new Dimension(Integer.MAX_VALUE, myFlipsRecentSortBar.getPreferredSize().height));
+
 		attachClearPopup(myFlipsListPanel);
 
 		renderMyFlips();
@@ -2148,7 +2341,102 @@ public class O7FlipPanel extends PluginPanel
 		JPanel footer = new JPanel();
 		footer.setBackground(ColorScheme.DARKER_GRAY_COLOR);
 
-		return assembleTab(sortBar, myFlipsListPanel, footer);
+		return assembleTab(sortBarTrail, myFlipsListPanel, footer);
+	}
+
+	private String periodPillLabel()
+	{
+		// Just the period name — the "Filter:" prefix wasted enough horizontal
+		// space on the My Trades header to push the Margin button out of view.
+		return myFlipsPeriod.label;
+	}
+
+	private void showMyFlipsPeriodMenu()
+	{
+		JPopupMenu menu = new JPopupMenu();
+		for (com.o7flip.ui.MyTradesStatsPanel.Period p : com.o7flip.ui.MyTradesStatsPanel.Period.values())
+		{
+			JMenuItem item = new JMenuItem(p.label);
+			final com.o7flip.ui.MyTradesStatsPanel.Period selected = p;
+			item.addActionListener(ae ->
+			{
+				if (myFlipsPeriod != selected)
+				{
+					myFlipsPeriod = selected;
+					myFlipsPeriodButton.setText(periodPillLabel());
+					renderMyFlips();
+				}
+			});
+			menu.add(item);
+		}
+		menu.show(myFlipsPeriodButton, 0, myFlipsPeriodButton.getHeight());
+	}
+
+	/**
+	 * Opens a two-field dialog letting the user manually seed the lifetime
+	 * bond ledger. Useful when the migration couldn't recover historical
+	 * bonds because their TradeRecord rows had been evicted from the
+	 * 200-row tradeHistory window before the ledger existed (the exact
+	 * symptom: "I bought 21 bonds for membership but they don't show
+	 * because the recent flip-style 3+3 wiped them out of history").
+	 */
+	private void openMembershipAdjustDialog()
+	{
+		if (plugin == null)
+		{
+			return;
+		}
+		com.o7flip.util.BondLedger current = plugin.bondLedger != null
+			? plugin.bondLedger
+			: com.o7flip.util.BondLedger.EMPTY;
+
+		javax.swing.JTextField countField = new javax.swing.JTextField(String.valueOf(current.count), 8);
+		javax.swing.JTextField spendField = new javax.swing.JTextField(String.valueOf(current.spend), 14);
+
+		JPanel form = new JPanel(new java.awt.GridLayout(0, 2, 6, 6));
+		form.add(new javax.swing.JLabel("Lifetime bonds bought:"));
+		form.add(countField);
+		form.add(new javax.swing.JLabel("Lifetime gp spent:"));
+		form.add(spendField);
+		form.add(new javax.swing.JLabel("<html><font color='#888888'>Negative or non-numeric inputs are rejected.</font></html>"));
+		form.add(new javax.swing.JLabel(""));
+
+		int choice = javax.swing.JOptionPane.showConfirmDialog(
+			this,
+			form,
+			"Adjust lifetime bond ledger",
+			javax.swing.JOptionPane.OK_CANCEL_OPTION,
+			javax.swing.JOptionPane.PLAIN_MESSAGE);
+
+		if (choice != javax.swing.JOptionPane.OK_OPTION)
+		{
+			return;
+		}
+
+		long spend;
+		int  count;
+		try
+		{
+			count = Integer.parseInt(countField.getText().trim());
+			spend = Long.parseLong(spendField.getText().trim());
+		}
+		catch (NumberFormatException ex)
+		{
+			javax.swing.JOptionPane.showMessageDialog(this,
+				"Both fields must be whole numbers (no commas or 'gp').",
+				"Adjust lifetime bond ledger",
+				javax.swing.JOptionPane.WARNING_MESSAGE);
+			return;
+		}
+		if (count < 0 || spend < 0)
+		{
+			javax.swing.JOptionPane.showMessageDialog(this,
+				"Counts and gp must be zero or positive.",
+				"Adjust lifetime bond ledger",
+				javax.swing.JOptionPane.WARNING_MESSAGE);
+			return;
+		}
+		plugin.setBondLedger(spend, count);
 	}
 
 	/**

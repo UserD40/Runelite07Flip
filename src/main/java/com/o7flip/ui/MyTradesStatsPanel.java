@@ -25,30 +25,43 @@
 package com.o7flip.ui;
 
 import com.o7flip.model.TrackerStats;
+import com.o7flip.util.BondLedger;
 import com.o7flip.util.Fonts;
 import com.o7flip.util.ProfitCalculator;
 import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Component;
+import java.awt.Cursor;
 import java.awt.Dimension;
+import java.awt.FlowLayout;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
 import java.time.LocalDate;
 import java.time.ZoneId;
-import javax.swing.BorderFactory;
 import javax.swing.Box;
 import javax.swing.BoxLayout;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
+import javax.swing.JPopupMenu;
 import javax.swing.SwingConstants;
 import javax.swing.border.EmptyBorder;
 import net.runelite.client.ui.ColorScheme;
 
 /**
  * Compact stats summary that sits above the trade list on the My Trades tab.
- * Reads from {@link ProfitCalculator.Result} — pure presentation, no logic.
  *
- * Renders only when at least one completed flip exists. Caller decides
- * whether to add the panel to the tab; an empty state hides itself by
- * setting visibility to false.
+ * Every figure on the panel is scoped to a {@link Period} chosen via the
+ * Filter pill in the sort bar — Daily, Weekly, Monthly, or All time. Older
+ * versions of this panel stacked all four windows on screen at once (Today,
+ * This week, This month plus a separate Total); the filter replaces that
+ * with a single set of rows the user re-targets at will. Cleaner read,
+ * more screen budget for the trade list below.
+ *
+ * Server-side {@link TrackerStats} (lifetime, not period-filterable) is only
+ * preferred when the panel is showing All time — for shorter windows we
+ * fall back to filtering the local FIFO result by {@code sellTimestamp}.
+ * The bond ledger is always lifetime, since "Membership cost" is a
+ * cumulative account stat.
  */
 public class MyTradesStatsPanel extends JPanel
 {
@@ -57,8 +70,45 @@ public class MyTradesStatsPanel extends JPanel
 	private static final Color SECTION_BG  = new Color(0x1F1F1F);
 	private static final Color HEADER_COL  = new Color(0xC4A052);
 
+	/**
+	 * Stats window the panel renders. {@code daysAgo == -1} means "no
+	 * filter" — every matched flip in tradeHistory contributes. The
+	 * runtime label ({@link #label}) is the one the user sees in the
+	 * section header and the filter dropdown.
+	 */
+	public enum Period
+	{
+		DAILY  ("Today",      0),
+		WEEKLY ("This week",  7),
+		MONTHLY("This month", 30),
+		ALL_TIME("All time", -1);
+
+		public final String label;
+		private final int daysAgo;
+
+		Period(String label, int daysAgo)
+		{
+			this.label = label;
+			this.daysAgo = daysAgo;
+		}
+
+		long startMillis()
+		{
+			if (daysAgo < 0)
+			{
+				return Long.MIN_VALUE;
+			}
+			return LocalDate.now()
+				.minusDays(daysAgo)
+				.atStartOfDay(ZoneId.systemDefault())
+				.toInstant()
+				.toEpochMilli();
+		}
+	}
+
+	private final JLabel profitHeader     = sectionHeaderLabel("Profit");
+	private final JLabel totalProfitLabel = rowLabel("Total");
 	private final JLabel totalProfitValue = valueLabel();
-	private final JLabel todayProfitValue = valueLabel();
 	private final JLabel tradesValue      = valueLabel();
 	private final JLabel winRateValue     = valueLabel();
 	private final JLabel avgRoiValue      = valueLabel();
@@ -67,13 +117,27 @@ public class MyTradesStatsPanel extends JPanel
 	private final JLabel bestProfitValue  = valueLabel();
 	private final JLabel worstNameValue   = valueLabel();
 	private final JLabel worstProfitValue = valueLabel();
-	private final JLabel weekValue        = valueLabel();
-	private final JLabel monthValue       = valueLabel();
 	private final JLabel bondsValue       = valueLabel();
+	private final JLabel bondsToggle      = toggleLabel("−");
 
 	private final JPanel bestRow;
 	private final JPanel worstRow;
 	private final JPanel bondsRow;
+
+	/**
+	 * Callback fired when the user clicks the hide/show toggle on the
+	 * Membership cost row. The panel itself doesn't persist the state —
+	 * O7FlipPanel owns the config-backed flag and feeds it back through
+	 * {@link #update(ProfitCalculator.Result, TrackerStats, BondLedger, Period, boolean)}.
+	 */
+	private Runnable onMembershipToggle = () -> {};
+
+	/**
+	 * Callback fired when the user picks "Adjust lifetime…" from the
+	 * right-click on the Membership cost row. O7FlipPanel pops the
+	 * dialog so this class stays free of frame/dialog plumbing.
+	 */
+	private Runnable onMembershipAdjust = () -> {};
 
 	public MyTradesStatsPanel()
 	{
@@ -82,128 +146,156 @@ public class MyTradesStatsPanel extends JPanel
 		setBorder(new EmptyBorder(8, 10, 8, 10));
 		setAlignmentX(Component.LEFT_ALIGNMENT);
 
-		add(sectionHeader("Profit"));
-		add(row("Total",      totalProfitValue));
-		add(row("Today",      todayProfitValue));
+		add(profitHeader);
+		add(row(totalProfitLabel, totalProfitValue));
 		bestRow  = row("Best",  bestNameValue,  bestProfitValue);
 		worstRow = row("Worst", worstNameValue, worstProfitValue);
 		add(bestRow);
 		add(worstRow);
 
 		add(Box.createVerticalStrut(8));
-		add(sectionHeader("Performance"));
+		add(sectionHeaderLabel("Performance"));
 		add(row("Trades",     tradesValue));
 		add(row("Win rate",   winRateValue));
 		add(row("Avg ROI",    avgRoiValue));
-		add(row("GE tax paid (est.)", taxValue));
-		// Membership cost value can be very long (e.g. "289,128,766 gp · 21 bonds")
-		// so it wouldn't fit on the same line as the label without collision.
-		// Stack the label above the value instead — label left, value right
-		// on its own line below.
-		bondsRow = stackedRow("Membership cost", bondsValue);
+		add(row("GE tax paid", taxValue));
+		// Membership cost can be very long ("289,128,766 gp · 21 bonds")
+		// so it gets a stacked row — label + toggle on top, value on its
+		// own line below right-aligned.
+		bondsRow = stackedBondsRow();
 		add(bondsRow);
+	}
 
-		// Tight 4px gap before Activity instead of 8px — the stacked Membership
-		// cost row adds vertical height on its own, so the extra strut pushes
-		// the bottom of the panel past the visible area without it.
-		add(Box.createVerticalStrut(4));
-		add(sectionHeader("Activity"));
-		add(row("This week",  weekValue));
-		add(row("This month", monthValue));
+	/** Setter used by O7FlipPanel to wire the hide/show config flip. */
+	public void setOnMembershipToggle(Runnable r)
+	{
+		this.onMembershipToggle = r != null ? r : () -> {};
+	}
+
+	/** Setter used by O7FlipPanel to open the lifetime-adjust dialog. */
+	public void setOnMembershipAdjust(Runnable r)
+	{
+		this.onMembershipAdjust = r != null ? r : () -> {};
 	}
 
 	/**
 	 * Backwards-compatible local-only update — still used by tests and any
-	 * caller that doesn't have server stats handy.
+	 * caller that doesn't have server stats handy. Renders all-time.
 	 */
 	public void update(ProfitCalculator.Result result)
 	{
-		update(result, null);
+		update(result, null, BondLedger.EMPTY, Period.ALL_TIME, false);
 	}
 
 	/**
-	 * Refresh all labels. Server stats (when present and non-empty) are
-	 * authoritative for headline numbers — Total, Trades, Win rate, Best —
-	 * because they merge plugin-recorded GE trades with website-logged
-	 * tracker entries that the plugin has no visibility into. Today, Avg
-	 * ROI, GE tax, and Worst still come from the local FIFO result since
-	 * the server stats endpoint doesn't expose per-flip detail.
-	 *
-	 * Hides the panel only when both sources are empty.
+	 * Compatibility shim for callers that haven't been migrated to pass a
+	 * {@link Period}. Defaults to {@link Period#ALL_TIME}.
 	 */
-	public void update(ProfitCalculator.Result result, TrackerStats server)
+	public void update(ProfitCalculator.Result result, TrackerStats server, BondLedger bonds)
 	{
-		ProfitCalculator.Stats local = result.stats;
-		boolean hasServer = server != null && server.closedCount > 0;
-		boolean hasLocal  = local.completedFlipCount > 0;
-		boolean hasBonds  = local.bondCount > 0;
+		update(result, server, bonds, Period.ALL_TIME, false);
+	}
 
-		// Keep the panel visible if there's any signal to show — flips, bonds,
-		// or server-side stats. A user who's only redeemed bonds (no flips
-		// captured yet) still sees the Membership cost line.
-		if (!hasServer && !hasLocal && !hasBonds)
+	/**
+	 * Compatibility shim for callers that don't pass the hide flag yet.
+	 */
+	public void update(ProfitCalculator.Result result, TrackerStats server, BondLedger bonds, Period period)
+	{
+		update(result, server, bonds, period, false);
+	}
+
+	/**
+	 * Refresh every label for the chosen period.
+	 *
+	 * Server stats ({@link TrackerStats}) are only consulted when the user
+	 * is viewing All time — they cover lifetime and have no per-flip
+	 * timestamps, so they can't answer "last 7 days". Bond ledger is
+	 * always lifetime (membership cost is cumulative by definition).
+	 */
+	public void update(ProfitCalculator.Result result, TrackerStats server, BondLedger bonds,
+		Period period, boolean membershipHidden)
+	{
+		if (period == null) period = Period.ALL_TIME;
+		if (bonds  == null) bonds  = BondLedger.EMPTY;
+
+		PeriodStats stats = PeriodStats.from(result, period);
+		boolean preferServer = period == Period.ALL_TIME && server != null && server.closedCount > 0;
+		boolean hasLocal     = stats.matchedCount > 0;
+		// Membership cost is a lifetime stat — it's the same number whether
+		// the user is looking at Today or All time. Always render the row;
+		// the period filter doesn't apply to it. A small (lifetime) hint
+		// next to the gp value is what disambiguates when the user is on
+		// a shorter window.
+		boolean showBondsRow = true;
+
+		// Keep the panel visible if there's any signal — flips, bonds, or
+		// server stats. A user who's only redeemed bonds (no flips captured
+		// yet) still sees the Membership cost line.
+		if (!preferServer && !hasLocal && !showBondsRow)
 		{
 			setVisible(false);
 			return;
 		}
 		setVisible(true);
 
-		long totalProfit = hasServer ? server.totalRealisedProfit : local.totalProfit;
+		profitHeader.setText("Profit · " + period.label);
+
+		// Total label always reads "Total"; the section header carries the
+		// period name. Keeping the row label fixed avoids a layout shudder
+		// when the user switches windows.
+		long totalProfit = preferServer ? server.totalRealisedProfit : stats.totalProfit;
 		setProfit(totalProfitValue, totalProfit);
-		if (hasServer && server.declaredProfit != 0L)
+		if (preferServer && server.declaredProfit != 0L)
 		{
 			totalProfitValue.setToolTipText(String.format(
 				"<html>%s gp confirmed by your GE trades<br>%s gp self-reported (manually-closed flips)</html>",
 				FlipItemPanel.formatGp(server.verifiedProfit),
 				FlipItemPanel.formatGp(server.declaredProfit)));
 		}
+		else if (stats.phantomCount > 0)
+		{
+			totalProfitValue.setToolTipText(String.format(
+				"<html>%s gp from matched flips in %s.<br>"
+				+ "<font color='#888888'>%d sell%s in this window had no matching buy in tracked history<br>"
+				+ "and %s excluded from the total.</font></html>",
+				FlipItemPanel.formatGp(totalProfit),
+				period.label.toLowerCase(),
+				stats.phantomCount,
+				stats.phantomCount == 1 ? "" : "s",
+				stats.phantomCount == 1 ? "is" : "are"));
+		}
 		else
 		{
 			totalProfitValue.setToolTipText(null);
 		}
 
-		// Today profit comes from local FIFO only — server stats don't expose
-		// per-flip timestamps. For users who only flip on the website, this
-		// stays at 0 gp, which is correct ("plugin saw zero today").
-		long todayProfit = hasLocal ? sumProfitSinceTodayStart(result) : 0L;
-		setProfit(todayProfitValue, todayProfit);
-		int phantomsToday = hasLocal ? countPhantomsSinceTodayStart(result) : 0;
-		if (phantomsToday > 0)
-		{
-			todayProfitValue.setToolTipText(String.format(
-				"<html>+%s gp from matched flips today.<br>"
-				+ "<font color='#888888'>%d sell%s today had no matching buy in tracked history<br>"
-				+ "and %s excluded from this total — hover that row for details.</font></html>",
-				FlipItemPanel.formatGp(todayProfit),
-				phantomsToday,
-				phantomsToday == 1 ? "" : "s",
-				phantomsToday == 1 ? "is" : "are"));
-		}
-		else
-		{
-			todayProfitValue.setToolTipText(null);
-		}
-
-		int tradesCount = hasServer ? server.closedCount : local.completedFlipCount;
+		int tradesCount = preferServer ? server.closedCount : stats.matchedCount;
 		tradesValue.setText(String.valueOf(tradesCount));
 		tradesValue.setForeground(Color.WHITE);
 
-		if (hasServer)
+		if (preferServer)
 		{
 			// Server returns just the rate; W/L/E breakdown isn't in /tracker/stats.
 			winRateValue.setText(String.format("%.0f%%", server.winRate * 100.0));
 		}
+		else if (hasLocal)
+		{
+			// Breakeven count is dropped — every sell is taxed, so an exact
+			// 0 profit flip is effectively impossible. W/L is what the user
+			// reads at a glance.
+			winRateValue.setText(String.format("%.0f%% (%dW / %dL)",
+				stats.winRatePct, stats.winCount, stats.lossCount));
+		}
 		else
 		{
-			winRateValue.setText(String.format("%.0f%% (%dW / %dL / %dE)",
-				local.winRatePct, local.winCount, local.lossCount, local.breakEvenCount));
+			winRateValue.setText("—");
 		}
 		winRateValue.setForeground(Color.WHITE);
 
 		if (hasLocal)
 		{
-			avgRoiValue.setText(String.format("%+.1f%%", local.avgRoiPct));
-			avgRoiValue.setForeground(local.avgRoiPct >= 0 ? PROFIT_COL : LOSS_COL);
+			avgRoiValue.setText(String.format("%+.1f%%", stats.avgRoiPct));
+			avgRoiValue.setForeground(stats.avgRoiPct >= 0 ? PROFIT_COL : LOSS_COL);
 		}
 		else
 		{
@@ -211,13 +303,14 @@ public class MyTradesStatsPanel extends JPanel
 			avgRoiValue.setForeground(Color.LIGHT_GRAY);
 		}
 
-		// GE tax: now an exact sum across matched flips (ProfitCalculator
-		// applies the OSRS rules per-flip — 2% with a 5M/item cap, exempt
-		// below 100 gp/item, exempt for bonds). Profit shown elsewhere in
-		// the panel is already net of this tax, so the two figures add up.
+		// GE tax: exact sum across matched flips in the period.
+		// ProfitCalculator applies OSRS rules per flip (2% with 5M/item
+		// cap, exempt below 100 gp/item, exempt for bonds), so the period
+		// sum is authoritative — the total profit shown above is already
+		// net of this figure.
 		if (hasLocal)
 		{
-			taxValue.setText(FlipItemPanel.formatGp(local.totalTaxPaid) + " gp");
+			taxValue.setText(FlipItemPanel.formatGp(stats.totalTaxPaid) + " gp");
 		}
 		else
 		{
@@ -225,29 +318,41 @@ public class MyTradesStatsPanel extends JPanel
 		}
 		taxValue.setForeground(Color.LIGHT_GRAY);
 
-		applyBestRow(local, server, hasServer);
+		applyBestRow(stats, server, preferServer);
+		applyWorstRow(stats);
 
-		if (local.worstFlip != null && local.worstFlip.profit < 0)
+		// Membership cost — lifetime stat, only rendered on All time. The
+		// hide toggle lets the user mask the gp value (privacy / streaming)
+		// without removing the row from the layout. Adjust… in the right-
+		// click menu opens a dialog for manually seeding the ledger when
+		// the migration couldn't recover historical bonds.
+		if (showBondsRow)
 		{
-			worstNameValue.setText(truncate(local.worstFlip.name, 16));
-			worstNameValue.setForeground(Color.WHITE);
-			setProfit(worstProfitValue, local.worstFlip.profit);
-			worstRow.setVisible(true);
-		}
-		else
-		{
-			worstRow.setVisible(false);
-		}
-
-		// Membership cost — only shown when the user has consumed bonds.
-		// The number is the gp value of bond buys with no matching sell, so
-		// it grows with every redemption and shrinks (rare) if a held bond
-		// gets flipped back. Hidden entirely when zero so it's not noise.
-		if (local.bondCount > 0)
-		{
-			String unit = local.bondCount == 1 ? " bond" : " bonds";
-			bondsValue.setText(FlipItemPanel.formatGp(local.bondSpend) + " gp · " + local.bondCount + unit);
-			bondsValue.setForeground(LOSS_COL);
+			if (membershipHidden)
+			{
+				bondsValue.setText("•••");
+				bondsValue.setForeground(Color.LIGHT_GRAY);
+				// + means "expand / reveal" — click to show the gp/count again.
+				bondsToggle.setText("+");
+				bondsToggle.setToolTipText("Click to reveal the lifetime bond total");
+			}
+			else
+			{
+				if (bonds.count > 0)
+				{
+					String unit = bonds.count == 1 ? " bond" : " bonds";
+					bondsValue.setText(FlipItemPanel.formatGp(bonds.spend) + " gp · " + bonds.count + unit);
+					bondsValue.setForeground(LOSS_COL);
+				}
+				else
+				{
+					bondsValue.setText("0 gp · 0 bonds");
+					bondsValue.setForeground(Color.LIGHT_GRAY);
+				}
+				// − means "collapse / hide" — click to mask the value.
+				bondsToggle.setText("−");
+				bondsToggle.setToolTipText("Click to hide the lifetime bond total. Right-click the row to adjust it.");
+			}
 			bondsRow.setVisible(true);
 		}
 		else
@@ -255,19 +360,13 @@ public class MyTradesStatsPanel extends JPanel
 			bondsRow.setVisible(false);
 		}
 
-		// Activity windows — local-only since server stats don't carry per-flip
-		// timestamps. A user who only logs flips on the website will see
-		// "0 gp · 0 flips" here, which is honest: the plugin saw nothing.
-		applyPeriod(weekValue,  result, periodStart(7));
-		applyPeriod(monthValue, result, periodStart(30));
-
 		revalidate();
 		repaint();
 	}
 
-	private void applyBestRow(ProfitCalculator.Stats local, TrackerStats server, boolean hasServer)
+	private void applyBestRow(PeriodStats stats, TrackerStats server, boolean preferServer)
 	{
-		if (hasServer && server.bestFlip != null && server.bestFlip.profit > 0)
+		if (preferServer && server.bestFlip != null && server.bestFlip.profit > 0)
 		{
 			TrackerStats.BestFlip b = server.bestFlip;
 			bestNameValue.setText(truncate(b.name, 16));
@@ -280,17 +379,32 @@ public class MyTradesStatsPanel extends JPanel
 			bestRow.setVisible(true);
 			return;
 		}
-		if (local.bestFlip != null && local.bestFlip.profit > 0)
+		if (stats.bestFlip != null && stats.bestFlip.profit > 0)
 		{
-			bestNameValue.setText(truncate(local.bestFlip.name, 16));
+			bestNameValue.setText(truncate(stats.bestFlip.name, 16));
 			bestNameValue.setForeground(Color.WHITE);
 			bestNameValue.setToolTipText(null);
-			setProfit(bestProfitValue, local.bestFlip.profit);
+			setProfit(bestProfitValue, stats.bestFlip.profit);
 			bestProfitValue.setToolTipText(null);
 			bestRow.setVisible(true);
 			return;
 		}
 		bestRow.setVisible(false);
+	}
+
+	private void applyWorstRow(PeriodStats stats)
+	{
+		if (stats.worstFlip != null && stats.worstFlip.profit < 0)
+		{
+			worstNameValue.setText(truncate(stats.worstFlip.name, 16));
+			worstNameValue.setForeground(Color.WHITE);
+			setProfit(worstProfitValue, stats.worstFlip.profit);
+			worstRow.setVisible(true);
+		}
+		else
+		{
+			worstRow.setVisible(false);
+		}
 	}
 
 	private static Color bestNameColor(String source)
@@ -324,87 +438,89 @@ public class MyTradesStatsPanel extends JPanel
 			+ "Backed by real GE trades captured by the plugin.</html>";
 	}
 
-	// ── helpers ─────────────────────────────────────────────────────────────
-
-	private static long sumProfitSinceTodayStart(ProfitCalculator.Result result)
-	{
-		return sumProfitSince(result, periodStart(0));
-	}
+	// ── period stats ────────────────────────────────────────────────────────
 
 	/**
-	 * Counts sells today that produced a phantom CompletedFlip — i.e., the
-	 * FIFO matcher couldn't pair them with a prior buy in tradeHistory. Used
-	 * by the Today tooltip so users understand why a fresh sell didn't bump
-	 * the Today number.
+	 * Snapshot of stats over a single {@link Period}. Mirrors the relevant
+	 * fields of {@link ProfitCalculator.Stats} but is computed by
+	 * re-walking {@code completedFlips} with a timestamp filter so it can
+	 * answer "last 7 days" without re-running the FIFO matcher.
 	 */
-	private static int countPhantomsSinceTodayStart(ProfitCalculator.Result result)
+	private static final class PeriodStats
 	{
-		long fromMillis = periodStart(0);
-		int phantoms = 0;
-		for (ProfitCalculator.CompletedFlip f : result.completedFlips)
+		final long totalProfit;
+		final long totalTaxPaid;
+		final int  matchedCount;
+		final int  winCount;
+		final int  lossCount;
+		final int  breakEvenCount;
+		final double winRatePct;
+		final double avgRoiPct;
+		final ProfitCalculator.CompletedFlip bestFlip;
+		final ProfitCalculator.CompletedFlip worstFlip;
+		final int phantomCount;
+
+		PeriodStats(long totalProfit, long totalTaxPaid, int matchedCount,
+			int winCount, int lossCount, int breakEvenCount,
+			double winRatePct, double avgRoiPct,
+			ProfitCalculator.CompletedFlip best, ProfitCalculator.CompletedFlip worst,
+			int phantomCount)
 		{
-			if (f.buyTotal <= 0 && f.sellTimestamp >= fromMillis)
+			this.totalProfit = totalProfit;
+			this.totalTaxPaid = totalTaxPaid;
+			this.matchedCount = matchedCount;
+			this.winCount = winCount;
+			this.lossCount = lossCount;
+			this.breakEvenCount = breakEvenCount;
+			this.winRatePct = winRatePct;
+			this.avgRoiPct = avgRoiPct;
+			this.bestFlip = best;
+			this.worstFlip = worst;
+			this.phantomCount = phantomCount;
+		}
+
+		static PeriodStats from(ProfitCalculator.Result result, Period period)
+		{
+			long from = period.startMillis();
+			long totalProfit = 0L;
+			long totalTaxPaid = 0L;
+			int matched = 0, wins = 0, losses = 0, evens = 0, phantoms = 0;
+			double roiSum = 0.0;
+			ProfitCalculator.CompletedFlip best = null, worst = null;
+			for (ProfitCalculator.CompletedFlip f : result.completedFlips)
 			{
-				phantoms++;
+				if (f.sellTimestamp < from)
+				{
+					continue;
+				}
+				if (f.buyTotal <= 0)
+				{
+					// Phantom sells (no matching buy in tracked history) are
+					// excluded from every aggregate stat in the same way
+					// ProfitCalculator does — including them would inflate
+					// totalProfit by the gross sale of items whose cost
+					// basis pre-dates the plugin's recording window.
+					phantoms++;
+					continue;
+				}
+				matched++;
+				totalProfit += f.profit;
+				totalTaxPaid += f.tax;
+				if (f.profit > 0) wins++;
+				else if (f.profit < 0) losses++;
+				else evens++;
+				roiSum += f.roiPct;
+				if (best  == null || f.profit > best.profit)  best  = f;
+				if (worst == null || f.profit < worst.profit) worst = f;
 			}
+			double winRate = matched > 0 ? 100.0 * wins / matched : 0.0;
+			double avgRoi  = matched > 0 ? roiSum / matched : 0.0;
+			return new PeriodStats(totalProfit, totalTaxPaid, matched, wins, losses, evens,
+				winRate, avgRoi, best, worst, phantoms);
 		}
-		return phantoms;
 	}
 
-	private static long periodStart(int daysAgo)
-	{
-		return LocalDate.now()
-			.minusDays(daysAgo)
-			.atStartOfDay(ZoneId.systemDefault())
-			.toInstant()
-			.toEpochMilli();
-	}
-
-	private static long sumProfitSince(ProfitCalculator.Result result, long fromMillis)
-	{
-		long sum = 0L;
-		for (ProfitCalculator.CompletedFlip f : result.completedFlips)
-		{
-			if (f.buyTotal > 0 && f.sellTimestamp >= fromMillis)
-			{
-				sum += f.profit;
-			}
-		}
-		return sum;
-	}
-
-	private static int countFlipsSince(ProfitCalculator.Result result, long fromMillis)
-	{
-		int n = 0;
-		for (ProfitCalculator.CompletedFlip f : result.completedFlips)
-		{
-			if (f.buyTotal > 0 && f.sellTimestamp >= fromMillis)
-			{
-				n++;
-			}
-		}
-		return n;
-	}
-
-	private static void applyPeriod(JLabel label, ProfitCalculator.Result result, long fromMillis)
-	{
-		long profit = sumProfitSince(result, fromMillis);
-		int  count  = countFlipsSince(result, fromMillis);
-		String prefix = profit > 0 ? "+" : "";
-		label.setText(prefix + FlipItemPanel.formatGp(profit) + " gp · " + count + (count == 1 ? " flip" : " flips"));
-		if (profit > 0)
-		{
-			label.setForeground(PROFIT_COL);
-		}
-		else if (profit < 0)
-		{
-			label.setForeground(LOSS_COL);
-		}
-		else
-		{
-			label.setForeground(Color.LIGHT_GRAY);
-		}
-	}
+	// ── helpers ─────────────────────────────────────────────────────────────
 
 	private static void setProfit(JLabel label, long profit)
 	{
@@ -433,7 +549,7 @@ public class MyTradesStatsPanel extends JPanel
 		return l;
 	}
 
-	private static JLabel sectionHeader(String text)
+	private static JLabel sectionHeaderLabel(String text)
 	{
 		JLabel l = new JLabel(text);
 		l.setFont(Fonts.SM_BOLD);
@@ -443,28 +559,31 @@ public class MyTradesStatsPanel extends JPanel
 		return l;
 	}
 
+	private static JLabel rowLabel(String text)
+	{
+		JLabel l = new JLabel(text);
+		l.setFont(Fonts.SM);
+		l.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
+		return l;
+	}
+
 	private static JPanel row(String labelText, JLabel value)
+	{
+		return row(rowLabel(labelText), value);
+	}
+
+	private static JPanel row(JLabel label, JLabel value)
 	{
 		JPanel row = new JPanel(new BorderLayout());
 		row.setBackground(SECTION_BG);
 		row.setBorder(new EmptyBorder(2, 0, 2, 0));
 		row.setAlignmentX(Component.LEFT_ALIGNMENT);
 		row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 18));
-
-		JLabel l = new JLabel(labelText);
-		l.setFont(Fonts.SM);
-		l.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
-		row.add(l,     BorderLayout.WEST);
+		row.add(label, BorderLayout.WEST);
 		row.add(value, BorderLayout.EAST);
 		return row;
 	}
 
-	/**
-	 * Two-line row variant for values that won't fit alongside their label
-	 * (currently just "Membership cost" with its full gp + count text).
-	 * Label sits on top in grey, value sits below right-aligned in its
-	 * own colour — same look as the single-line row, just split.
-	 */
 	private static JPanel stackedRow(String labelText, JLabel value)
 	{
 		JPanel row = new JPanel();
@@ -474,20 +593,89 @@ public class MyTradesStatsPanel extends JPanel
 		row.setAlignmentX(Component.LEFT_ALIGNMENT);
 		row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 36));
 
-		JLabel l = new JLabel(labelText);
-		l.setFont(Fonts.SM);
-		l.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
+		JLabel l = rowLabel(labelText);
 		l.setAlignmentX(Component.LEFT_ALIGNMENT);
 		l.setMaximumSize(new Dimension(Integer.MAX_VALUE, 16));
 
-		// value already has horizontalAlignment=RIGHT from valueLabel(); just
-		// stretch it to full row width so the right-align fires.
 		value.setAlignmentX(Component.LEFT_ALIGNMENT);
 		value.setMaximumSize(new Dimension(Integer.MAX_VALUE, 16));
 
 		row.add(l);
 		row.add(value);
 		return row;
+	}
+
+	/**
+	 * Single-line row for the bond ledger.
+	 *
+	 * Layout:
+	 * <pre>
+	 *   Bonds bought  [+/-]                 0 gp · 0 bonds
+	 * </pre>
+	 *
+	 * Label sits on the left with the +/- toggle next to it — {@code +}
+	 * when the value is currently hidden (click to reveal), {@code -}
+	 * when visible (click to collapse). Value renders on the right same
+	 * as every other row in the panel. Right-click anywhere opens the
+	 * "Adjust lifetime…" dialog for manual seeding.
+	 *
+	 * Built once in the constructor; the labels are mutated by
+	 * {@link #update}.
+	 */
+	private JPanel stackedBondsRow()
+	{
+		JPanel row = new JPanel(new BorderLayout());
+		row.setBackground(SECTION_BG);
+		row.setBorder(new EmptyBorder(2, 0, 2, 0));
+		row.setAlignmentX(Component.LEFT_ALIGNMENT);
+		row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 18));
+
+		// Left side: "Bonds bought" label paired with the inline +/-
+		// toggle. FlowLayout(LEFT, 4, 0) keeps the toggle tight against
+		// the label without baseline shenanigans.
+		JPanel leftCluster = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 0));
+		leftCluster.setBackground(SECTION_BG);
+		leftCluster.add(rowLabel("Bonds bought"));
+
+		bondsToggle.setHorizontalAlignment(SwingConstants.CENTER);
+		bondsToggle.addMouseListener(new MouseAdapter()
+		{
+			@Override
+			public void mouseClicked(MouseEvent e)
+			{
+				if (e.getButton() == MouseEvent.BUTTON1)
+				{
+					onMembershipToggle.run();
+				}
+			}
+		});
+		leftCluster.add(bondsToggle);
+
+		bondsValue.setHorizontalAlignment(SwingConstants.RIGHT);
+
+		row.add(leftCluster, BorderLayout.WEST);
+		row.add(bondsValue,  BorderLayout.EAST);
+
+		// Right-click anywhere on the row opens the lifetime-adjust dialog.
+		JPopupMenu menu = new JPopupMenu();
+		javax.swing.JMenuItem adjust = new javax.swing.JMenuItem("Adjust lifetime…");
+		adjust.setToolTipText("Manually set the lifetime gp + bond count, e.g. to recover history from before the ledger existed");
+		adjust.addActionListener(e -> onMembershipAdjust.run());
+		menu.add(adjust);
+		row.setComponentPopupMenu(menu);
+		leftCluster.setComponentPopupMenu(menu);
+		bondsValue.setComponentPopupMenu(menu);
+
+		return row;
+	}
+
+	private static JLabel toggleLabel(String text)
+	{
+		JLabel l = new JLabel(text);
+		l.setFont(Fonts.SM);
+		l.setForeground(new Color(0x8AB6FF));
+		l.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+		return l;
 	}
 
 	private static JPanel row(String labelText, JLabel name, JLabel profit)

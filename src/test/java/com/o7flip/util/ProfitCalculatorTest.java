@@ -72,13 +72,16 @@ public class ProfitCalculatorTest
 	@Test
 	public void sellWithoutBuy_producesPhantomFlip()
 	{
+		// Sell 100 @ 1000 gp/item → 2% tax = 20 gp/item × 100 = 2000.
+		// Phantom profit still nets the tax (consistent with matched flips).
 		TradeRecord sell = trade(1, "Cannonball", false, 100, 100_000L, 1000L);
 		ProfitCalculator.Result r = ProfitCalculator.compute(Collections.singletonList(sell));
 		assertEquals(1, r.completedFlips.size());
 		ProfitCalculator.CompletedFlip flip = r.completedFlips.get(0);
 		assertEquals(0L, flip.buyTotal);
 		assertEquals(100_000L, flip.sellTotal);
-		assertEquals(100_000L, flip.profit);
+		assertEquals(2_000L, flip.tax);
+		assertEquals(98_000L, flip.profit);
 		assertEquals(0.0, flip.roiPct, 0.001);
 	}
 
@@ -94,8 +97,11 @@ public class ProfitCalculatorTest
 		assertEquals(100, flip.quantity);
 		assertEquals(100_000L, flip.buyTotal);
 		assertEquals(120_000L, flip.sellTotal);
-		assertEquals(20_000L, flip.profit);
-		assertEquals(20.0, flip.roiPct, 0.01);
+		// 2% GE tax on 1200 gp/item = 24 gp/item × 100 = 2400 gp.
+		// Profit is reported NET of tax: 120_000 - 2400 - 100_000 = 17_600.
+		assertEquals(2_400L,  flip.tax);
+		assertEquals(17_600L, flip.profit);
+		assertEquals(17.6, flip.roiPct, 0.01);
 		assertEquals(1000L, flip.firstBuyTimestamp);
 		assertEquals(2000L, flip.sellTimestamp);
 		assertTrue(r.openPositions.isEmpty());
@@ -112,7 +118,10 @@ public class ProfitCalculatorTest
 		assertEquals(40, flip.quantity);
 		assertEquals(40_000L, flip.buyTotal);  // 100_000 * 40 / 100
 		assertEquals(48_000L, flip.sellTotal);
-		assertEquals(8_000L, flip.profit);
+		// 2% tax on 1200 gp/item = 24 gp/item × 40 = 960 gp.
+		// Net profit: 48_000 - 960 - 40_000 = 7_040.
+		assertEquals(960L,   flip.tax);
+		assertEquals(7_040L, flip.profit);
 
 		ProfitCalculator.OpenPosition pos = r.openPositions.get(1);
 		assertNotNull(pos);
@@ -133,22 +142,24 @@ public class ProfitCalculatorTest
 		ProfitCalculator.Result r = ProfitCalculator.compute(Arrays.asList(buy1, buy2, sell));
 		assertEquals(2, r.completedFlips.size());
 
-		// First flip: 50 from buy1
+		// First flip: 50 from buy1. Sell price 1500 gp/item → tax 30 gp × 50 = 1500.
+		// Net profit: 75_000 - 1500 - 50_000 = 23_500.
 		ProfitCalculator.CompletedFlip f1 = r.completedFlips.get(0);
 		assertEquals(50, f1.quantity);
 		assertEquals(50_000L, f1.buyTotal);
-		// sellGp portion: 120_000 * 50 / 80 = 75_000
 		assertEquals(75_000L, f1.sellTotal);
-		assertEquals(25_000L, f1.profit);
+		assertEquals(1_500L,  f1.tax);
+		assertEquals(23_500L, f1.profit);
 		assertEquals(1000L, f1.firstBuyTimestamp);
 
-		// Second flip: 30 from buy2 (remainder of sell)
+		// Second flip: 30 from buy2 (remainder of sell). Tax 30 gp × 30 = 900.
+		// Net profit: 45_000 - 900 - 36_000 = 8_100.
 		ProfitCalculator.CompletedFlip f2 = r.completedFlips.get(1);
 		assertEquals(30, f2.quantity);
-		assertEquals(36_000L, f2.buyTotal); // 60_000 * 30 / 50
-		// sellGp remainder: 120_000 - 75_000 = 45_000
+		assertEquals(36_000L, f2.buyTotal);
 		assertEquals(45_000L, f2.sellTotal);
-		assertEquals(9_000L, f2.profit);
+		assertEquals(900L,    f2.tax);
+		assertEquals(8_100L,  f2.profit);
 		assertEquals(2000L, f2.firstBuyTimestamp);
 
 		// Open position: 20 from buy2 remaining
@@ -166,7 +177,8 @@ public class ProfitCalculatorTest
 		TradeRecord buy  = trade(1, "Cannonball", true,  100, 100_000L, 1000L);
 		ProfitCalculator.Result r = ProfitCalculator.compute(Arrays.asList(sell, buy));
 		assertEquals(1, r.completedFlips.size());
-		assertEquals(20_000L, r.completedFlips.get(0).profit);
+		// Same scenario as exactMatch_buyThenSell_oneFlip — net of 2% tax.
+		assertEquals(17_600L, r.completedFlips.get(0).profit);
 		assertTrue(r.openPositions.isEmpty());
 	}
 
@@ -186,23 +198,27 @@ public class ProfitCalculatorTest
 	@Test
 	public void stats_winLossBreakeven_classifiedCorrectly()
 	{
+		// Sell prices below 100 gp/item are tax-exempt — picking 1000+ gp/item
+		// keeps the tax math interesting and exercises the post-tax counters.
 		ProfitCalculator.Result r = ProfitCalculator.compute(Arrays.asList(
 			trade(1, "A", true,  10, 10_000L, 1000L),
-			trade(1, "A", false, 10, 12_000L, 1100L), // +2000 win
+			trade(1, "A", false, 10, 12_000L, 1100L), // sell 1200/item → tax 240, profit +1760 (win)
 			trade(2, "B", true,  10, 10_000L, 2000L),
-			trade(2, "B", false, 10,  8_000L, 2100L), // -2000 loss
+			trade(2, "B", false, 10,  8_000L, 2100L), // sell 800/item → tax 160, profit -2160 (loss)
 			trade(3, "C", true,  10, 10_000L, 3000L),
-			trade(3, "C", false, 10, 10_000L, 3100L)  // 0 breakeven
+			trade(3, "C", false, 10, 10_000L, 3100L)  // sell 1000/item → tax 200, profit -200 (still a loss after tax)
 		));
 		assertEquals(3, r.stats.completedFlipCount);
 		assertEquals(1, r.stats.winCount);
-		assertEquals(1, r.stats.lossCount);
-		assertEquals(1, r.stats.breakEvenCount);
+		assertEquals(2, r.stats.lossCount);
+		assertEquals(0, r.stats.breakEvenCount);
 		assertEquals(33.33, r.stats.winRatePct, 0.1);
-		// total profit: +2000 - 2000 + 0 = 0
-		assertEquals(0L, r.stats.totalProfit);
-		// total gp sold: 12000 + 8000 + 10000 = 30000
+		// 1760 - 2160 - 200 = -600 (net of GE tax)
+		assertEquals(-600L, r.stats.totalProfit);
+		// gross gp sold (pre-tax) still adds the way it always did
 		assertEquals(30_000L, r.stats.totalGpSold);
+		// total tax = 240 + 160 + 200 = 600
+		assertEquals(600L, r.stats.totalTaxPaid);
 	}
 
 	@Test
@@ -210,39 +226,38 @@ public class ProfitCalculatorTest
 	{
 		ProfitCalculator.Result r = ProfitCalculator.compute(Arrays.asList(
 			trade(1, "A", true,  10, 10_000L, 1000L),
-			trade(1, "A", false, 10, 15_000L, 1100L), // +5000
+			trade(1, "A", false, 10, 15_000L, 1100L), // sell 1500/item, tax 300, profit +4700
 			trade(2, "B", true,  10, 10_000L, 2000L),
-			trade(2, "B", false, 10,  7_000L, 2100L)  // -3000
+			trade(2, "B", false, 10,  7_000L, 2100L)  // sell 700/item, tax 140, profit -3140
 		));
 		assertNotNull(r.stats.bestFlip);
 		assertEquals(1, r.stats.bestFlip.itemId);
-		assertEquals(5_000L, r.stats.bestFlip.profit);
+		assertEquals(4_700L, r.stats.bestFlip.profit);
 
 		assertNotNull(r.stats.worstFlip);
 		assertEquals(2, r.stats.worstFlip.itemId);
-		assertEquals(-3_000L, r.stats.worstFlip.profit);
+		assertEquals(-3_140L, r.stats.worstFlip.profit);
 	}
 
 	@Test
 	public void stats_excludePhantomFlips()
 	{
-		// One real flip @ +20% ROI plus one phantom (sell without matched buy
-		// in tracked history). Phantoms must be excluded from every stat —
-		// counting them would make totalProfit, win-rate, best/worst, and the
-		// flip count all misleading whenever the user has trades older than
-		// the plugin's history (e.g. items bought before installing).
+		// One real flip plus one phantom (sell without matched buy in
+		// tracked history). Phantoms must be excluded from every stat —
+		// counting them would make totalProfit, win-rate, best/worst, and
+		// the flip count all misleading whenever the user has trades older
+		// than the plugin's history (e.g. items bought before installing).
+		// Buy 10 @ 1000 / sell 10 @ 1200; tax = 24/item × 10 = 240 → profit 1760.
 		ProfitCalculator.Result r = ProfitCalculator.compute(Arrays.asList(
 			trade(1, "A", true,  10, 10_000L, 1000L),
-			trade(1, "A", false, 10, 12_000L, 1100L), // +2000, +20% ROI
+			trade(1, "A", false, 10, 12_000L, 1100L),
 			trade(2, "B", false, 10, 50_000L, 2000L)  // phantom, buyTotal=0
 		));
-		// Phantom still appears in the raw flip list (so it can render in
-		// the trade history view) but does NOT contribute to summary stats.
 		assertEquals(2, r.completedFlips.size());
 		assertEquals(1, r.stats.completedFlipCount);
-		assertEquals(2_000L, r.stats.totalProfit);
+		assertEquals(1_760L, r.stats.totalProfit);
 		assertEquals(1, r.stats.winCount);
-		assertEquals(20.0, r.stats.avgRoiPct, 0.01);
+		assertEquals(17.6, r.stats.avgRoiPct, 0.01);
 		assertEquals(1, r.stats.bestFlip.itemId);
 	}
 
@@ -253,6 +268,50 @@ public class ProfitCalculatorTest
 		ProfitCalculator.Result r = ProfitCalculator.compute(Collections.singletonList(weird));
 		assertTrue(r.completedFlips.isEmpty());
 		assertTrue(r.openPositions.isEmpty());
+	}
+
+	/**
+	 * Combined-stock flip with two cost bases. User had 1 leftover from a
+	 * 5-11 buy (cost basis 21.6M ea) plus a freshly-bought 8 at 21.38M ea,
+	 * then sold all 9 together at 22.14M ea. FIFO must split into TWO
+	 * matched flips — the old leftover priced against its 21.6M basis and
+	 * the new 8 priced against their 21.38M basis — instead of a blended
+	 * average. Each slice reports its own profit and contributes
+	 * separately to win/loss counts.
+	 */
+	@Test
+	public void mixedCostBasis_sellAcrossTwoBuyLots_splitsIntoTwoFlips()
+	{
+		TradeRecord oldBuy = trade(13239, "Primordial boots", true, 1, 21_602_010L, 1000L);
+		TradeRecord newBuy = trade(13239, "Primordial boots", true, 8, 171_006_976L, 2000L);
+		TradeRecord sell   = trade(13239, "Primordial boots", false, 9, 199_285_929L, 3000L);
+
+		ProfitCalculator.Result r = ProfitCalculator.compute(Arrays.asList(oldBuy, newBuy, sell));
+
+		// Two matched flips — one per buy lot.
+		assertEquals(2, r.completedFlips.size());
+
+		// First slice: 1 item from the old lot.
+		ProfitCalculator.CompletedFlip f1 = r.completedFlips.get(0);
+		assertEquals(1, f1.quantity);
+		assertEquals(21_602_010L, f1.buyTotal);
+		// sellTotal slice: round(199_285_929 * 1/9) = 22_142_881
+		assertEquals(22_142_881L, f1.sellTotal);
+		// 2% per-item tax on 22_142_881 → 442_857
+		assertEquals(442_857L, f1.tax);
+		assertEquals(22_142_881L - 442_857L - 21_602_010L, f1.profit);
+
+		// Second slice: 8 items from the new lot, taking the remainder.
+		ProfitCalculator.CompletedFlip f2 = r.completedFlips.get(1);
+		assertEquals(8, f2.quantity);
+		assertEquals(171_006_976L, f2.buyTotal);
+		assertEquals(199_285_929L - 22_142_881L, f2.sellTotal); // 177_143_048
+		assertEquals(442_857L * 8, f2.tax);
+		assertEquals(f2.sellTotal - f2.tax - f2.buyTotal, f2.profit);
+
+		// Combined profit + matched count exposed via stats.
+		assertEquals(2, r.stats.completedFlipCount);
+		assertEquals(f1.profit + f2.profit, r.stats.totalProfit);
 	}
 
 	@Test
