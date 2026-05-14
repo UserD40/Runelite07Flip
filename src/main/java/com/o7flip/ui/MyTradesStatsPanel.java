@@ -78,10 +78,15 @@ public class MyTradesStatsPanel extends JPanel
 	 */
 	public enum Period
 	{
-		DAILY  ("Today",      0),
-		WEEKLY ("This week",  7),
-		MONTHLY("This month", 30),
-		ALL_TIME("All time", -1);
+		// Labels are intentionally terse — the period name renders inside
+		// the Filter pill on the sort bar next to Active/Recent/Margin,
+		// and "This week"/"This month"/"All time" pushed the Margin
+		// button off-screen. "Today / Week / Month / All" keeps every
+		// sub-tab visible without sacrificing clarity.
+		DAILY  ("Today", 0),
+		WEEKLY ("Week",  7),
+		MONTHLY("Month", 30),
+		ALL_TIME("All", -1);
 
 		public final String label;
 		private final int daysAgo;
@@ -103,6 +108,24 @@ public class MyTradesStatsPanel extends JPanel
 				.atStartOfDay(ZoneId.systemDefault())
 				.toInstant()
 				.toEpochMilli();
+		}
+
+		/**
+		 * Longer-form phrase used in body text — empty-state copy, tooltips —
+		 * where the terse {@link #label} ("Week", "All") would read
+		 * awkwardly inside a sentence. Keeps the pill compact while still
+		 * sounding natural in prose.
+		 */
+		public String phrase()
+		{
+			switch (this)
+			{
+				case DAILY:    return "today";
+				case WEEKLY:   return "this week";
+				case MONTHLY:  return "this month";
+				case ALL_TIME: return "all time";
+				default:       return label.toLowerCase();
+			}
 		}
 	}
 
@@ -259,7 +282,7 @@ public class MyTradesStatsPanel extends JPanel
 				+ "<font color='#888888'>%d sell%s in this window had no matching buy in tracked history<br>"
 				+ "and %s excluded from the total.</font></html>",
 				FlipItemPanel.formatGp(totalProfit),
-				period.label.toLowerCase(),
+				period.phrase(),
 				stats.phantomCount,
 				stats.phantomCount == 1 ? "" : "s",
 				stats.phantomCount == 1 ? "is" : "are"));

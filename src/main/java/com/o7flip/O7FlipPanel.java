@@ -1390,7 +1390,7 @@ public class O7FlipPanel extends PluginPanel
 		if (filtered.isEmpty())
 		{
 			myFlipsListPanel.add(emptyLabel(
-				"No trades in " + myFlipsPeriod.label.toLowerCase(),
+				"No trades " + myFlipsPeriod.phrase(),
 				"Widen the time filter or place an offer to see rows here"));
 			return;
 		}
@@ -1512,7 +1512,7 @@ public class O7FlipPanel extends PluginPanel
 		if (matched.isEmpty())
 		{
 			myFlipsListPanel.add(emptyLabel(
-				"No completed flips in " + myFlipsPeriod.label.toLowerCase(),
+				"No completed flips " + myFlipsPeriod.phrase(),
 				"Widen the time filter or close more buy/sell pairs to populate this list"));
 			return;
 		}
