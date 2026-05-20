@@ -241,7 +241,17 @@ public class MyTradesStatsPanel extends JPanel
 	public void update(ProfitCalculator.Result result, TrackerStats server, BondLedger bonds,
 		Period period, boolean membershipHidden)
 	{
-		update(result, server, bonds, period, membershipHidden, 0L);
+		update(result, server, bonds, period, membershipHidden, 0L, 0L);
+	}
+
+	/**
+	 * Compatibility shim for callers that pass activeBuyGp but not the
+	 * pre-filtered held cost basis.
+	 */
+	public void update(ProfitCalculator.Result result, TrackerStats server, BondLedger bonds,
+		Period period, boolean membershipHidden, long activeBuyGp)
+	{
+		update(result, server, bonds, period, membershipHidden, activeBuyGp, 0L);
 	}
 
 	/**
@@ -252,12 +262,21 @@ public class MyTradesStatsPanel extends JPanel
 	 * timestamps, so they can't answer "last 7 days". Bond ledger is
 	 * always lifetime (membership cost is cumulative by definition).
 	 *
-	 * {@code activeBuyGp} is the sum of gp the GE is currently holding for
-	 * pending buy offers — used together with the open-position cost basis
-	 * to render the "Invested" snapshot.
+	 * "Invested" snapshot components, both passed pre-computed by the
+	 * caller because filtering open positions against active sell offers
+	 * requires the live offer snapshot which lives on the plugin:
+	 * <ul>
+	 *   <li>{@code activeBuyGp} — gp the GE is currently holding for
+	 *       pending buy offers.</li>
+	 *   <li>{@code heldCostBasisInActiveSells} — gross cost basis of items
+	 *       currently sitting in active SELLING offers, proportional to
+	 *       qty remaining to fill. Excludes inventory hoarding and old
+	 *       open positions whose corresponding sell history fell off the
+	 *       rolling window.</li>
+	 * </ul>
 	 */
 	public void update(ProfitCalculator.Result result, TrackerStats server, BondLedger bonds,
-		Period period, boolean membershipHidden, long activeBuyGp)
+		Period period, boolean membershipHidden, long activeBuyGp, long heldCostBasisInActiveSells)
 	{
 		if (period == null) period = Period.ALL_TIME;
 		if (bonds  == null) bonds  = BondLedger.EMPTY;
@@ -362,28 +381,24 @@ public class MyTradesStatsPanel extends JPanel
 		}
 		taxValue.setForeground(Color.LIGHT_GRAY);
 
-		// "Invested" snapshot — independent of the period filter. Cost basis
-		// of open positions is haircut 2% to approximate the GE tax that'll
-		// be skimmed when the user eventually sells. Tax rate is on sell
-		// price, so this is a conservative under-estimate at break-even and
-		// becomes increasingly inaccurate at higher mark-ups — but for a
-		// "money tied up right now" read it's the right floor.
-		long heldCostBasis = 0L;
-		if (result != null && result.openPositions != null)
-		{
-			for (ProfitCalculator.OpenPosition p : result.openPositions.values())
-			{
-				if (p != null) heldCostBasis += p.remainingCostBasis;
-			}
-		}
-		long heldNet = Math.round(heldCostBasis * 0.98);
+		// "Invested" snapshot — independent of the period filter. Counts
+		// only what's tied up in live GE activity right now: gp in active
+		// buy offers + cost basis of items currently sitting in active
+		// SELL offers. Held inventory the user hasn't listed is excluded
+		// (it's an asset but not "in the GE"), as are phantom open
+		// positions where the matching sell has fallen out of the rolling
+		// 200-row history. The 2% haircut on the held side is a
+		// conservative estimate of the GE tax that'll be deducted when
+		// the active sells fill.
+		long heldGross = Math.max(0L, heldCostBasisInActiveSells);
+		long heldNet = Math.round(heldGross * 0.98);
 		long invested = Math.max(0L, activeBuyGp) + heldNet;
 		investedValue.setText(FlipItemPanel.formatGp(invested) + " gp");
 		investedValue.setForeground(invested > 0 ? Color.WHITE : Color.LIGHT_GRAY);
 		investedValue.setToolTipText(String.format(
-			"<html>%s gp in active buy offers<br>%s gp cost basis on items waiting to sell (−2%% GE tax = %s gp)</html>",
+			"<html>%s gp in active buy offers<br>%s gp cost basis of items in active sell offers (−2%% GE tax = %s gp)</html>",
 			FlipItemPanel.formatGp(Math.max(0L, activeBuyGp)),
-			FlipItemPanel.formatGp(heldCostBasis),
+			FlipItemPanel.formatGp(heldGross),
 			FlipItemPanel.formatGp(heldNet)));
 
 		applyBestRow(stats, server, preferServer);

@@ -2014,14 +2014,42 @@ public class O7FlipPanel extends PluginPanel
 
 		if (myFlipsStatsPanel != null)
 		{
+			// "Invested" components — both derived from the live offer
+			// snapshot. Active BUY gp = remaining qty × listing price across
+			// every BUYING-state offer. Held cost basis = cost basis of items
+			// currently sitting in SELLING-state offers, proportional to qty
+			// still waiting to fill. SOLD/CANCELLED states are excluded:
+			// SOLD items are already gone, CANCELLED returns them to bank.
 			long activeBuyGp = 0L;
+			java.util.Map<Integer, Integer> qtyInActiveSells = new java.util.HashMap<>();
 			if (plugin != null && plugin.activeOffers != null)
 			{
 				for (com.o7flip.model.ActiveOfferSnapshot s : plugin.activeOffers.values())
 				{
-					if (s == null || !s.isBuy()) continue;
+					if (s == null) continue;
 					int remaining = Math.max(0, s.totalQuantity - s.quantitySold);
-					activeBuyGp += (long) remaining * s.price;
+					if (remaining <= 0) continue;
+					if (s.state == net.runelite.api.GrandExchangeOfferState.BUYING)
+					{
+						activeBuyGp += (long) remaining * s.price;
+					}
+					else if (s.state == net.runelite.api.GrandExchangeOfferState.SELLING)
+					{
+						qtyInActiveSells.merge(s.itemId, remaining, Integer::sum);
+					}
+				}
+			}
+			long heldCostBasisInActiveSells = 0L;
+			if (result != null && result.openPositions != null)
+			{
+				for (com.o7flip.util.ProfitCalculator.OpenPosition op : result.openPositions.values())
+				{
+					if (op == null || op.remainingQty <= 0) continue;
+					Integer qtyInSell = qtyInActiveSells.get(op.itemId);
+					if (qtyInSell == null || qtyInSell <= 0) continue;
+					int coveredQty = Math.min(qtyInSell, op.remainingQty);
+					long perUnitCost = op.remainingCostBasis / op.remainingQty;
+					heldCostBasisInActiveSells += perUnitCost * coveredQty;
 				}
 			}
 			myFlipsStatsPanel.update(
@@ -2030,7 +2058,8 @@ public class O7FlipPanel extends PluginPanel
 				plugin != null ? plugin.bondLedger  : com.o7flip.util.BondLedger.EMPTY,
 				myFlipsPeriod,
 				plugin != null && plugin.isMembershipCostHidden(),
-				activeBuyGp);
+				activeBuyGp,
+				heldCostBasisInActiveSells);
 			if (myFlipsStatsPanel.isVisible())
 			{
 				myFlipsListPanel.add(myFlipsStatsPanel);
