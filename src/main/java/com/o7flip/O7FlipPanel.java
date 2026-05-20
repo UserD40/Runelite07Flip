@@ -37,7 +37,12 @@ import com.o7flip.ui.AlertItemPanel;
 import com.o7flip.ui.BarrowsItemPanel;
 import com.o7flip.ui.BarrowsSetPanel;
 import com.o7flip.ui.DecantItemPanel;
+import com.o7flip.ui.DipItemPanel;
 import com.o7flip.ui.DumpItemPanel;
+import com.o7flip.ui.HighAlchPanel;
+import com.o7flip.ui.ScreenerMatchPanel;
+import com.o7flip.ui.ScreenerPresetCard;
+import com.o7flip.ui.TeleTabletPanel;
 import com.o7flip.ui.FlipItemPanel;
 import com.o7flip.ui.MoonSetPanel;
 import com.o7flip.ui.SearchResultPanel;
@@ -147,6 +152,12 @@ public class O7FlipPanel extends PluginPanel
 		{"profit",          "Profit"},
 		{"roi",             "ROI %"},
 		{"recProfit",       "Recommended profit"},
+		{"dailyVolume",     "Daily volume"},
+		{"hourlyVolume",    "Hourly volume"},
+		{"buyPrice",        "Buy price (low → high)"},
+		{"buyPriceDesc",    "Buy price (high → low)"},
+		{"sellPrice",       "Sell price (low → high)"},
+		{"sellPriceDesc",   "Sell price (high → low)"},
 	};
 
 	// -------------------------------------------------------------------------
@@ -211,15 +222,51 @@ public class O7FlipPanel extends PluginPanel
 	private int flipsCapitalIdx    = 0;
 	private boolean flipsF2pOnly   = false;
 	private boolean flipsFilterPanelOpen = false;
+	/** Flips category — index into {@link #PRESETS}. 0 = "All Flips" (default). */
+	private int flipsCategoryIdx   = 0;
+	/** Min hourly volume floor — index into {@link #FLIPS_MIN_VOL_LABELS}. Default
+	 *  index 0 = "Any volume" so the headline 07Flip Score view shows high-value
+	 *  low-volume items (Amulet of rancour, Tumeken's shadow, etc.) out of the
+	 *  box. Users can opt in to 1K+/hr when ROI sorting brings penny-flips to
+	 *  the top (Bird snare, Bronze med helm, Fire rune). */
+	private int flipsMinHourlyVolIdx = 0;
+	/** Min buy-price floor — index into {@link #FLIPS_MIN_BUY_PRICE_LABELS}. Default
+	 *  index 2 = 100gp, same anti-trash reasoning. */
+	private int flipsMinBuyPriceIdx  = 2;
+	/** Tax-free toggle — shows ONLY items priced under 50gp (no GE tax). */
+	private boolean flipsTaxFreeOnly = false;
+
+	private static final int[]    FLIPS_MIN_HOURLY_VOL    = {0, 100, 500, 1_000, 5_000, 10_000};
+	private static final String[] FLIPS_MIN_VOL_LABELS    = {"Any volume", "100+/hr", "500+/hr", "1K+/hr", "5K+/hr", "10K+/hr"};
+	private static final long[]   FLIPS_MIN_BUY_PRICE     = {0, 10, 100, 1_000, 10_000, 100_000};
+	private static final String[] FLIPS_MIN_BUY_PRICE_LABELS = {"Any price", "10+", "100+", "1K+", "10K+", "100K+"};
 	private int dumpsMinProfitIdx  = 0;
 	private int dumpsPriceRangeIdx = 0;
 
 	// -------------------------------------------------------------------------
-	// Server-side sort keys for spikes / dumps
+	// Server-side sort keys for spikes / dumps / dips
 	// -------------------------------------------------------------------------
 	private String spikesSortKey = "recent";
-	private String dumpsSortKey  = "recent";
+	// v3 default: show "what should I act on right now" — the website ships
+	// max_profit + confirmed_bot=true + active dumps as its primary view.
+	private String dumpsSortKey  = "max_profit";
+	private String dipsSortKey   = "recent";
+	/** Active dip window — "1d" | "7d" | "30d". Drives the server's
+	 *  activity_window param and the per-row "↓ X% in Yd" label. */
+	private String dipsActivityWindow = "1d";
 	private boolean dumpsUseBotEndpoint = false;
+
+	// ── v3 dumps filters (server-side gates beyond minProfit / price range) ─
+	/** Floor on dump_score (0–100). 0 = no gate. */
+	private int     dumpsMinScore   = 0;
+	/** When true, only dump_status in {"dumping","due_soon"} is shown. */
+	private boolean dumpsActiveOnly = true;
+	/** v5 tier filter: "all" | "confirmed" | "likely". "all" is the default. */
+	private String  dumpsTier       = "all";
+	/** Per-tier totals from the most recent /dumps response. Drives the
+	 *  count chips on the segmented [All N] [Confirmed N] [Likely N] control. */
+	private int     dumpsConfirmedTotal = 0;
+	private int     dumpsLikelyTotal    = 0;
 
 	// -------------------------------------------------------------------------
 	// Auth state
@@ -242,6 +289,11 @@ public class O7FlipPanel extends PluginPanel
 	private List<BarrowsSet>  allBarrows = new ArrayList<>();
 	private List<MoonSet>     allMoon    = new ArrayList<>();
 	private List<DecantItem>  allDecants = new ArrayList<>();
+	private List<com.o7flip.model.DipItem> allDips = new ArrayList<>();
+	private List<com.o7flip.model.HighAlchItem> allHighAlch = new ArrayList<>();
+	private List<com.o7flip.model.TeleTablet>   allTablets  = new ArrayList<>();
+	private List<FlipItem>    allFavourites = new ArrayList<>();
+	private com.o7flip.model.ScreenerPreset.Bundle screenersBundle = new com.o7flip.model.ScreenerPreset.Bundle();
 	private List<AlertItem>   allAlerts  = new ArrayList<>();
 	private List<TradeRecord> allMyFlips = new ArrayList<>();
 
@@ -272,6 +324,7 @@ public class O7FlipPanel extends PluginPanel
 	private int flipsPage   = 0;  private int flipsTotal  = 0;
 	private int spikesPage  = 0;  private int spikesTotal = 0;
 	private int dumpsPage   = 0;  private int dumpsTotal  = 0;
+	private int dipsPage    = 0;  private int dipsTotal   = 0;
 	private int barrowsPage = 0;
 	private int moonPage    = 0;
 	private int decantPage  = 0;
@@ -282,10 +335,46 @@ public class O7FlipPanel extends PluginPanel
 	private JPanel flipsListPanel;
 	private JPanel spikesListPanel;
 	private JPanel dumpsListPanel;
+	private JPanel dipsListPanel;
+	private JPanel highAlchListPanel;
+	private JPanel tabletsListPanel;
+	private JPanel favouritesListPanel;
+	private JPanel screenersListPanel;
+	private JLabel highAlchCostLabel;
 	private JPanel barrowsListPanel;
 	private JPanel barrowsDetailPanel;
 	private JPanel barrowsTabCard;
 	private JLabel barrowsDetailTitle;
+	// Screener master-detail state. screenersTabCard is the CardLayout shell;
+	// screenersListPanel is the preset cards, screenersDetailPanel hosts one
+	// preset's matches. activeScreenerPreset == null means we're on the list.
+	private JPanel screenersTabCard;
+	private JPanel screenersDetailPanel;
+	private JLabel screenersDetailTitle;
+	// Optimizer ("Plan") sub-tab state — ephemeral, lives only while the
+	// panel is alive. Inputs are kept in fields so the user's settings
+	// survive sub-tab switches within the session.
+	private JPanel optimizerListPanel;       // results column (cards + summary)
+	private com.o7flip.model.OptimizeResult lastOptimize;
+	private int     optSlots         = 8;
+	private String  optRisk          = "medium";
+	private int     optMaxFillHours  = 4;
+	private Boolean optMembers       = null;  // null = both, true = members, false = F2P
+	private boolean optInFlight;
+	/** True after a successful build — collapses the input form to a compact
+	 *  summary pill so the allocations get the panel's full vertical space.
+	 *  Reset by the Reconfigure button. */
+	private boolean optFormCollapsed;
+	private JPanel  optInputsPanel;       // the full setup form
+	private JPanel  optCollapsedPanel;    // the compact pill shown after build
+	private JPanel  optInputsHost;        // CardLayout-style container swapping the two
+	private JLabel  optCollapsedLabel;    // text on the compact pill
+	private com.o7flip.model.ScreenerPreset activeScreenerPreset;
+	// Inner Other-tab selection — preserved across rebuildTabs so the user
+	// doesn't get snapped back to the first sub-tab whenever data refreshes
+	// or an auth-status poll triggers a rebuild. Null until the user
+	// actually clicks something inside Other.
+	private String lastOtherSubTab;
 	private JPanel moonListPanel;
 	private JPanel decantListPanel;
 	private JPanel alertsListPanel;
@@ -302,6 +391,9 @@ public class O7FlipPanel extends PluginPanel
 	// expanded 5-option sort (07Flip Score / gp-hour / profit / roi / recProfit).
 	private JButton[] spikesSortBtns;
 	private JButton[] dumpsSortBtns;
+	private JButton[] dumpsTierBtns;       // [All, Confirmed, Likely]
+	private JPanel    dumpsTierBar;        // container for the segmented control
+	private JButton[] dipsSortBtns;
 	private JButton[] barrowsSortBtns;
 	private JButton[] myFlipsSortBtns;
 	private JButton[] myFlipsMarginSortBtns;
@@ -319,6 +411,22 @@ public class O7FlipPanel extends PluginPanel
 	private JLabel  flipsPageLabel;   private JButton flipsPrev,    flipsNext;
 	private JLabel  spikesPageLabel;  private JButton spikesPrev,   spikesNext;
 	private JLabel  dumpsPageLabel;   private JButton dumpsPrev,    dumpsNext;
+	private JLabel  dipsPageLabel;    private JButton dipsPrev,     dipsNext;
+	private JLabel  highAlchPageLabel; private JButton highAlchPrev, highAlchNext;
+	private int     dipsSortIdx = 0;
+	private int     highAlchSortIdx = 0;
+	private int     highAlchPage    = 0;
+	private int     highAlchTotal   = 0;
+	private String  highAlchSortKey = "profit";
+	private int     tabletsSortIdx = 0;
+	private int     tabletsSpellbookIdx = 0;        // 0=All, 1=Standard, 2=Lunar, 3=Ancient, 4=Arceuus
+	private boolean tabletsProfitableOnly = true;
+	private JButton[] tabletsSortBtns;
+	private JButton[] highAlchSortBtns;
+	private JButton   highAlchFireStaffBtn;
+	private JButton   highAlchBryophytaBtn;
+	private boolean highAlchFireStaff;
+	private boolean highAlchBryophyta;
 	private JLabel  barrowsPageLabel; private JButton barrowsPrev,  barrowsNext;
 	private JLabel  moonPageLabel;    private JButton moonPrev,     moonNext;
 	private JLabel  decantPageLabel;  private JButton decantPrev,   decantNext;
@@ -329,6 +437,7 @@ public class O7FlipPanel extends PluginPanel
 	// Filter panel widgets — created lazily inside buildFlipsTab and stashed
 	// here so chip-removals can keep them in sync with the panel state.
 	private JComboBox<String> flipsCapitalCombo;
+	private JComboBox<String> flipsSortCombo;
 	private JComboBox<String> flipsMinProfitCombo;
 	private JButton           flipsMembersBtn;
 	private JButton           flipsF2pBtn;
@@ -417,11 +526,24 @@ public class O7FlipPanel extends PluginPanel
 
 	public void updateAuthStatus(boolean signedIn, boolean premium)
 	{
+		// Only rebuild the tab structure when the auth result actually
+		// changed. Without this guard, every 15-minute auth re-check yanks
+		// the user out of whichever tab they're sitting on — including the
+		// Plan tab mid-poll, which is the reported regression.
+		boolean wasChecked = this.authChecked;
+		boolean changed = (signedIn != this.isSignedIn) || (premium != this.isPremium);
 		this.isSignedIn  = signedIn;
 		this.isPremium   = premium;
 		this.authChecked = true;
 		updateAuthBanner();
-		rebuildTabs();
+		// First-time check (wasChecked false) ALWAYS rebuilds because the
+		// initial panel was built before auth status was known — its tab
+		// visibility may be wrong until we hear back. Subsequent checks only
+		// rebuild on actual state change.
+		if (changed || !wasChecked)
+		{
+			rebuildTabs();
+		}
 	}
 
 	private void updateAuthBanner()
@@ -691,19 +813,22 @@ public class O7FlipPanel extends PluginPanel
 
 	public String getSelectedPreset()
 	{
-		// The Flips tab now exposes only an "F2P / All" toggle, no preset
-		// dropdown. F2P uses the server's free 'f2p' preset; otherwise no
-		// preset (defaults to 'all' on the server).
-		return flipsF2pOnly ? "f2p" : "";
+		// Category dropdown in the Filter panel drives the preset. F2P toggle
+		// overrides to the server's "f2p" preset since that's stricter than
+		// any other category that might also include F2P items.
+		if (flipsF2pOnly) return "f2p";
+		int idx = Math.max(0, Math.min(flipsCategoryIdx, PRESETS.length - 1));
+		return PRESETS[idx][0];
 	}
 
 	public String getFlipsSortKey()
 	{
-		// Sort is hardcoded to flip07Score now — the panel surfaces the
-		// "Top flips by 07Flip Score" header without a sort dropdown,
-		// so anything else would be a lie. If the server adds a better
-		// score later, just change this constant.
-		return "flip07Score";
+		// Selected from the Sort dropdown in the Flips filter panel. Default
+		// (index 0) is flip07Score so the headline ranking matches the
+		// server's primary signal. Pseudo-keys like "buyPriceDesc" are
+		// expanded into sort + order by the API client.
+		int idx = Math.max(0, Math.min(flipsSortIdx, FLIPS_SORTS.length - 1));
+		return FLIPS_SORTS[idx][0];
 	}
 
 	public String getSpikesSortKey()
@@ -734,12 +859,25 @@ public class O7FlipPanel extends PluginPanel
 
 	public long getFlipsPriceMin()
 	{
-		return flipsCapitalIdx > 0 ? CAPITAL_RANGES[flipsCapitalIdx][0] : 0;
+		// Tax-free overrides any other floor — those items are <50gp.
+		if (flipsTaxFreeOnly) return 0;
+		long capitalFloor = flipsCapitalIdx > 0 ? CAPITAL_RANGES[flipsCapitalIdx][0] : 0;
+		long qualityFloor = FLIPS_MIN_BUY_PRICE[Math.max(0, Math.min(flipsMinBuyPriceIdx, FLIPS_MIN_BUY_PRICE.length - 1))];
+		return Math.max(capitalFloor, qualityFloor);
 	}
 
 	public long getFlipsPriceMax()
 	{
+		// Tax-free flips are items priced ≤ 49gp (GE tax kicks in at 50gp).
+		if (flipsTaxFreeOnly) return 49L;
 		return flipsCapitalIdx > 0 ? CAPITAL_RANGES[flipsCapitalIdx][1] : Long.MAX_VALUE;
+	}
+
+	/** Volume floor read by {@link #fFlips} for client-side filtering until
+	 *  the server gains a minHourlyVolume query param. */
+	private int getFlipsMinHourlyVolume()
+	{
+		return FLIPS_MIN_HOURLY_VOL[Math.max(0, Math.min(flipsMinHourlyVolIdx, FLIPS_MIN_HOURLY_VOL.length - 1))];
 	}
 
 	public long getDumpsMinProfit()
@@ -756,6 +894,10 @@ public class O7FlipPanel extends PluginPanel
 	{
 		return dumpsPriceRangeIdx > 0 ? PRICE_RANGES[dumpsPriceRangeIdx][1] : Long.MAX_VALUE;
 	}
+
+	public int     getDumpsMinScore()   { return dumpsMinScore; }
+	public boolean getDumpsActiveOnly() { return dumpsActiveOnly; }
+	public String  getDumpsTier()       { return dumpsTier; }
 
 	public int getFlipsPage()
 	{
@@ -797,11 +939,14 @@ public class O7FlipPanel extends PluginPanel
 		renderSpikes(filtered());
 	}
 
-	public void updateDumps(List<DumpItem> items, int total, int page)
+	public void updateDumps(com.o7flip.model.DumpItem.Response resp, int page)
 	{
-		allDumps = items;
-		dumpsTotal = total;
+		allDumps = resp.items;
+		dumpsTotal = resp.total;
 		dumpsPage = page;
+		dumpsConfirmedTotal = resp.confirmedCount;
+		dumpsLikelyTotal    = resp.likelyCount;
+		repaintDumpsTierBar();
 		renderDumps(filtered());
 	}
 
@@ -839,6 +984,119 @@ public class O7FlipPanel extends PluginPanel
 		renderDecants(filtered());
 	}
 
+	public void updateDips(List<com.o7flip.model.DipItem> items, int total, int page)
+	{
+		allDips = items;
+		dipsTotal = total;
+		dipsPage = page;
+		renderDips(filtered());
+	}
+
+	public String getDipsSortKey()
+	{
+		return dipsSortKey;
+	}
+
+	public String getDipsActivityWindow()
+	{
+		return dipsActivityWindow == null ? "1d" : dipsActivityWindow;
+	}
+
+	public int getDipsPage()
+	{
+		return dipsPage;
+	}
+
+	public void updateHighAlch(com.o7flip.model.HighAlchItem.Response resp, int page)
+	{
+		allHighAlch    = resp.items;
+		highAlchTotal  = resp.total;
+		highAlchPage   = page;
+		if (highAlchCostLabel != null)
+		{
+			highAlchCostLabel.setText("Cost / cast: " + FlipItemPanel.formatGp(resp.alchCost) + " gp"
+				+ (resp.fireStaff ? "  · Fire staff" : "")
+				+ (resp.bryophytaStaff ? "  · Bryophyta" : ""));
+		}
+		renderHighAlch(filtered());
+	}
+
+	public String getHighAlchSortKey()
+	{
+		return highAlchSortKey;
+	}
+
+	public int getHighAlchPage()
+	{
+		return highAlchPage;
+	}
+
+	public boolean getHighAlchFireStaff()
+	{
+		return highAlchFireStaff;
+	}
+
+	public boolean getHighAlchBryophyta()
+	{
+		return highAlchBryophyta;
+	}
+
+	public void updateTeleTablets(List<com.o7flip.model.TeleTablet> items)
+	{
+		allTablets = items;
+		renderTeleTablets(filtered());
+	}
+
+	public String getTabletsSortKey()
+	{
+		// Two-option sort: Volume · Profit. Volume is the default (index 0) —
+		// high-volume tablets sell fastest, so it's what most flippers want
+		// to see first. Server may not yet understand "dailyVolume"; we
+		// sort client-side too so the UI is always deterministic.
+		final String[] keys = {"dailyVolume", "profit"};
+		return keys[Math.max(0, Math.min(tabletsSortIdx, keys.length - 1))];
+	}
+
+	public String getTabletsSpellbook()
+	{
+		final String[] books = {"", "Standard", "Lunar", "Ancient", "Arceuus"};
+		return books[Math.max(0, Math.min(tabletsSpellbookIdx, books.length - 1))];
+	}
+
+	public boolean getTabletsProfitableOnly()
+	{
+		return tabletsProfitableOnly;
+	}
+
+	public void updateFavourites(List<FlipItem> items)
+	{
+		allFavourites = items;
+		renderFavourites(filtered());
+		// Insights might be showing one of these items — refresh its star.
+		if (insightsPanel != null)
+		{
+			insightsPanel.refreshFavouriteState();
+		}
+	}
+
+	/**
+	 * Called by the plugin after an optimistic favourite toggle. Repaints
+	 * any visible star icon so the user sees the new state immediately.
+	 */
+	public void onFavouriteToggled(int itemId)
+	{
+		if (insightsPanel != null)
+		{
+			insightsPanel.refreshFavouriteState();
+		}
+	}
+
+	public void updateScreeners(com.o7flip.model.ScreenerPreset.Bundle bundle)
+	{
+		screenersBundle = bundle == null ? new com.o7flip.model.ScreenerPreset.Bundle() : bundle;
+		renderScreeners();
+	}
+
 	// =========================================================================
 	// Search
 	// =========================================================================
@@ -867,6 +1125,10 @@ public class O7FlipPanel extends PluginPanel
 			renderBarrows("");
 			renderMoon("");
 			renderDecants("");
+			renderDips("");
+			renderHighAlch("");
+			renderTeleTablets("");
+			renderFavourites("");
 			renderAlerts("");
 			return;
 		}
@@ -919,10 +1181,32 @@ public class O7FlipPanel extends PluginPanel
 		return plugin == null || !plugin.isBlocked(itemId);
 	}
 
+	/**
+	 * Returns the active capital ceiling in gp, or 0 when the user has the
+	 * Capital input set to "Off". Callers use this to filter their row list
+	 * to items the user can actually afford. Zero is "no filter".
+	 */
+	private long capitalCeiling()
+	{
+		return plugin != null ? plugin.effectiveCapital() : 0L;
+	}
+
+	/** Convenience: true when {@code price} fits within the active capital. */
+	private boolean affordable(long price)
+	{
+		long ceiling = capitalCeiling();
+		return ceiling <= 0 || price <= ceiling;
+	}
+
 	private List<FlipItem>   fFlips(String q)
 	{
+		final int minVol = getFlipsMinHourlyVolume();
 		return allFlips.stream()
 			.filter(i -> notBlocked(i.itemId))
+			// Client-side volume floor — passes through any row that doesn't
+			// carry hourlyVolume yet (server still adding to /flips). Once
+			// the field lands, the filter activates without further changes.
+			.filter(i -> minVol <= 0 || i.hourlyVolume == null || i.hourlyVolume >= minVol)
 			.filter(i -> q.isEmpty() || matches(i.name, q))
 			.collect(Collectors.toList());
 	}
@@ -931,6 +1215,7 @@ public class O7FlipPanel extends PluginPanel
 	{
 		return allSpikes.stream()
 			.filter(i -> notBlocked(i.itemId))
+			.filter(i -> affordable(i.buyPrice))
 			.filter(i -> q.isEmpty() || matches(i.name, q))
 			.collect(Collectors.toList());
 	}
@@ -939,6 +1224,43 @@ public class O7FlipPanel extends PluginPanel
 	{
 		return allDumps.stream()
 			.filter(i -> notBlocked(i.itemId))
+			.filter(i -> affordable(i.buyPrice))
+			.filter(i -> q.isEmpty() || matches(i.name, q))
+			.collect(Collectors.toList());
+	}
+
+	private List<com.o7flip.model.DipItem> fDips(String q)
+	{
+		return allDips.stream()
+			.filter(i -> notBlocked(i.itemId))
+			.filter(i -> affordable(i.buyPrice))
+			.filter(i -> q.isEmpty() || matches(i.name, q))
+			.collect(Collectors.toList());
+	}
+
+	private List<com.o7flip.model.HighAlchItem> fHighAlch(String q)
+	{
+		return allHighAlch.stream()
+			.filter(i -> notBlocked(i.itemId))
+			.filter(i -> affordable(i.buyPrice))
+			.filter(i -> q.isEmpty() || matches(i.name, q))
+			.collect(Collectors.toList());
+	}
+
+	private List<com.o7flip.model.TeleTablet> fTablets(String q)
+	{
+		return allTablets.stream()
+			// Tablets gate on material cost, not buy price — the user pays for
+			// the runes + soft clay upfront and the GE proceeds come later.
+			.filter(t -> affordable(t.materialCost))
+			.filter(t -> q.isEmpty() || matches(t.name, q))
+			.collect(Collectors.toList());
+	}
+
+	private List<FlipItem> fFavourites(String q)
+	{
+		return allFavourites.stream()
+			.filter(i -> affordable(i.buyPrice))
 			.filter(i -> q.isEmpty() || matches(i.name, q))
 			.collect(Collectors.toList());
 	}
@@ -987,30 +1309,17 @@ public class O7FlipPanel extends PluginPanel
 	// Sort helpers
 	// =========================================================================
 
+	/**
+	 * Identity wrapper — kept so callers don't break, but client-side sorting
+	 * was retired when the server gained max_profit / recovery_pct /
+	 * volume_consistency / dump_pct sorts. The server already applies the
+	 * user's selected sort before responding; re-sorting client-side would
+	 * just override it with stale logic (the legacy indices don't match the
+	 * new sort options anyway).
+	 */
 	private List<DumpItem> sortDumps(List<DumpItem> items)
 	{
-		if (dumpsSortIdx == 1)  // Score
-		{
-			return items.stream().sorted(Comparator.comparingInt((DumpItem x) -> x.dumpScore).reversed())
-				.collect(Collectors.toList());
-		}
-		// Default idx == 0: Recent — smallest lastDumpHoursAgo first, nulls last
-		return items.stream().sorted((a, b) ->
-		{
-			if (a.lastDumpHoursAgo == null && b.lastDumpHoursAgo == null)
-			{
-				return 0;
-			}
-			if (a.lastDumpHoursAgo == null)
-			{
-				return 1;
-			}
-			if (b.lastDumpHoursAgo == null)
-			{
-				return -1;
-			}
-			return Double.compare(a.lastDumpHoursAgo, b.lastDumpHoursAgo);
-		}).collect(Collectors.toList());
+		return items;
 	}
 
 	private List<BarrowsSet> sortBarrows(List<BarrowsSet> items)
@@ -1027,6 +1336,35 @@ public class O7FlipPanel extends PluginPanel
 			: decantSortIdx == 2 ? Comparator.comparingInt((DecantItem x) -> x.dailyVolume)
 			: Comparator.comparingLong((DecantItem x) -> x.profitPer4dose);
 		return items.stream().sorted(c.reversed()).collect(Collectors.toList());
+	}
+
+	/**
+	 * Client-side sort for the Tablets list. The server may or may not
+	 * understand the {@code dailyVolume} sort key (it's new), so we sort
+	 * locally too — the dataset is small enough that this is essentially
+	 * free, and the UI stays deterministic regardless of server support.
+	 *
+	 * Tablets without a known daily volume sort to the bottom of the
+	 * Volume order.
+	 */
+	private List<com.o7flip.model.TeleTablet> sortTablets(List<com.o7flip.model.TeleTablet> items)
+	{
+		if (tabletsSortIdx == 1) // Profit
+		{
+			return items.stream()
+				.sorted(Comparator.comparingLong((com.o7flip.model.TeleTablet x) -> x.profit).reversed())
+				.collect(Collectors.toList());
+		}
+		// Volume (default, index 0) — desc by daily GE volume. Tablets
+		// without a known daily volume sort to the bottom.
+		return items.stream()
+			.sorted((a, b) ->
+			{
+				int va = a.dailyVolume != null ? a.dailyVolume : -1;
+				int vb = b.dailyVolume != null ? b.dailyVolume : -1;
+				return Integer.compare(vb, va);
+			})
+			.collect(Collectors.toList());
 	}
 
 	private List<AlertItem> sortAlerts(List<AlertItem> items)
@@ -1068,11 +1406,384 @@ public class O7FlipPanel extends PluginPanel
 
 	private void renderDumps(String q)
 	{
-		fillListPaged(dumpsListPanel, sortDumps(fDumps(q)), dumpsPage, dumpsTotal,
-			dumpsPageLabel, dumpsPrev, dumpsNext,
-			(item, odd) -> new DumpItemPanel(item, itemManager, odd, plugin),
-			"No dump signals", "Check back soon");
+		if (dumpsListPanel == null)
+		{
+			return;
+		}
 		hiliteFilter(dumpsSortBtns, dumpsSortIdx);
+
+		// Bypass fillListPaged — we want to group rows by dump_status with
+		// section headers, then apply the server's sort within each bucket.
+		// Pagination still drives page label + prev/next via the server's
+		// total count, so the user can paginate through the full list.
+		List<DumpItem> items = sortDumps(fDumps(q));
+		dumpsListPanel.removeAll();
+
+		int total = Math.max(dumpsTotal, items.size());
+		int pages = Math.max(1, (int) Math.ceil(total / (double) PAGE_SIZE));
+		dumpsPageLabel.setText(isSignedIn && total > 0 ? (dumpsPage + 1) + " / " + pages : "");
+		dumpsPrev.setEnabled(isSignedIn && dumpsPage > 0);
+		dumpsNext.setEnabled(isSignedIn && dumpsPage < pages - 1);
+
+		if (items.isEmpty())
+		{
+			dumpsListPanel.add(emptyLabel("No confirmed dumps right now",
+				"Bot activity is bursty — check back in an hour."));
+			dumpsListPanel.revalidate();
+			dumpsListPanel.repaint();
+			return;
+		}
+
+		// Split into four buckets — three live + stale at the bottom. Stale
+		// items don't get a status-coloured header; they go under a separate
+		// "Stale patterns" section so users learn to trust the live groups.
+		List<DumpItem> dumping  = new ArrayList<>();
+		List<DumpItem> dueSoon  = new ArrayList<>();
+		List<DumpItem> pattern  = new ArrayList<>();
+		List<DumpItem> stale    = new ArrayList<>();
+		for (DumpItem it : items)
+		{
+			if (Boolean.TRUE.equals(it.patternStale))
+			{
+				stale.add(it);
+				continue;
+			}
+			String s = it.dumpStatus == null ? "" : it.dumpStatus;
+			switch (s)
+			{
+				case "dumping":  dumping.add(it);  break;
+				case "due_soon": dueSoon.add(it);  break;
+				default:         pattern.add(it);  break;
+			}
+		}
+
+		int idx = 0;
+		idx = appendGroup("Dumping now",    new Color(0xFF5555), dumping, idx);
+		idx = appendGroup("Due soon",       new Color(0xFF981F), dueSoon, idx);
+		idx = appendGroup("Pattern",        new Color(0xAAAAAA), pattern, idx);
+		idx = appendGroup("Stale patterns", new Color(0x666666), stale,   idx);
+
+		if (!isSignedIn && total > FREE_ROWS)
+		{
+			dumpsListPanel.add(signInPrompt(total - FREE_ROWS));
+		}
+
+		dumpsListPanel.revalidate();
+		dumpsListPanel.repaint();
+	}
+
+	/**
+	 * Renders one urgency bucket: a coloured header showing "{label} (N)"
+	 * followed by the bucket's rows. Returns the running row-index so the
+	 * caller can keep the odd/even striping consistent across buckets.
+	 */
+	private int appendGroup(String label, Color headerFg, List<DumpItem> rows, int startIdx)
+	{
+		if (rows.isEmpty())
+		{
+			return startIdx;
+		}
+		JLabel header = new JLabel(label + "  (" + rows.size() + ")");
+		header.setFont(Fonts.BOLD);
+		header.setForeground(headerFg);
+		header.setBorder(new EmptyBorder(10, 12, 4, 12));
+		header.setAlignmentX(Component.LEFT_ALIGNMENT);
+		dumpsListPanel.add(header);
+
+		int idx = startIdx;
+		// Cap visible rows on free tier (matches fillListPaged's PAGE_SIZE).
+		int ps = isSignedIn ? PAGE_SIZE : FREE_ROWS;
+		for (DumpItem it : rows)
+		{
+			if (idx >= ps) break;
+			dumpsListPanel.add(new DumpItemPanel(it, itemManager, idx % 2 != 0, plugin));
+			dumpsListPanel.add(sep());
+			idx++;
+		}
+		return idx;
+	}
+
+	private void renderDips(String q)
+	{
+		if (dipsListPanel == null)
+		{
+			return;
+		}
+		final String window = getDipsActivityWindow();
+		fillListPaged(dipsListPanel, fDips(q), dipsPage, dipsTotal,
+			dipsPageLabel, dipsPrev, dipsNext,
+			(item, odd) -> new DipItemPanel(item, itemManager, odd, plugin, window),
+			"No dip signals", "Items below the " + window + " average or near ATL will appear here");
+		hiliteFilter(dipsSortBtns, dipsSortIdx);
+	}
+
+	private void renderHighAlch(String q)
+	{
+		if (highAlchListPanel == null)
+		{
+			return;
+		}
+		fillListPaged(highAlchListPanel, fHighAlch(q), highAlchPage, highAlchTotal,
+			highAlchPageLabel, highAlchPrev, highAlchNext,
+			(item, odd) -> new HighAlchPanel(item, itemManager, odd, plugin),
+			"No alch-profitable items", "Try toggling Fire staff or Bryophyta");
+		hiliteFilter(highAlchSortBtns, highAlchSortIdx);
+	}
+
+	private void renderTeleTablets(String q)
+	{
+		if (tabletsListPanel == null)
+		{
+			return;
+		}
+		// Tablets endpoint isn't paginated and the dataset is tiny — render in
+		// a single client-side pass. Sort is applied here (not server-side)
+		// so "Volume" works even before the server supports sort=dailyVolume.
+		tabletsListPanel.removeAll();
+		List<com.o7flip.model.TeleTablet> shown = sortTablets(fTablets(q));
+		if (shown.isEmpty())
+		{
+			tabletsListPanel.add(emptyLabel("No tablets to craft", "Try a different spellbook or turn off 'Profitable only'"));
+		}
+		else
+		{
+			for (int i = 0; i < shown.size(); i++)
+			{
+				tabletsListPanel.add(new TeleTabletPanel(shown.get(i), itemManager, i % 2 != 0, plugin));
+				tabletsListPanel.add(sep());
+			}
+		}
+		tabletsListPanel.revalidate();
+		tabletsListPanel.repaint();
+		hiliteFilter(tabletsSortBtns, tabletsSortIdx);
+	}
+
+	private void renderFavourites(String q)
+	{
+		if (favouritesListPanel == null)
+		{
+			return;
+		}
+		favouritesListPanel.removeAll();
+		// Favourites only need an API key — premium isn't required. Earlier
+		// the gate used isSignedIn which conflates apiKey-present with
+		// premium-status, so non-premium users with a valid key were getting
+		// a "Sign in required" placeholder even though the server would have
+		// happily returned their favourites.
+		boolean hasKey = config != null && config.apiKey() != null && !config.apiKey().trim().isEmpty();
+		if (!hasKey)
+		{
+			favouritesListPanel.add(emptyLabel("API key required",
+				"Paste your 07flip.com API key into the plugin config to use favourites."));
+		}
+		else
+		{
+			List<FlipItem> shown = fFavourites(q);
+			if (shown.isEmpty())
+			{
+				favouritesListPanel.add(emptyLabel("No favourites yet",
+					"Tap the ★ on any item's Insights tab to add it here."));
+			}
+			else
+			{
+				for (int i = 0; i < shown.size(); i++)
+				{
+					favouritesListPanel.add(new FlipItemPanel(shown.get(i), itemManager, i % 2 != 0, plugin));
+					favouritesListPanel.add(sep());
+				}
+			}
+		}
+		favouritesListPanel.revalidate();
+		favouritesListPanel.repaint();
+	}
+
+	private void renderScreeners()
+	{
+		// Master-detail dispatcher: list of preset cards by default, drill-down
+		// for one preset's matches when {@link #activeScreenerPreset} is set.
+		if (screenersTabCard == null)
+		{
+			return;
+		}
+		if (activeScreenerPreset != null)
+		{
+			renderScreenersDetail(activeScreenerPreset);
+		}
+		else
+		{
+			renderScreenersList();
+		}
+	}
+
+	/** Renders the list view — custom presets on top, system below. */
+	private void renderScreenersList()
+	{
+		if (screenersListPanel == null)
+		{
+			return;
+		}
+		screenersListPanel.removeAll();
+
+		List<com.o7flip.model.ScreenerPreset> system = screenersBundle.systemPresets;
+		List<com.o7flip.model.ScreenerPreset> user   = screenersBundle.userPresets;
+
+		// ── Custom screeners — shown FIRST per UX ask ────────────────────────
+		screenersListPanel.add(buildScreenerSectionHeader("My screeners"));
+		if (!screenersBundle.authenticated)
+		{
+			screenersListPanel.add(emptyLabel("Sign in required",
+				"Add an API key in plugin config to see your custom screeners."));
+		}
+		else if (user == null || user.isEmpty())
+		{
+			// Empty-state CTA — links to the website's screener editor.
+			screenersListPanel.add(ScreenerPresetCard.buildCreateOwnCard(
+				() -> openUrl("https://07flip.com/alerts?tab=screener")));
+		}
+		else
+		{
+			for (int i = 0; i < user.size(); i++)
+			{
+				final com.o7flip.model.ScreenerPreset p = user.get(i);
+				screenersListPanel.add(new ScreenerPresetCard(p, i % 2 != 0, this::onScreenerPresetClicked));
+				screenersListPanel.add(sep());
+			}
+		}
+
+		// ── System screeners — the 5 defaults ────────────────────────────────
+		screenersListPanel.add(buildScreenerSectionHeader("System screeners"));
+		if (system == null || system.isEmpty())
+		{
+			screenersListPanel.add(emptyLabel("Screeners loading…",
+				"Indicators update hourly. Pull-to-refresh isn't needed."));
+		}
+		else
+		{
+			for (int i = 0; i < system.size(); i++)
+			{
+				final com.o7flip.model.ScreenerPreset p = system.get(i);
+				screenersListPanel.add(new ScreenerPresetCard(p, i % 2 != 0, this::onScreenerPresetClicked));
+				screenersListPanel.add(sep());
+			}
+		}
+
+		screenersListPanel.revalidate();
+		screenersListPanel.repaint();
+		((CardLayout) screenersTabCard.getLayout()).show(screenersTabCard, "list");
+	}
+
+	/** Renders the detail view for a single preset's matches. */
+	private void renderScreenersDetail(com.o7flip.model.ScreenerPreset preset)
+	{
+		if (screenersDetailPanel == null || screenersDetailTitle == null)
+		{
+			return;
+		}
+		screenersDetailTitle.setText(preset.name);
+		screenersDetailPanel.removeAll();
+
+		// Preset description strip at the top of the detail view.
+		if (preset.description != null && !preset.description.isEmpty())
+		{
+			JLabel desc = new JLabel("<html><font color='#888888'>" + escapeHtml(preset.description) + "</font></html>");
+			desc.setFont(Fonts.SM);
+			desc.setBorder(new EmptyBorder(8, 12, 8, 12));
+			desc.setAlignmentX(Component.LEFT_ALIGNMENT);
+			screenersDetailPanel.add(desc);
+			screenersDetailPanel.add(sep());
+		}
+
+		if (preset.premiumRequired)
+		{
+			JLabel locked = new JLabel("<html><b>Matches are premium-only.</b><br>"
+				+ "<font color='#888888'>Upgrade on 07flip.com to see which items hit this preset.</font></html>");
+			locked.setFont(Fonts.SM);
+			locked.setBorder(new EmptyBorder(12, 12, 8, 12));
+			locked.setAlignmentX(Component.LEFT_ALIGNMENT);
+			screenersDetailPanel.add(locked);
+
+			JButton upgrade = pillButton("Unlock with Premium");
+			upgrade.setBackground(ORANGE);
+			upgrade.setForeground(Color.BLACK);
+			upgrade.setAlignmentX(Component.LEFT_ALIGNMENT);
+			upgrade.addActionListener(e -> openUrl(preset.upgradeUrl != null ? preset.upgradeUrl : "https://07flip.com/premium"));
+			JPanel wrap = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 4));
+			wrap.setBackground(ColorScheme.DARK_GRAY_COLOR);
+			wrap.setBorder(new EmptyBorder(0, 12, 12, 12));
+			wrap.setAlignmentX(Component.LEFT_ALIGNMENT);
+			wrap.add(upgrade);
+			screenersDetailPanel.add(wrap);
+		}
+		else if (preset.matches == null || preset.matches.isEmpty())
+		{
+			screenersDetailPanel.add(emptyLabel("No items match",
+				"This preset has no current hits. Check back later."));
+		}
+		else
+		{
+			// Enrich matches with market data from cached Flips before render
+			// so the rows show price + score + margin when available.
+			enrichScreenerMatches(preset.matches);
+			for (int i = 0; i < preset.matches.size(); i++)
+			{
+				screenersDetailPanel.add(new ScreenerMatchPanel(
+					preset.matches.get(i), itemManager, i % 2 != 0, plugin));
+				screenersDetailPanel.add(sep());
+			}
+		}
+
+		screenersDetailPanel.revalidate();
+		screenersDetailPanel.repaint();
+		((CardLayout) screenersTabCard.getLayout()).show(screenersTabCard, "detail");
+	}
+
+	/**
+	 * Fills in {@link com.o7flip.model.ScreenerMatch#buyPrice}, sellPrice,
+	 * profit, roiPct and flip07Score from the plugin's cached Flips list
+	 * when the server didn't ship them. Best-effort — items the user
+	 * doesn't have cached data for stay at null and render as "—".
+	 */
+	private void enrichScreenerMatches(List<com.o7flip.model.ScreenerMatch> matches)
+	{
+		if (plugin == null || matches == null || matches.isEmpty()) return;
+		java.util.Map<Integer, FlipItem> byId = new java.util.HashMap<>();
+		for (FlipItem f : plugin.lastFlips) byId.put(f.itemId, f);
+		// Also fall back to our locally-rendered Flips list (in-memory in panel)
+		// which may have items the plugin's lastFlips no longer caches.
+		for (FlipItem f : allFlips) byId.putIfAbsent(f.itemId, f);
+		for (FlipItem f : allFavourites) byId.putIfAbsent(f.itemId, f);
+		for (com.o7flip.model.ScreenerMatch m : matches)
+		{
+			FlipItem f = byId.get(m.itemId);
+			if (f == null) continue;
+			if (m.buyPrice    == null) m.buyPrice    = f.buyPrice;
+			if (m.sellPrice   == null) m.sellPrice   = f.sellPrice;
+			if (m.profit      == null) m.profit      = f.profit;
+			if (m.roiPct      == null) m.roiPct      = f.roiPct;
+			if (m.flip07Score == null) m.flip07Score = f.flip07Score;
+		}
+	}
+
+	private void onScreenerPresetClicked(com.o7flip.model.ScreenerPreset preset)
+	{
+		// Premium-locked rows route to the upgrade URL instead of detail.
+		if (preset.premiumRequired)
+		{
+			openUrl(preset.upgradeUrl != null ? preset.upgradeUrl : "https://07flip.com/premium");
+			return;
+		}
+		activeScreenerPreset = preset;
+		renderScreenersDetail(preset);
+	}
+
+	private JComponent buildScreenerSectionHeader(String title)
+	{
+		JLabel lbl = new JLabel(title);
+		lbl.setFont(Fonts.BOLD);
+		lbl.setForeground(ORANGE);
+		lbl.setBorder(new EmptyBorder(10, 10, 4, 10));
+		lbl.setAlignmentX(Component.LEFT_ALIGNMENT);
+		return lbl;
 	}
 
 	private void renderBarrows(String q)
@@ -1303,12 +2014,23 @@ public class O7FlipPanel extends PluginPanel
 
 		if (myFlipsStatsPanel != null)
 		{
+			long activeBuyGp = 0L;
+			if (plugin != null && plugin.activeOffers != null)
+			{
+				for (com.o7flip.model.ActiveOfferSnapshot s : plugin.activeOffers.values())
+				{
+					if (s == null || !s.isBuy()) continue;
+					int remaining = Math.max(0, s.totalQuantity - s.quantitySold);
+					activeBuyGp += (long) remaining * s.price;
+				}
+			}
 			myFlipsStatsPanel.update(
 				result,
 				plugin != null ? plugin.trackerStats : null,
 				plugin != null ? plugin.bondLedger  : com.o7flip.util.BondLedger.EMPTY,
 				myFlipsPeriod,
-				plugin != null && plugin.isMembershipCostHidden());
+				plugin != null && plugin.isMembershipCostHidden(),
+				activeBuyGp);
 			if (myFlipsStatsPanel.isVisible())
 			{
 				myFlipsListPanel.add(myFlipsStatsPanel);
@@ -1854,8 +2576,39 @@ public class O7FlipPanel extends PluginPanel
 		statusLabel.setFont(Fonts.SM);
 		statusLabel.setForeground(new Color(0xFFAA00));
 
+		// Capital indicator chip — lives in the header's right cluster
+		// alongside ● Live. Compact pen icon: orange when capital is set,
+		// muted grey when not. Click toggles the slim inline editor below
+		// (which only renders when toggled on, so the header doesn't burn a
+		// whole row when capital isn't being edited).
+		capitalHeaderChip = new JLabel("✎");
+		capitalHeaderChip.setFont(capitalHeaderChip.getFont().deriveFont(15f));
+		capitalHeaderChip.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+		capitalHeaderChip.setBorder(new EmptyBorder(0, 4, 0, 4));
+		updateCapitalHeaderChip();
+		capitalHeaderChip.addMouseListener(new MouseAdapter()
+		{
+			@Override
+			public void mousePressed(MouseEvent e)
+			{
+				capitalExpanded = !capitalExpanded;
+				// Opening the editor from a freshly-installed state should
+				// land the user in MANUAL mode so typing works immediately.
+				if (capitalExpanded && plugin != null
+					&& currentCapitalMode() != O7FlipConfig.CapitalMode.MANUAL)
+				{
+					plugin.persistCapitalMode(O7FlipConfig.CapitalMode.MANUAL);
+				}
+				renderCapitalRow();
+				if (capitalExpanded) focusCapitalFieldIfEditable();
+			}
+			@Override public void mouseEntered(MouseEvent e) { repaintCapitalChipHover(true); }
+			@Override public void mouseExited(MouseEvent e)  { repaintCapitalChipHover(false); }
+		});
+
 		JPanel rightCluster = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.RIGHT, 8, 0));
 		rightCluster.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+		rightCluster.add(capitalHeaderChip);
 		rightCluster.add(statusLabel);
 
 		header.add(title,        BorderLayout.WEST);
@@ -1956,12 +2709,396 @@ public class O7FlipPanel extends PluginPanel
 		searchRow.setBorder(new EmptyBorder(0, 12, 8, 12));
 		searchRow.add(searchBox, BorderLayout.CENTER);
 
+		JPanel capitalRow = buildCapitalRow();
+
+		JPanel topInner = new JPanel(new BorderLayout());
+		topInner.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+		topInner.add(capitalRow, BorderLayout.NORTH);
+		topInner.add(searchRow,  BorderLayout.SOUTH);
+
 		JPanel top = new JPanel(new BorderLayout());
 		top.setBackground(ColorScheme.DARKER_GRAY_COLOR);
 		top.setBorder(new MatteBorder(0, 0, 1, 0, new Color(0x3A3A3A)));
 		top.add(header,    BorderLayout.NORTH);
-		top.add(searchRow, BorderLayout.SOUTH);
+		top.add(topInner,  BorderLayout.SOUTH);
 		return top;
+	}
+
+	// =========================================================================
+	// Capital input — drives the cross-tab affordability filter (cashStack /
+	// affordable_qty params on /flips, client-side filter on other feeds).
+	//
+	// The row collapses to a compact chip by default so the input stays out
+	// of the way; clicking the chip expands a full editor. A lock toggle
+	// keeps a saved value safe from accidental edits, and completed GE
+	// trades adjust the manual value automatically (see plugin's
+	// adjustCapitalForTrade).
+	// =========================================================================
+
+	private JPanel     capitalContainer;   // the swappable shell — collapsed or expanded
+	private JTextField capitalField;
+	private JLabel     capitalReadout;
+	private JLabel     capitalHeaderChip;  // small pen icon in the title bar
+	private boolean    capitalExpanded;    // ephemeral — UI state, not persisted
+
+	private JPanel buildCapitalRow()
+	{
+		capitalContainer = new JPanel(new BorderLayout());
+		capitalContainer.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+		capitalContainer.setBorder(new EmptyBorder(0, 12, 6, 12));
+		renderCapitalRow();
+		return capitalContainer;
+	}
+
+	/**
+	 * Renders either the collapsed chip or the expanded editor into
+	 * {@link #capitalContainer}, depending on {@link #capitalExpanded}.
+	 * Called whenever the user toggles, types, or the mode changes.
+	 */
+	private void renderCapitalRow()
+	{
+		if (capitalContainer == null) return;
+		capitalContainer.removeAll();
+		// Editor only renders when the header chip has been toggled on. When
+		// collapsed, the container is invisible AND has zero preferred height,
+		// so no empty row appears at the top of the plugin.
+		if (capitalExpanded)
+		{
+			capitalContainer.add(buildCapitalExpanded(), BorderLayout.CENTER);
+			capitalContainer.setVisible(true);
+		}
+		else
+		{
+			capitalContainer.setVisible(false);
+		}
+		capitalContainer.revalidate();
+		capitalContainer.repaint();
+		updateCapitalHeaderChip();
+	}
+
+	/**
+	 * Reflects the current capital state into the small header chip. Orange
+	 * pen when a value is set; muted grey when not. The number itself stays
+	 * off the always-visible surface — the user opens the editor to see it.
+	 */
+	private void updateCapitalHeaderChip()
+	{
+		if (capitalHeaderChip == null) return;
+		long value = displayedCapital();
+		boolean active = value > 0;
+		capitalHeaderChip.setForeground(active ? ORANGE : new Color(0x666666));
+		capitalHeaderChip.setToolTipText(active
+			? "Capital: " + formatCapital(value) + " · click to edit"
+			: "Set capital — items filter to what's affordable");
+	}
+
+	/** Subtle hover styling on the header chip — slightly brighter on hover. */
+	private void repaintCapitalChipHover(boolean hovering)
+	{
+		if (capitalHeaderChip == null) return;
+		long value = displayedCapital();
+		boolean active = value > 0;
+		if (hovering)
+		{
+			capitalHeaderChip.setForeground(active ? Color.WHITE : new Color(0xAAAAAA));
+		}
+		else
+		{
+			capitalHeaderChip.setForeground(active ? ORANGE : new Color(0x666666));
+		}
+	}
+
+	private JComponent buildCapitalExpanded()
+	{
+		JPanel outer = new JPanel();
+		outer.setLayout(new BoxLayout(outer, BoxLayout.Y_AXIS));
+		outer.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+
+		JLabel label = new JLabel("Capital");
+		label.setFont(Fonts.SM);
+		label.setForeground(new Color(0xAAAAAA));
+
+		// Editable field — always typeable in this state. Pressing Enter or
+		// blurring saves; the save button does the same, just as an explicit
+		// affordance.
+		capitalField = new JTextField(formatCapital(displayedCapital()));
+		capitalField.setBackground(new Color(0x1E1E1E));
+		capitalField.setForeground(Color.WHITE);
+		capitalField.setCaretColor(Color.WHITE);
+		capitalField.setFont(Fonts.SM);
+		capitalField.setBorder(BorderFactory.createCompoundBorder(
+			new MatteBorder(1, 1, 1, 1, new Color(0x4A4A4A)),
+			new EmptyBorder(4, 8, 4, 8)));
+		capitalField.setEditable(true);
+		capitalField.setEnabled(true);
+		capitalField.addActionListener(e -> saveCapitalAndCollapse());
+		capitalField.addFocusListener(new java.awt.event.FocusAdapter()
+		{
+			@Override
+			public void focusLost(java.awt.event.FocusEvent e)
+			{
+				// Focus leaving the field commits the current text but keeps
+				// the editor open. Explicit save (or Enter) collapses.
+				commitManualCapital();
+			}
+		});
+
+		// Save button — floppy disk. Click commits + collapses.
+		JButton saveBtn = pillButton("💾");
+		saveBtn.setFont(saveBtn.getFont().deriveFont(15f));
+		saveBtn.setBackground(ORANGE);
+		saveBtn.setForeground(Color.BLACK);
+		saveBtn.setToolTipText("Save capital");
+		saveBtn.addActionListener(e -> saveCapitalAndCollapse());
+
+		capitalReadout = new JLabel("");
+		capitalReadout.setFont(Fonts.SM);
+		capitalReadout.setForeground(new Color(0x888888));
+		capitalReadout.setBorder(new EmptyBorder(3, 2, 0, 0));
+		capitalReadout.setAlignmentX(Component.LEFT_ALIGNMENT);
+		updateCapitalReadout();
+
+		// Top row: just the label (left). The field + save sit on row 2
+		// to give the input the full width it deserves at panel sizes.
+		JPanel top = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 4, 0));
+		top.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+		top.add(label);
+		top.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+		JPanel fieldRow = new JPanel(new BorderLayout(6, 0));
+		fieldRow.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+		fieldRow.setBorder(new EmptyBorder(4, 0, 0, 0));
+		fieldRow.add(capitalField, BorderLayout.CENTER);
+		fieldRow.add(saveBtn,      BorderLayout.EAST);
+		fieldRow.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+		outer.add(top);
+		outer.add(fieldRow);
+		outer.add(capitalReadout);
+		return outer;
+	}
+
+	/**
+	 * Commits the field text + collapses the editor. Called by both the
+	 * floppy-disk save button and the field's Enter key — the single
+	 * "explicit save" path. Bad input silently reverts to the last saved
+	 * value (matches the field's focus-lost behaviour).
+	 */
+	private void saveCapitalAndCollapse()
+	{
+		commitManualCapital();
+		capitalExpanded = false;
+		renderCapitalRow();
+	}
+
+	private O7FlipConfig.CapitalMode currentCapitalMode()
+	{
+		O7FlipConfig.CapitalMode mode = config != null ? config.capitalMode() : O7FlipConfig.CapitalMode.OFF;
+		// Mirror the plugin's legacy migration so the UI label reflects what's
+		// actually being applied (Auto when usePersonalisedFlips is on but
+		// the new mode hasn't been touched).
+		if (mode == O7FlipConfig.CapitalMode.OFF && config != null && config.usePersonalisedFlips())
+		{
+			return O7FlipConfig.CapitalMode.AUTO;
+		}
+		return mode;
+	}
+
+	/**
+	 * Defers a focus + select-all to {@link SwingUtilities#invokeLater} so the
+	 * field has time to be laid out by the EDT before we try to grab focus.
+	 * No-op when the field isn't currently editable.
+	 */
+	private void focusCapitalFieldIfEditable()
+	{
+		if (capitalField == null || !capitalField.isEditable())
+		{
+			return;
+		}
+		SwingUtilities.invokeLater(() ->
+		{
+			capitalField.requestFocusInWindow();
+			capitalField.selectAll();
+		});
+	}
+
+	private void commitManualCapital()
+	{
+		if (capitalField == null)
+		{
+			return;
+		}
+		long parsed = parseCapital(capitalField.getText());
+		if (parsed < 0)
+		{
+			// Bad input — revert to last saved value rather than nag the user.
+			capitalField.setText(formatCapital(displayedCapital()));
+			return;
+		}
+		if (plugin != null)
+		{
+			// Saving any value implicitly puts us in MANUAL mode (the only
+			// surfaced mode now). Legacy users on AUTO get migrated the
+			// moment they save their first value.
+			if (currentCapitalMode() != O7FlipConfig.CapitalMode.MANUAL)
+			{
+				plugin.persistCapitalMode(O7FlipConfig.CapitalMode.MANUAL);
+			}
+			plugin.persistCapitalManual(parsed);
+		}
+		capitalField.setText(formatCapital(parsed));
+		updateCapitalReadout();
+		if (plugin != null)
+		{
+			plugin.onCapitalChanged();
+		}
+	}
+
+	/** Called by the plugin after a GE fill auto-adjusts the manual capital,
+	 *  or when active-offer state changes (which shifts deployed/free). */
+	public void onCapitalAutoAdjusted()
+	{
+		if (capitalField != null && currentCapitalMode() != O7FlipConfig.CapitalMode.OFF)
+		{
+			capitalField.setText(formatCapital(displayedCapital()));
+		}
+		updateCapitalReadout();
+		// Also refresh collapsed view if that's what's showing.
+		if (!capitalExpanded)
+		{
+			renderCapitalRow();
+		}
+		// A trade / offer change also moves what the user can afford — re-
+		// apply the filter across every tab that's gated on capital.
+		rerenderCapitalAffectedTabs();
+	}
+
+	/**
+	 * Re-renders every tab whose row list is gated by capital. Cheap —
+	 * uses the data already in memory, no refetch. Called when the user
+	 * changes the Capital input or when a trade auto-adjusts it.
+	 */
+	public void rerenderCapitalAffectedTabs()
+	{
+		String q = filtered();
+		renderDumps(q);
+		renderSpikes(q);
+		renderDips(q);
+		renderHighAlch(q);
+		renderTeleTablets(q);
+		renderFavourites(q);
+	}
+
+	/** Pushes a fresh inventory-coin reading into the Auto-mode display. */
+	public void onInventoryCoinsChanged()
+	{
+		if (currentCapitalMode() == O7FlipConfig.CapitalMode.AUTO && capitalField != null)
+		{
+			capitalField.setText(formatCapital(displayedCapital()));
+			updateCapitalReadout();
+		}
+	}
+
+	/**
+	 * The "headline" capital figure displayed in the field — the user's total
+	 * bankroll (free + deployed). The affordability filter uses {@code
+	 * effectiveCapital()} which is the bucketed FREE figure.
+	 */
+	private long displayedCapital()
+	{
+		if (plugin != null && currentCapitalMode() != O7FlipConfig.CapitalMode.OFF)
+		{
+			return plugin.totalCapital();
+		}
+		return 0L;
+	}
+
+	private void updateCapitalReadout()
+	{
+		if (capitalReadout == null) return;
+		O7FlipConfig.CapitalMode mode = currentCapitalMode();
+		if (mode == O7FlipConfig.CapitalMode.OFF)
+		{
+			capitalReadout.setText("");
+			return;
+		}
+		long deployed = plugin != null ? plugin.deployedCapital() : 0L;
+		long total    = plugin != null ? plugin.totalCapital()    : 0L;
+
+		// Always-on diagnostic: shows the exact GP value the abbreviated
+		// input parsed to (e.g. "100M" → "100,000,000 gp"). Removes the
+		// ambiguity the user reported around suffix parsing.
+		StringBuilder html = new StringBuilder("<html>");
+		if (total > 0)
+		{
+			html.append("<font color='#888888'>= ")
+				.append(String.format("%,d", total)).append(" gp</font>");
+		}
+		if (deployed > 0)
+		{
+			long free = plugin != null ? plugin.freeCapital() : 0L;
+			if (total > 0) html.append("  ");
+			html.append("<font color='#00C27A'>Free ").append(formatCapital(free)).append("</font>")
+				.append(" <font color='#888888'>· GE ").append(formatCapital(deployed)).append("</font>");
+		}
+		else if (mode == O7FlipConfig.CapitalMode.AUTO && total > 0)
+		{
+			html.append("  <font color='#888888'>(inventory)</font>");
+		}
+		html.append("</html>");
+		capitalReadout.setText(html.toString());
+	}
+
+	/**
+	 * Parses an input like {@code "50m"}, {@code "1.5B"} or {@code "250000"}
+	 * into a gp amount. Returns -1 on unparseable input so callers can
+	 * silently revert without a popup. Empty input is treated as 0.
+	 */
+	static long parseCapital(String raw)
+	{
+		if (raw == null) return -1;
+		String s = raw.trim().toLowerCase().replace(",", "").replace(" ", "").replace("gp", "");
+		if (s.isEmpty()) return 0L;
+		long mult = 1L;
+		char last = s.charAt(s.length() - 1);
+		if (last == 'k')      { mult = 1_000L;             s = s.substring(0, s.length() - 1); }
+		else if (last == 'm') { mult = 1_000_000L;         s = s.substring(0, s.length() - 1); }
+		else if (last == 'b') { mult = 1_000_000_000L;     s = s.substring(0, s.length() - 1); }
+		try
+		{
+			double n = Double.parseDouble(s);
+			if (n < 0) return -1;
+			return (long) (n * mult);
+		}
+		catch (NumberFormatException e)
+		{
+			return -1;
+		}
+	}
+
+	private static String formatCapital(long gp)
+	{
+		if (gp <= 0) return "0";
+		if (gp >= 1_000_000_000L) return trimZeros(String.format("%.2f", gp / 1_000_000_000.0)) + "B";
+		if (gp >= 1_000_000L)     return trimZeros(String.format("%.2f", gp / 1_000_000.0))     + "M";
+		if (gp >= 1_000L)         return trimZeros(String.format("%.1f", gp / 1_000.0))         + "K";
+		return String.valueOf(gp);
+	}
+
+	private static String trimZeros(String s)
+	{
+		int dot = s.indexOf('.');
+		if (dot < 0) return s;
+		int end = s.length();
+		while (end > dot && s.charAt(end - 1) == '0') end--;
+		if (end > dot && s.charAt(end - 1) == '.') end--;
+		return s.substring(0, end);
+	}
+
+	private static String escapeHtml(String s)
+	{
+		if (s == null) return "";
+		return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
 	}
 
 	// =========================================================================
@@ -1977,60 +3114,147 @@ public class O7FlipPanel extends PluginPanel
 		switch (name)
 		{
 			case "Flips":     return config.showFlips();
-			case "Dumps":     return config.showDumps();
 			case "Item":      return config.showInsights();
-			case "Alerts":    return config.showAlerts();
-			case "Moons":     return config.showMoon()    && isSignedIn;
-			case "Barrows":   return config.showBarrows() && isSignedIn;
-			case "Decant":    return config.showDecant();
-			case "My Trades": return config.showMyFlips();
+			case "Trades":    return config.showMyFlips();
+			// "Other" hosts anything from the customisable pool that the user
+			// didn't promote to Row 1. Shown whenever at least one sub-feature
+			// is both enabled AND not currently in the top row.
+			case "Other":     return otherTabHasContent();
+			// Movable pool — same visibility predicates whether they're sitting
+			// on Row 1 (top-level) or inside Other (sub-tab).
+			case "Dumps":
+			case "Alerts":
+			case "Moons":
+			case "Barrows":
+			case "Dips":
+			case "Favs":
+			case "Alch":
+			case "Tablets":
+			case "Screener":
+			case "Decant":
+			case "Plan":
+				return subFeatureEnabled(name);
 			default:          return false;
 		}
 	}
 
-	/** Default left-to-right order of the panel tabs. Mirrors the order
-	 *  this plugin shipped with before the reorder feature was added.
-	 *  Used by {@link com.o7flip.ui.TabOrderDialog} as the "reset" value. */
-	public static final List<String> DEFAULT_TAB_ORDER = java.util.Arrays.asList(
-		// Row 1 (4 tabs)
-		"Flips", "My Trades", "Alerts", "Dumps",
-		// Row 2 (4 tabs)
-		"Moons", "Barrows", "Decant", "Item"
-	);
+	/** Returns true when the Other tab has at least one sub-tab to host. */
+	private boolean otherTabHasContent()
+	{
+		if (config == null) return false;
+		for (String name : MOVABLE_POOL)
+		{
+			if (resolveTopRow().contains(name)) continue;
+			if (subFeatureEnabled(name)) return true;
+		}
+		return false;
+	}
 
 	/**
-	 * Resolves the user's preferred tab order from config, falling back to
-	 * the default order. Any name in config that doesn't match a known tab
-	 * is dropped; any default tab name not listed in config is appended at
-	 * the end so newly-added tabs naturally show without requiring config
-	 * migration.
+	 * Pool of "movable" tabs that can sit either on Row 1 (top, customisable)
+	 * or inside the Other tab on Row 2. Bottom-row tabs (Flips / My Trades /
+	 * Item / Other) are NOT in this pool — they're fixed.
+	 *
+	 * Order here only matters as the default ordering inside the Customise
+	 * dialog; the user's saved {@code topRowTabs} drives the actual layout.
 	 */
-	public List<String> resolveTabOrder()
+	public static final List<String> MOVABLE_POOL = java.util.Arrays.asList(
+		"Moons", "Barrows", "Dumps", "Alerts",
+		"Dips", "Favs", "Alch", "Tablets", "Screener", "Decant", "Plan"
+	);
+
+	/** Default top-row pick when {@code topRowTabs} is empty. */
+	public static final List<String> DEFAULT_TOP_ROW = java.util.Arrays.asList(
+		"Moons", "Barrows", "Dumps", "Alerts"
+	);
+
+	/** Fixed Row 2 — non-customisable, non-reorderable. */
+	public static final List<String> FIXED_BOTTOM_ROW = java.util.Arrays.asList(
+		"Flips", "Trades", "Item", "Other"
+	);
+
+	/** Default order = Row 1 + Row 2. Kept for the legacy {@code tabOrder}
+	 *  config and the TabOrderDialog reset target. */
+	public static final List<String> DEFAULT_TAB_ORDER;
+	static
 	{
-		String raw = config != null ? config.tabOrder() : "";
+		List<String> combined = new ArrayList<>(8);
+		combined.addAll(DEFAULT_TOP_ROW);
+		combined.addAll(FIXED_BOTTOM_ROW);
+		DEFAULT_TAB_ORDER = java.util.Collections.unmodifiableList(combined);
+	}
+
+	/**
+	 * Parses {@code topRowTabs} into the user's chosen Row 1 selection.
+	 * Returns at most 4 names, all of which are members of {@link #MOVABLE_POOL}.
+	 * Falls back to {@link #DEFAULT_TOP_ROW} when the config is empty or
+	 * malformed.
+	 */
+	public List<String> resolveTopRow()
+	{
+		String raw = config != null ? config.topRowTabs() : "";
 		if (raw == null || raw.trim().isEmpty())
 		{
-			return new ArrayList<>(DEFAULT_TAB_ORDER);
+			return new ArrayList<>(DEFAULT_TOP_ROW);
 		}
-		List<String> result = new ArrayList<>();
+		List<String> out = new ArrayList<>(4);
 		java.util.Set<String> seen = new java.util.HashSet<>();
 		for (String token : raw.split(","))
 		{
 			String name = token.trim();
-			if (DEFAULT_TAB_ORDER.contains(name) && !seen.contains(name))
+			// Migration: the old "Screen" short label is now "Screener" — map
+			// any saved config entry transparently so users don't lose a slot.
+			if ("Screen".equals(name)) name = "Screener";
+			if (MOVABLE_POOL.contains(name) && seen.add(name))
 			{
-				result.add(name);
-				seen.add(name);
+				out.add(name);
+				if (out.size() >= 4) break;
 			}
 		}
-		for (String name : DEFAULT_TAB_ORDER)
+		return out.isEmpty() ? new ArrayList<>(DEFAULT_TOP_ROW) : out;
+	}
+
+	/** True when the user has pasted any non-empty API key into config. */
+	private boolean hasApiKey()
+	{
+		return config != null && config.apiKey() != null && !config.apiKey().trim().isEmpty();
+	}
+
+	/** Returns true when the user's per-feature visibility toggle is on. */
+	private boolean subFeatureEnabled(String name)
+	{
+		if (config == null) return true;
+		switch (name)
 		{
-			if (!seen.contains(name))
-			{
-				result.add(name);
-			}
+			case "Moons":   return config.showMoon()      && isSignedIn;
+			case "Barrows": return config.showBarrows()   && isSignedIn;
+			case "Dumps":   return config.showDumps();
+			case "Alerts":  return config.showAlerts();
+			case "Dips":    return config.showDips();
+			case "Favs":    return config.showFavourites() && hasApiKey();
+			case "Alch":    return config.showHighAlch();
+			case "Tablets": return config.showTeleTablets();
+			case "Screener":return config.showScreeners();
+			case "Decant":  return config.showDecant();
+			case "Plan":    return hasApiKey();   // optimizer is premium-only; signing in is the gate
+			default:        return false;
 		}
-		return result;
+	}
+
+	/**
+	 * Resolves the panel's tab order. JTabbedPane with WRAP_TAB_LAYOUT and
+	 * shouldRotateTabRuns=false places first-inserted tabs on the run
+	 * adjacent to content (i.e. the BOTTOM of the strip for TOP placement).
+	 * So we insert the fixed Row 2 (Flips/My Trades/Item/Other) FIRST so it
+	 * lands on the bottom row, then the customisable Row 1 so it stacks on
+	 * top — matching the design contract "customisable row sits up high".
+	 */
+	public List<String> resolveTabOrder()
+	{
+		List<String> out = new ArrayList<>(8);
+		out.addAll(FIXED_BOTTOM_ROW);
+		out.addAll(resolveTopRow());
+		return out;
 	}
 
 	private JTabbedPane buildTabs()
@@ -2038,11 +3262,18 @@ public class O7FlipPanel extends PluginPanel
 		// WRAP_TAB_LAYOUT spreads all tabs across multiple rows so every tab
 		// is visible at once — avoids the awkward "> chevron + dropdown"
 		// overflow that SCROLL_TAB_LAYOUT shows in narrow side panels.
-		// 9 tabs at SM font fit comfortably across 2 rows of the side panel.
+		// 8 tabs at SM font fit comfortably across 2 rows of the side panel.
 		JTabbedPane tabs = new JTabbedPane(JTabbedPane.TOP, JTabbedPane.WRAP_TAB_LAYOUT);
 		tabs.setBackground(ColorScheme.DARK_GRAY_COLOR);
 		tabs.setForeground(Color.WHITE);
 		tabs.setFont(Fonts.SM);
+		// Pin the row order: Swing's default behaviour rotates runs so the
+		// SELECTED tab's row sits adjacent to the content area (i.e. at the
+		// bottom of the tab strip). That breaks the design contract of
+		// "customisable row on top, fixed row below" — selecting Moons would
+		// shove its row below Flips. The override below is a no-op
+		// rotateTabRuns so the runs stay in insertion order.
+		applyStaticOrderUI(tabs);
 
 		// Always build all tab content to initialise list-panel fields,
 		// then conditionally add each tab based on config + auth state.
@@ -2053,7 +3284,17 @@ public class O7FlipPanel extends PluginPanel
 		JPanel alertsContent   = buildGenericTab("Merch");
 		JPanel moonContent     = buildMoonTab();
 		JPanel barrowsContent  = buildGenericTab("Barrows");
-		JPanel decantContent   = buildGenericTab("Decant");
+		JPanel decantContent     = buildGenericTab("Decant");
+		JPanel dipsContent       = buildDipsTab();
+		JPanel highAlchContent   = buildHighAlchTab();
+		JPanel tabletsContent    = buildTeleTabletsTab();
+		JPanel favouritesContent = buildFavouritesTab();
+		JPanel screenersContent  = buildScreenersTab();
+		JPanel planContent       = buildPlanTab();
+		JPanel otherContent      = buildOtherTab(decantContent, dipsContent,
+			highAlchContent, tabletsContent, favouritesContent, screenersContent,
+			planContent,
+			moonContent, barrowsContent, dumpsContent, alertsContent);
 		JPanel myFlipsContent  = buildMyFlipsTab();
 
 		// Map each tab name to its (content, visibility predicate) — the
@@ -2066,8 +3307,18 @@ public class O7FlipPanel extends PluginPanel
 		contentByName.put("Alerts",    alertsContent);
 		contentByName.put("Moons",     moonContent);
 		contentByName.put("Barrows",   barrowsContent);
-		contentByName.put("Decant",    decantContent);
-		contentByName.put("My Trades", myFlipsContent);
+		contentByName.put("Other",     otherContent);
+		contentByName.put("Trades",    myFlipsContent);
+		// New movable-pool entries: can appear EITHER in Row 1 (top-level tab)
+		// OR inside Other (sub-tab). Building each panel once and slotting it
+		// into the right pane keeps state coherent across the swap.
+		contentByName.put("Decant",  decantContent);
+		contentByName.put("Dips",    dipsContent);
+		contentByName.put("Alch",    highAlchContent);
+		contentByName.put("Tablets", tabletsContent);
+		contentByName.put("Favs",    favouritesContent);
+		contentByName.put("Screener",screenersContent);
+		contentByName.put("Plan",    planContent);
 		// Spikes intentionally not registered: feature retired from the panel
 		// per design feedback. The buildSpikesTab() call above still runs to
 		// initialise listPanel state used by sortFlips/filtered fallbacks.
@@ -2095,9 +3346,32 @@ public class O7FlipPanel extends PluginPanel
 		tabs.addChangeListener(e ->
 		{
 			int idx = tabs.getSelectedIndex();
-			if (idx >= 0 && "Item".equals(tabs.getTitleAt(idx)))
+			if (idx < 0) return;
+			String title = tabs.getTitleAt(idx);
+			// Track the user's currently-active movable-pool tab regardless
+			// of whether they reached it via top-row promotion OR via the
+			// Other inner pane. This way rebuilds can ALWAYS restore the
+			// right sub-tab even when the pool flickers (auth check, etc.).
+			if (MOVABLE_POOL.contains(title))
+			{
+				lastOtherSubTab = title;
+			}
+			if ("Item".equals(title))
 			{
 				ensureInsightsPanel();
+			}
+			else if ("Plan".equals(title) && plugin != null)
+			{
+				// Plan-as-top-row: kick the session poll on tab selection so
+				// the sync starts even when Plan isn't inside Other.
+				plugin.onPlanTabSelected();
+			}
+			else if (plugin != null && !"Other".equals(title))
+			{
+				// Stop the Plan poll when the user navigates away from Plan to
+				// any other top-row tab (Other has its own inner listener that
+				// handles the Plan-inside-Other case).
+				plugin.onPlanTabDeselected();
 			}
 		});
 
@@ -2116,6 +3390,159 @@ public class O7FlipPanel extends PluginPanel
 		});
 
 		return tabs;
+	}
+
+	/**
+	 * Installs a {@link javax.swing.plaf.metal.MetalTabbedPaneUI} subclass on
+	 * the given pane that (a) pins run order via {@code shouldRotateTabRuns}
+	 * returning false, and (b) overrides the paint pipeline so the tabs
+	 * match the dark theme — flat dark background, no focus ring, no 3D
+	 * content border, with a 2px orange underline on the selected tab.
+	 *
+	 * Falls back to a logged warning + leaving the default UI alone if the
+	 * platform LAF refuses Metal's UI (very rare on Swing).
+	 */
+	private static void applyStaticOrderUI(JTabbedPane pane)
+	{
+		try
+		{
+			pane.setUI(new javax.swing.plaf.metal.MetalTabbedPaneUI()
+			{
+				private final Color TAB_BG    = ColorScheme.DARK_GRAY_COLOR;
+				private final Color TAB_HOVER = new Color(0x3A3A3A);
+				private final Color UNDERLINE = new Color(0xFF981F);
+
+				@Override
+				protected boolean shouldRotateTabRuns(int tabPlacement)
+				{
+					// Pin run order — the selected tab's row doesn't get
+					// moved adjacent to content.
+					return false;
+				}
+
+				@Override
+				protected void paintTabBackground(java.awt.Graphics g, int tabPlacement,
+					int tabIndex, int x, int y, int w, int h, boolean isSelected)
+				{
+					// Flat dark fill. The unselected/selected distinction is
+					// carried by the orange underline below, not by background.
+					g.setColor(isSelected ? TAB_HOVER : TAB_BG);
+					g.fillRect(x, y, w, h);
+					if (isSelected)
+					{
+						g.setColor(UNDERLINE);
+						g.fillRect(x, y + h - 2, w, 2);
+					}
+				}
+
+				@Override
+				protected void paintTabBorder(java.awt.Graphics g, int tabPlacement,
+					int tabIndex, int x, int y, int w, int h, boolean isSelected)
+				{
+					// No tab border — Metal's default is a 3D bevel that
+					// clashes with the flat dark look.
+				}
+
+				@Override
+				protected void paintContentBorder(java.awt.Graphics g, int tabPlacement,
+					int selectedIndex)
+				{
+					// No content border. Metal draws a chunky frame around
+					// the active tab's content; we want the rows below to
+					// flow directly off the tab strip.
+				}
+
+				@Override
+				protected void paintFocusIndicator(java.awt.Graphics g, int tabPlacement,
+					java.awt.Rectangle[] rects, int tabIndex,
+					java.awt.Rectangle iconRect, java.awt.Rectangle textRect, boolean isSelected)
+				{
+					// No focus ring — the dotted rectangle that Metal paints
+					// around the focused tab reads as a "white border" bug.
+				}
+
+				@Override
+				protected java.awt.Insets getContentBorderInsets(int tabPlacement)
+				{
+					// Zero out the content-area gap so rows abut the tabs
+					// cleanly instead of leaving a thick frame.
+					return new java.awt.Insets(0, 0, 0, 0);
+				}
+
+				@Override
+				protected java.awt.Insets getTabInsets(int tabPlacement, int tabIndex)
+				{
+					// Vertical 7/7 gives a chunky-but-not-tall bar. Horizontal
+					// 4/4 lets labels sit centred with visible breathing room
+					// inside the forced 4-per-row grid at side-panel widths.
+					return new java.awt.Insets(7, 4, 7, 4);
+				}
+
+				@Override
+				protected int calculateTabWidth(int tabPlacement, int tabIndex,
+					java.awt.FontMetrics metrics)
+				{
+					// Force a deterministic grid. WRAP_TAB_LAYOUT's default
+					// uses each tab's natural width, so longer labels would
+					// otherwise spill the layout into uneven rows. Pinning
+					// every tab to (available/perRow) guarantees an even
+					// spread and a fixed number of rows.
+					javax.swing.JTabbedPane pane = this.tabPane;
+					int paneWidth = pane == null ? 0 : pane.getWidth();
+					if (paneWidth <= 0)
+					{
+						return super.calculateTabWidth(tabPlacement, tabIndex, metrics);
+					}
+					// IMPORTANT: the JTabbedPane layout subtracts BOTH the
+					// outer pane insets AND the tab-area insets when computing
+					// `returnAt`. Subtracting only one (the previous bug)
+					// returned over-wide tabs and pushed the layout to extra
+					// rows (e.g. 7 sub-tabs landed as 3+3+1 instead of 4+3).
+					java.awt.Insets paneInsets = pane.getInsets();
+					java.awt.Insets tabAreaInsets = getTabAreaInsets(tabPlacement);
+					int available = paneWidth
+						- paneInsets.left - paneInsets.right
+						- tabAreaInsets.left - tabAreaInsets.right;
+					int n = pane.getTabCount();
+					int perRow = perRowFor(n);
+					// -4 safety buffer absorbs run-overlay + per-tab border
+					// rounding so an off-by-one can't bump the last tab to a
+					// new row.
+					return Math.max(40, (available - 4) / perRow);
+				}
+
+				@Override
+				protected int calculateMaxTabWidth(int tabPlacement)
+				{
+					// Some Metal layout paths consult the max width separately
+					// — keep it in sync with the per-tab width so the layout
+					// doesn't over-size based on the longest label.
+					return calculateTabWidth(tabPlacement, 0,
+						tabPane.getFontMetrics(tabPane.getFont()));
+				}
+
+				/** Tab-count → tabs-per-row. Caps to ≤ 2 rows and ensures
+				 *  each row is fully spread. 7 sub-tabs → 4+3, not 3+3+1. */
+				private int perRowFor(int n)
+				{
+					if (n <= 4) return Math.max(1, n);
+					if (n <= 6) return 3;   // 5 → 3+2, 6 → 3+3
+					if (n <= 8) return 4;   // 7 → 4+3, 8 → 4+4
+					return (int) Math.ceil(n / 2.0); // 9+ → ceil(n/2) per row, 2 rows
+				}
+			});
+			// Foreground colour reads from setForeground on the pane; selected
+			// tab keeps the same colour since we don't repaint text — this is
+			// already handled by Metal's default text-rendering path.
+			pane.setOpaque(true);
+		}
+		catch (Exception e)
+		{
+			// If the LAF rejects MetalTabbedPaneUI we'd rather keep working
+			// (just with Swing's default run rotation) than crash the panel.
+			org.slf4j.LoggerFactory.getLogger(O7FlipPanel.class)
+				.warn("[07Flip] Could not pin tab-run order: {}", e.getMessage());
+		}
 	}
 
 	private JPanel insightsHost;
@@ -2519,12 +3946,19 @@ public class O7FlipPanel extends PluginPanel
 
 	public void rebuildTabs()
 	{
-		// Capture the currently-selected tab name BEFORE tearing down so we
-		// can restore it after the rebuild. Without this, every rebuild snaps
-		// the user back to the first tab — including the rebuilds triggered
-		// by background auth-status refreshes, which yanked users off
-		// My Trades / Item every refresh cycle.
+		// Capture the user's CURRENT selection — both the outer tab and, if
+		// they're inside Other, the inner sub-tab. Without preserving the
+		// inner explicitly the rebuild relies on lastOtherSubTab tracking,
+		// which is racy and breaks when the previously-active sub-tab
+		// momentarily disappears from the pool (e.g. Plan during an auth
+		// re-check). Capturing here and forcing the restore below makes
+		// the rebuild idempotent regardless of pool fluctuation.
 		String previouslySelected = currentSelectedTabName();
+		if ("Other".equals(previouslySelected))
+		{
+			String innerNow = currentInnerOtherSubTab();
+			if (innerNow != null) lastOtherSubTab = innerNow;
+		}
 
 		// The Item tab's lazy-init pattern caches the InsightsPanel in a
 		// field but its host container is recreated by buildInsightsTab()
@@ -2545,12 +3979,27 @@ public class O7FlipPanel extends PluginPanel
 		renderBarrows(q);
 		renderMoon(q);
 		renderDecants(q);
+		renderDips(q);
+		renderHighAlch(q);
+		renderTeleTablets(q);
+		renderFavourites(q);
+		renderScreeners();
 		renderAlerts(q);
 		refreshBlocklistFooter();
 
 		if (previouslySelected != null)
 		{
-			selectTab(previouslySelected);
+			boolean restored = selectTab(previouslySelected);
+			if (!restored && MOVABLE_POOL.contains(previouslySelected))
+			{
+				// The tab the user was on (e.g. Plan promoted to top row)
+				// no longer exists at the outer level — likely demoted into
+				// Other. Pivot to Other so the inner pane's restoration
+				// (which reads lastOtherSubTab — already set to this name
+				// by the outer change listener) lands on the right sub-tab.
+				lastOtherSubTab = previouslySelected;
+				selectTab("Other");
+			}
 		}
 	}
 
@@ -2573,6 +4022,40 @@ public class O7FlipPanel extends PluginPanel
 			return null;
 		}
 		return pane.getTitleAt(idx);
+	}
+
+	/**
+	 * Walks into the currently-selected outer tab and returns the inner
+	 * sub-tab title if and only if the outer tab is "Other". Used by
+	 * {@link #rebuildTabs} to lock in the inner selection before the tear-
+	 * down begins. Null if the outer isn't Other, or the inner pane can't
+	 * be reached.
+	 */
+	private String currentInnerOtherSubTab()
+	{
+		if (tabsWrapper.getComponentCount() == 0) return null;
+		java.awt.Component c = tabsWrapper.getComponent(0);
+		if (!(c instanceof JTabbedPane)) return null;
+		JTabbedPane pane = (JTabbedPane) c;
+		int idx = pane.getSelectedIndex();
+		if (idx < 0 || !"Other".equals(pane.getTitleAt(idx))) return null;
+		java.awt.Component outerContent = pane.getComponentAt(idx);
+		// buildOtherTab wraps the inner pane in a JPanel(BorderLayout) — the
+		// inner pane is the CENTER component. Walk one level down to reach it.
+		if (outerContent instanceof java.awt.Container)
+		{
+			for (java.awt.Component child : ((java.awt.Container) outerContent).getComponents())
+			{
+				if (child instanceof JTabbedPane)
+				{
+					JTabbedPane inner = (JTabbedPane) child;
+					int innerIdx = inner.getSelectedIndex();
+					if (innerIdx >= 0) return inner.getTitleAt(innerIdx);
+					return null;
+				}
+			}
+		}
+		return null;
 	}
 
 	public void refreshBlocklistFooter()
@@ -2799,15 +4282,95 @@ public class O7FlipPanel extends PluginPanel
 		accountRow.add(flipsMembersBtn);
 		accountRow.add(flipsF2pBtn);
 
+		// Sort selector — server-side sort key + asc/desc handling. Labels
+		// taken from FLIPS_SORTS so adding entries there auto-updates the UI.
+		String[] sortLabels = new String[FLIPS_SORTS.length];
+		for (int i = 0; i < FLIPS_SORTS.length; i++) sortLabels[i] = FLIPS_SORTS[i][1];
+		flipsSortCombo = styledCombo(sortLabels);
+		flipsSortCombo.setSelectedIndex(Math.max(0, Math.min(flipsSortIdx, FLIPS_SORTS.length - 1)));
+		flipsSortCombo.addActionListener(e ->
+		{
+			flipsSortIdx = flipsSortCombo.getSelectedIndex();
+			flipsPage = 0;
+			if (plugin != null)
+			{
+				plugin.onFlipsFilterChanged();
+			}
+		});
+
+		// Category selector — base preset. F2P toggle still overrides for
+		// stricter F2P-only behaviour; otherwise the chosen preset drives
+		// the server's ?preset= param.
+		String[] categoryLabels = new String[PRESETS.length];
+		for (int i = 0; i < PRESETS.length; i++) categoryLabels[i] = PRESETS[i][1];
+		JComboBox<String> categoryCombo = styledCombo(categoryLabels);
+		categoryCombo.setSelectedIndex(Math.max(0, Math.min(flipsCategoryIdx, PRESETS.length - 1)));
+		categoryCombo.addActionListener(e ->
+		{
+			flipsCategoryIdx = categoryCombo.getSelectedIndex();
+			flipsPage = 0;
+			rebuildFlipsChipBar();
+			if (plugin != null) plugin.onFlipsFilterChanged();
+		});
+
+		// Min hourly volume — kills the "Bird snare / Fire rune" penny-flips
+		// that bubble to the top of ROI sort. Default index = 1000/hr.
+		JComboBox<String> minVolCombo = styledCombo(FLIPS_MIN_VOL_LABELS);
+		minVolCombo.setSelectedIndex(Math.max(0, Math.min(flipsMinHourlyVolIdx, FLIPS_MIN_VOL_LABELS.length - 1)));
+		minVolCombo.addActionListener(e ->
+		{
+			flipsMinHourlyVolIdx = minVolCombo.getSelectedIndex();
+			flipsPage = 0;
+			rebuildFlipsChipBar();
+			renderFlips(filtered());
+		});
+
+		// Min buy price — same anti-trash purpose as Min volume, but uses the
+		// server's existing priceMin param so it works without server changes.
+		JComboBox<String> minPriceCombo = styledCombo(FLIPS_MIN_BUY_PRICE_LABELS);
+		minPriceCombo.setSelectedIndex(Math.max(0, Math.min(flipsMinBuyPriceIdx, FLIPS_MIN_BUY_PRICE_LABELS.length - 1)));
+		minPriceCombo.addActionListener(e ->
+		{
+			flipsMinBuyPriceIdx = minPriceCombo.getSelectedIndex();
+			flipsPage = 0;
+			rebuildFlipsChipBar();
+			if (plugin != null) plugin.onFlipsFilterChanged();
+		});
+
+		// Tax-free toggle — items under 50gp pay no GE tax. Useful for
+		// high-volume / low-margin flipping where the 2% bite would dominate.
+		JButton taxFreeBtn = pillButton("Tax-free only");
+		taxFreeBtn.setToolTipText("<html>Show only items priced below 50gp.<br>"
+			+ "These pay no GE tax so the listed margin is the real margin.</html>");
+		applyToggleStyle(taxFreeBtn, flipsTaxFreeOnly);
+		taxFreeBtn.addActionListener(e ->
+		{
+			flipsTaxFreeOnly = !flipsTaxFreeOnly;
+			applyToggleStyle(taxFreeBtn, flipsTaxFreeOnly);
+			flipsPage = 0;
+			rebuildFlipsChipBar();
+			if (plugin != null) plugin.onFlipsFilterChanged();
+		});
+
 		JPanel panel = new JPanel(new GridLayout(0, 2, 6, 6));
 		panel.setBackground(ColorScheme.DARKER_GRAY_COLOR);
 		panel.setBorder(new EmptyBorder(0, 8, 8, 8));
+		panel.add(filterRowLabel("Category"));
+		panel.add(categoryCombo);
+		panel.add(filterRowLabel("Sort by"));
+		panel.add(flipsSortCombo);
 		panel.add(filterRowLabel("Capital"));
 		panel.add(flipsCapitalCombo);
+		panel.add(filterRowLabel("Min volume"));
+		panel.add(minVolCombo);
+		panel.add(filterRowLabel("Min price"));
+		panel.add(minPriceCombo);
 		panel.add(filterRowLabel("Min profit"));
 		panel.add(flipsMinProfitCombo);
 		panel.add(filterRowLabel("Account"));
 		panel.add(accountRow);
+		panel.add(filterRowLabel(""));
+		panel.add(taxFreeBtn);
 		return panel;
 	}
 
@@ -2984,11 +4547,76 @@ public class O7FlipPanel extends PluginPanel
 		return assembleTab(sortRow, spikesListPanel, buildPageBar(spikesPageLabel, spikesPrev, spikesNext));
 	}
 
+	/**
+	 * Builds the three-pill segmented control for the dumps tier filter.
+	 * Buttons are persisted in {@link #dumpsTierBtns} so
+	 * {@link #repaintDumpsTierBar()} can refresh the counts whenever a fresh
+	 * response lands without rebuilding the row.
+	 */
+	private JPanel buildDumpsTierBar()
+	{
+		dumpsTierBtns = new JButton[3];
+		final String[] keys   = {"all", "confirmed", "likely"};
+		final String[] labels = {"All", "Confirmed", "Likely"};
+		JPanel bar = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 4));
+		bar.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+		bar.setBorder(new MatteBorder(0, 0, 1, 0, new Color(0x3A3A3A)));
+		for (int i = 0; i < keys.length; i++)
+		{
+			final int idx = i;
+			JButton btn = pillButton(labels[i]);
+			btn.addActionListener(e ->
+			{
+				if (dumpsTier.equals(keys[idx])) return;
+				dumpsTier = keys[idx];
+				dumpsPage = 0;
+				repaintDumpsTierBar();
+				if (plugin != null) plugin.onDumpsFilterChanged();
+			});
+			dumpsTierBtns[i] = btn;
+			bar.add(btn);
+		}
+		repaintDumpsTierBar();
+		return bar;
+	}
+
+	/** Refreshes the pill labels + selected state on the tier bar. */
+	private void repaintDumpsTierBar()
+	{
+		if (dumpsTierBtns == null) return;
+		final String[] keys = {"all", "confirmed", "likely"};
+		int totalAll = dumpsConfirmedTotal + dumpsLikelyTotal;
+		// Show counts when we have them; bare label on first paint.
+		String[] withCounts = {
+			totalAll > 0 ? "All " + totalAll : "All",
+			dumpsConfirmedTotal > 0 ? "Confirmed " + dumpsConfirmedTotal : "Confirmed",
+			dumpsLikelyTotal > 0 ? "Likely " + dumpsLikelyTotal : "Likely",
+		};
+		for (int i = 0; i < dumpsTierBtns.length; i++)
+		{
+			dumpsTierBtns[i].setText(withCounts[i]);
+			applySortStyle(dumpsTierBtns[i], keys[i].equals(dumpsTier));
+		}
+	}
+
 	private JPanel buildDumpsTab()
 	{
-		// Sort bar — no sign-in gate (server-side sort, useful to all users)
-		dumpsSortBtns = new JButton[2];
-		String[] sortLabels = {"Recent", "Score"};
+		// ── v5 tier segmented control ────────────────────────────────────────
+		// Three pill buttons: [All N] [Confirmed N] [Likely N]. Default to
+		// "all" — the server includes the strong-pattern PvM-drop bots in
+		// "likely" tier and the user wants them visible by default.
+		dumpsTierBar = buildDumpsTierBar();
+
+		// ── v3 sort bar ──────────────────────────────────────────────────────
+		// Five server-side sorts. The default (Max Profit) matches the
+		// website's "what should I act on right now" view.
+		final String[] sortLabels = {"Max Profit", "Recovery", "Vol×Cons", "Score", "Recent"};
+		final String[] sortKeys   = {"max_profit", "recovery_pct", "volume_consistency", "dump_pct", "recent"};
+		// Seed the index from the persisted key so the highlighted button
+		// matches state on rebuild.
+		dumpsSortIdx = 0;
+		for (int i = 0; i < sortKeys.length; i++) { if (sortKeys[i].equals(dumpsSortKey)) { dumpsSortIdx = i; break; } }
+		dumpsSortBtns = new JButton[sortLabels.length];
 		JPanel sortRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 4));
 		sortRow.setBackground(ColorScheme.DARKER_GRAY_COLOR);
 		sortRow.setBorder(new MatteBorder(0, 0, 1, 0, new Color(0x3A3A3A)));
@@ -3000,7 +4628,7 @@ public class O7FlipPanel extends PluginPanel
 			btn.addActionListener(e ->
 			{
 				dumpsSortIdx = idx;
-				dumpsSortKey = idx == 0 ? "recent" : "dump_pct";
+				dumpsSortKey = sortKeys[idx];
 				dumpsPage    = 0;
 				hiliteFilter(dumpsSortBtns, dumpsSortIdx);
 				if (plugin != null)
@@ -3012,17 +4640,42 @@ public class O7FlipPanel extends PluginPanel
 			sortRow.add(btn);
 		}
 
-		// Client-side filters
+		// ── Secondary filters (Active · Min Score · Min Profit · Price) ─────
+		// All hidden behind a "More" expander to keep the default surface to
+		// just tier + sort. The website mostly uses Tier + Max Profit and
+		// rarely the other knobs, so we follow that hierarchy.
+		JButton activeBtn = pillButton("Active");
+		activeBtn.setToolTipText("<html>When on, only items currently dumping or due soon<br>"
+			+ "(dump_status ∈ {dumping, due_soon}) are shown.</html>");
+		applyToggleStyle(activeBtn, dumpsActiveOnly);
+		activeBtn.addActionListener(e ->
+		{
+			dumpsActiveOnly = !dumpsActiveOnly;
+			applyToggleStyle(activeBtn, dumpsActiveOnly);
+			dumpsPage = 0;
+			if (plugin != null) plugin.onDumpsFilterChanged();
+		});
+
+		final int[]    scoreThresholds = {0, 30, 60, 80};
+		final String[] scoreLabels     = {"Any score", "30+", "60+", "80+"};
+		JComboBox<String> minScoreCb = styledCombo(scoreLabels);
+		int initialScoreIdx = 0;
+		for (int i = 0; i < scoreThresholds.length; i++) { if (dumpsMinScore >= scoreThresholds[i]) initialScoreIdx = i; }
+		minScoreCb.setSelectedIndex(initialScoreIdx);
+		minScoreCb.addActionListener(e ->
+		{
+			dumpsMinScore = scoreThresholds[minScoreCb.getSelectedIndex()];
+			dumpsPage = 0;
+			if (plugin != null) plugin.onDumpsFilterChanged();
+		});
+
 		JComboBox<String> minProfitCb = styledCombo(DUMP_MIN_PROFIT_LABELS);
 		minProfitCb.addActionListener(e ->
 		{
 			dumpsMinProfitIdx = minProfitCb.getSelectedIndex();
 			dumpsPage = 0;
 			renderDumps(filtered());
-			if (plugin != null)
-			{
-				plugin.onDumpsFilterChanged();
-			}
+			if (plugin != null) plugin.onDumpsFilterChanged();
 		});
 
 		JComboBox<String> priceRangeCb = styledCombo(PRICE_RANGE_LABELS);
@@ -3031,48 +4684,53 @@ public class O7FlipPanel extends PluginPanel
 			dumpsPriceRangeIdx = priceRangeCb.getSelectedIndex();
 			dumpsPage = 0;
 			renderDumps(filtered());
-			if (plugin != null)
-			{
-				plugin.onDumpsFilterChanged();
-			}
+			if (plugin != null) plugin.onDumpsFilterChanged();
 		});
 
-		JPanel filterRow = new JPanel(new GridLayout(1, 2, 4, 0));
-		filterRow.setBackground(ColorScheme.DARKER_GRAY_COLOR);
-		filterRow.setBorder(new EmptyBorder(4, 8, 4, 8));
-		filterRow.add(minProfitCb);
-		filterRow.add(priceRangeCb);
+		// Collapsible "More" expander hosting the four secondary controls.
+		// First row: Active + Min Score. Second row: Min Profit + Max Price.
+		JPanel moreInner = new JPanel();
+		moreInner.setLayout(new BoxLayout(moreInner, BoxLayout.Y_AXIS));
+		moreInner.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+		moreInner.setBorder(new EmptyBorder(2, 8, 4, 8));
+		moreInner.setVisible(false);
 
-		// Source toggle: switch between /dumps (all dumps) and /bot-dumps
-		// (machine-detected bot-driven dumps). Same response shape on the
-		// server side so both feeds render through the existing DumpItemPanel.
-		JComboBox<String> sourceCb = styledCombo(new String[]{"All Dumps", "Bot Dumps"});
-		sourceCb.setSelectedIndex(dumpsUseBotEndpoint ? 1 : 0);
-		sourceCb.addActionListener(e ->
+		JPanel moreRow1 = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 2));
+		moreRow1.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+		moreRow1.add(activeBtn);
+		moreRow1.add(minScoreCb);
+
+		JPanel moreRow2 = new JPanel(new GridLayout(1, 2, 4, 0));
+		moreRow2.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+		moreRow2.setBorder(new EmptyBorder(4, 0, 0, 0));
+		moreRow2.add(minProfitCb);
+		moreRow2.add(priceRangeCb);
+
+		moreInner.add(moreRow1);
+		moreInner.add(moreRow2);
+
+		JButton moreToggle = pillButton("More filters ▾");
+		moreToggle.setBackground(new Color(0x3E3E3E));
+		moreToggle.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
+		moreToggle.addActionListener(e ->
 		{
-			boolean wantBot = sourceCb.getSelectedIndex() == 1;
-			if (wantBot == dumpsUseBotEndpoint)
-			{
-				return;
-			}
-			dumpsUseBotEndpoint = wantBot;
-			dumpsPage = 0;
-			if (plugin != null)
-			{
-				plugin.onDumpsFilterChanged();
-			}
+			boolean show = !moreInner.isVisible();
+			moreInner.setVisible(show);
+			moreToggle.setText(show ? "More filters ▴" : "More filters ▾");
 		});
-		JPanel sourceRow = new JPanel(new BorderLayout());
-		sourceRow.setBackground(ColorScheme.DARKER_GRAY_COLOR);
-		sourceRow.setBorder(new EmptyBorder(4, 8, 0, 8));
-		sourceRow.add(sourceCb, BorderLayout.CENTER);
+
+		JPanel moreToggleRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 2));
+		moreToggleRow.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+		moreToggleRow.setBorder(new EmptyBorder(2, 8, 0, 8));
+		moreToggleRow.add(moreToggle);
 
 		JPanel topBar = new JPanel();
 		topBar.setLayout(new BoxLayout(topBar, BoxLayout.Y_AXIS));
 		topBar.setBackground(ColorScheme.DARKER_GRAY_COLOR);
-		topBar.add(sourceRow);
-		topBar.add(filterRow);
+		topBar.add(dumpsTierBar);
 		topBar.add(sortRow);
+		topBar.add(moreToggleRow);
+		topBar.add(moreInner);
 
 		dumpsListPanel = listPanel();
 		dumpsPageLabel = pageLabel();
@@ -3195,6 +4853,1146 @@ public class O7FlipPanel extends PluginPanel
 				alertsListPanel = listPanel();
 				return assembleTab(buildAlertsSortBar(), alertsListPanel, null);
 		}
+	}
+
+	/**
+	 * The Dips sub-tab — paginated list against /api/runelite/dips, sortable
+	 * by recency, dip %, or distance from ATL. The endpoint mixes 24h-dip
+	 * and ATL rows; {@link DipItemPanel} handles the per-row badge + metric.
+	 */
+	private JPanel buildDipsTab()
+	{
+		dipsSortBtns  = new JButton[3];
+		dipsListPanel = listPanel();
+		dipsPageLabel = pageLabel();
+		dipsPrev      = pageBtn("‹");
+		dipsNext      = pageBtn("›");
+		dipsPrev.addActionListener(e ->
+		{
+			if (plugin != null)
+			{
+				plugin.onDipsPageChanged(--dipsPage);
+			}
+		});
+		dipsNext.addActionListener(e ->
+		{
+			if (plugin != null)
+			{
+				plugin.onDipsPageChanged(++dipsPage);
+			}
+		});
+
+		// Activity-window selector — drives the server's activity_window
+		// param + the per-row "in 1d/7d/30d" label. Default 1d.
+		String[] windowLabels = {"1d", "7d", "30d"};
+		JButton[] dipsWindowBtns = new JButton[windowLabels.length];
+		JPanel windowRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 4));
+		windowRow.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+		windowRow.setBorder(new EmptyBorder(2, 0, 0, 0));
+		for (int i = 0; i < windowLabels.length; i++)
+		{
+			final String w = windowLabels[i];
+			JButton btn = pillButton(w);
+			applySortStyle(btn, w.equals(dipsActivityWindow));
+			btn.addActionListener(e ->
+			{
+				if (w.equals(dipsActivityWindow)) return;
+				dipsActivityWindow = w;
+				dipsPage = 0;
+				for (int j = 0; j < dipsWindowBtns.length; j++)
+				{
+					applySortStyle(dipsWindowBtns[j], windowLabels[j].equals(dipsActivityWindow));
+				}
+				if (plugin != null) plugin.onDipsSortChanged(dipsSortKey);
+			});
+			dipsWindowBtns[i] = btn;
+			windowRow.add(btn);
+		}
+
+		String[] labels = {"Recent", "Dip %", "ATL %"};
+		String[] keys   = {"recent", "dip_pct", "atl_pct"};
+		JPanel sortRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 4));
+		sortRow.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+		sortRow.setBorder(new MatteBorder(0, 0, 1, 0, new Color(0x3A3A3A)));
+		for (int i = 0; i < labels.length; i++)
+		{
+			final int idx = i;
+			JButton btn = pillButton(labels[i]);
+			applySortStyle(btn, idx == dipsSortIdx);
+			btn.addActionListener(e ->
+			{
+				dipsSortIdx = idx;
+				dipsSortKey = keys[idx];
+				dipsPage    = 0;
+				hiliteFilter(dipsSortBtns, dipsSortIdx);
+				if (plugin != null)
+				{
+					plugin.onDipsSortChanged(dipsSortKey);
+				}
+			});
+			dipsSortBtns[i] = btn;
+			sortRow.add(btn);
+		}
+
+		JPanel topBar = new JPanel();
+		topBar.setLayout(new BoxLayout(topBar, BoxLayout.Y_AXIS));
+		topBar.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+		topBar.add(windowRow);
+		topBar.add(sortRow);
+
+		return assembleTab(topBar, dipsListPanel, buildPageBar(dipsPageLabel, dipsPrev, dipsNext));
+	}
+
+	/**
+	 * High Alch sub-tab — server-paginated against /api/runelite/high-alch.
+	 * Staff toggles (Fire / Bryophyta) re-fire the request with the matching
+	 * query params; the server applies the modifier and recomputes profit so
+	 * the panel never needs to know the rune-cost math.
+	 */
+	private JPanel buildHighAlchTab()
+	{
+		// Seed toggle state from the persisted config so the buttons render
+		// in the right state on first build.
+		highAlchFireStaff = config != null && config.highAlchFireStaff();
+		highAlchBryophyta = config != null && config.highAlchBryophyta();
+
+		highAlchSortBtns  = new JButton[4];
+		highAlchListPanel = listPanel();
+		highAlchPageLabel = pageLabel();
+		highAlchPrev      = pageBtn("‹");
+		highAlchNext      = pageBtn("›");
+		highAlchPrev.addActionListener(e ->
+		{
+			if (plugin != null) plugin.onHighAlchPageChanged(--highAlchPage);
+		});
+		highAlchNext.addActionListener(e ->
+		{
+			if (plugin != null) plugin.onHighAlchPageChanged(++highAlchPage);
+		});
+
+		String[] labels = {"Profit", "ROI", "Buy", "Volume"};
+		String[] keys   = {"profit", "roi", "buyPrice", "dailyVolume"};
+		JPanel sortRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 4));
+		sortRow.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+		sortRow.setBorder(new MatteBorder(0, 0, 1, 0, new Color(0x3A3A3A)));
+		for (int i = 0; i < labels.length; i++)
+		{
+			final int idx = i;
+			JButton btn = pillButton(labels[i]);
+			applySortStyle(btn, idx == highAlchSortIdx);
+			btn.addActionListener(e ->
+			{
+				highAlchSortIdx = idx;
+				highAlchSortKey = keys[idx];
+				highAlchPage    = 0;
+				hiliteFilter(highAlchSortBtns, highAlchSortIdx);
+				if (plugin != null) plugin.onHighAlchSortChanged(highAlchSortKey);
+			});
+			highAlchSortBtns[i] = btn;
+			sortRow.add(btn);
+		}
+
+		// Staff toggles row — sits underneath the sort bar and shows current
+		// alch cost so the user sees the modifier's effect immediately.
+		highAlchFireStaffBtn = pillButton("Fire staff");
+		highAlchBryophytaBtn = pillButton("Bryophyta");
+		applyToggleStyle(highAlchFireStaffBtn, highAlchFireStaff);
+		applyToggleStyle(highAlchBryophytaBtn, highAlchBryophyta);
+		// Fire staff + Bryophyta are mutually exclusive — a player carries
+		// one staff at a time, so turning one on automatically turns the
+		// other off. Both off is fine (= no staff modifier).
+		highAlchFireStaffBtn.addActionListener(e ->
+		{
+			highAlchFireStaff = !highAlchFireStaff;
+			if (highAlchFireStaff) highAlchBryophyta = false;
+			applyToggleStyle(highAlchFireStaffBtn, highAlchFireStaff);
+			applyToggleStyle(highAlchBryophytaBtn, highAlchBryophyta);
+			if (plugin != null)
+			{
+				plugin.persistHighAlchModifier("highAlchFireStaff", highAlchFireStaff);
+				plugin.persistHighAlchModifier("highAlchBryophyta", highAlchBryophyta);
+				highAlchPage = 0;
+				plugin.onHighAlchModifierChanged();
+			}
+		});
+		highAlchBryophytaBtn.addActionListener(e ->
+		{
+			highAlchBryophyta = !highAlchBryophyta;
+			if (highAlchBryophyta) highAlchFireStaff = false;
+			applyToggleStyle(highAlchBryophytaBtn, highAlchBryophyta);
+			applyToggleStyle(highAlchFireStaffBtn, highAlchFireStaff);
+			if (plugin != null)
+			{
+				plugin.persistHighAlchModifier("highAlchBryophyta", highAlchBryophyta);
+				plugin.persistHighAlchModifier("highAlchFireStaff", highAlchFireStaff);
+				highAlchPage = 0;
+				plugin.onHighAlchModifierChanged();
+			}
+		});
+
+		highAlchCostLabel = new JLabel(" ");
+		highAlchCostLabel.setFont(Fonts.SM);
+		highAlchCostLabel.setForeground(new Color(0x888888));
+
+		JPanel toggleRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 2));
+		toggleRow.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+		toggleRow.setBorder(new MatteBorder(0, 0, 1, 0, new Color(0x3A3A3A)));
+		toggleRow.add(highAlchFireStaffBtn);
+		toggleRow.add(highAlchBryophytaBtn);
+		toggleRow.add(highAlchCostLabel);
+
+		JPanel topBar = new JPanel();
+		topBar.setLayout(new BoxLayout(topBar, BoxLayout.Y_AXIS));
+		topBar.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+		topBar.add(sortRow);
+		topBar.add(toggleRow);
+
+		return assembleTab(topBar, highAlchListPanel, buildPageBar(highAlchPageLabel, highAlchPrev, highAlchNext));
+	}
+
+	/** Compact green/grey "on" styling for boolean toggle pills. */
+	private void applyToggleStyle(JButton btn, boolean on)
+	{
+		btn.setBackground(on ? new Color(0x00C27A) : new Color(0x3E3E3E));
+		btn.setForeground(on ? Color.BLACK : ColorScheme.LIGHT_GRAY_COLOR);
+	}
+
+	/**
+	 * Tablets sub-tab — non-paginated (dataset is small). Sort + spellbook
+	 * filter + "profitable only" toggle drive the request.
+	 */
+	private JPanel buildTeleTabletsTab()
+	{
+		// Two sort options: Volume (daily GE volume) and Profit (margin
+		// between cost and post-tax sell). Volume leads — high-volume
+		// tablets are the actionable ones; profit-per-tablet matters less
+		// when a niche tablet sells once a day.
+		tabletsSortBtns  = new JButton[2];
+		tabletsListPanel = listPanel();
+
+		String[] labels = {"Volume", "Profit"};
+		JPanel sortRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 4));
+		sortRow.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+		sortRow.setBorder(new MatteBorder(0, 0, 1, 0, new Color(0x3A3A3A)));
+		for (int i = 0; i < labels.length; i++)
+		{
+			final int idx = i;
+			JButton btn = pillButton(labels[i]);
+			applySortStyle(btn, idx == tabletsSortIdx);
+			btn.addActionListener(e ->
+			{
+				tabletsSortIdx = idx;
+				hiliteFilter(tabletsSortBtns, tabletsSortIdx);
+				if (plugin != null) plugin.onTeleTabletsFilterChanged();
+			});
+			tabletsSortBtns[i] = btn;
+			sortRow.add(btn);
+		}
+
+		// Spellbook filter dropdown + Profitable-only pill.
+		String[] books = {"All books", "Standard", "Lunar", "Ancient", "Arceuus"};
+		JComboBox<String> bookCombo = styledCombo(books);
+		bookCombo.setSelectedIndex(tabletsSpellbookIdx);
+		bookCombo.addActionListener(e ->
+		{
+			tabletsSpellbookIdx = bookCombo.getSelectedIndex();
+			if (plugin != null) plugin.onTeleTabletsFilterChanged();
+		});
+
+		JButton profitableBtn = pillButton("Profitable only");
+		applyToggleStyle(profitableBtn, tabletsProfitableOnly);
+		profitableBtn.addActionListener(e ->
+		{
+			tabletsProfitableOnly = !tabletsProfitableOnly;
+			applyToggleStyle(profitableBtn, tabletsProfitableOnly);
+			if (plugin != null) plugin.onTeleTabletsFilterChanged();
+		});
+
+		JPanel filterRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 2));
+		filterRow.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+		filterRow.setBorder(new MatteBorder(0, 0, 1, 0, new Color(0x3A3A3A)));
+		filterRow.add(bookCombo);
+		filterRow.add(profitableBtn);
+
+		JPanel topBar = new JPanel();
+		topBar.setLayout(new BoxLayout(topBar, BoxLayout.Y_AXIS));
+		topBar.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+		topBar.add(sortRow);
+		topBar.add(filterRow);
+
+		return assembleTab(topBar, tabletsListPanel, null);
+	}
+
+	/** Favourites sub-tab — the user's saved item list, rendered as flip rows. */
+	private JPanel buildFavouritesTab()
+	{
+		favouritesListPanel = listPanel();
+		return assembleTab(null, favouritesListPanel, null);
+	}
+
+	/**
+	 * Screeners sub-tab — two card layouts behind a {@link CardLayout}:
+	 *
+	 * <ul>
+	 *   <li>{@code "list"} — preset cards (Custom on top, System below).</li>
+	 *   <li>{@code "detail"} — drill-down for one preset's matches, with a
+	 *       Back button that flips the card layout back to the list.</li>
+	 * </ul>
+	 *
+	 * Same pattern as the Barrows tab so the navigation feels consistent.
+	 */
+	/**
+	 * Builds the Optimizer "Plan" sub-tab. Header row hosts the inputs
+	 * (slots stepper, composition stepper, risk pills, fill-window chips,
+	 * members tri-state, Build button). The list panel below renders the
+	 * server's allocation cards + summary block.
+	 */
+	private JPanel buildPlanTab()
+	{
+		optimizerListPanel = listPanel();
+		// Initial empty state — the user hasn't built a plan yet.
+		renderOptimizerEmpty();
+
+		// ── Inputs panel ─────────────────────────────────────────────────────
+		JPanel inputs = new JPanel();
+		inputs.setLayout(new BoxLayout(inputs, BoxLayout.Y_AXIS));
+		inputs.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+		inputs.setBorder(new EmptyBorder(6, 8, 6, 8));
+
+		// Row: slots stepper. Composition (big_slots) is gone — the engine
+		// now picks per-slot gp/h dynamically, so the user only sets total
+		// slots and the optimiser splits them between big positions and
+		// fillers internally.
+		JPanel slotsRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 2));
+		slotsRow.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+		slotsRow.add(buildStepper("Slots", () -> optSlots, v -> optSlots = Math.max(1, Math.min(8, v)), 1, 8));
+		inputs.add(slotsRow);
+
+		// Row: risk pills
+		JPanel riskRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 2));
+		riskRow.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+		JLabel riskLabel = new JLabel("Risk");
+		riskLabel.setFont(Fonts.SM);
+		riskLabel.setForeground(new Color(0xAAAAAA));
+		riskRow.add(riskLabel);
+		String[] riskKeys = {"low", "medium", "high"};
+		String[] riskLabels = {"Low", "Medium", "High"};
+		JButton[] riskBtns = new JButton[3];
+		for (int i = 0; i < riskKeys.length; i++)
+		{
+			final String k = riskKeys[i];
+			JButton b = pillButton(riskLabels[i]);
+			applySortStyle(b, k.equals(optRisk));
+			b.addActionListener(e ->
+			{
+				optRisk = k;
+				for (int j = 0; j < riskBtns.length; j++)
+				{
+					applySortStyle(riskBtns[j], riskKeys[j].equals(optRisk));
+				}
+			});
+			riskBtns[i] = b;
+			riskRow.add(b);
+		}
+		inputs.add(riskRow);
+
+		// Row: fill-window chips (Quick 2h / Standard 4h / Patient 12h / Long 24h)
+		JPanel fillRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 2));
+		fillRow.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+		JLabel fillLabel = new JLabel("Window");
+		fillLabel.setFont(Fonts.SM);
+		fillLabel.setForeground(new Color(0xAAAAAA));
+		fillRow.add(fillLabel);
+		int[]    fillHours  = {2, 4, 12, 24};
+		String[] fillLabels = {"2h", "4h", "12h", "24h"};
+		JButton[] fillBtns = new JButton[4];
+		for (int i = 0; i < fillHours.length; i++)
+		{
+			final int h = fillHours[i];
+			JButton b = pillButton(fillLabels[i]);
+			applySortStyle(b, h == optMaxFillHours);
+			b.addActionListener(e ->
+			{
+				optMaxFillHours = h;
+				for (int j = 0; j < fillBtns.length; j++)
+				{
+					applySortStyle(fillBtns[j], fillHours[j] == optMaxFillHours);
+				}
+			});
+			fillBtns[i] = b;
+			fillRow.add(b);
+		}
+		inputs.add(fillRow);
+
+		// Row: members tri-state
+		JPanel memRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 2));
+		memRow.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+		JLabel memLabel = new JLabel("Items");
+		memLabel.setFont(Fonts.SM);
+		memLabel.setForeground(new Color(0xAAAAAA));
+		memRow.add(memLabel);
+		String[] memKeys = {"any", "members", "f2p"};
+		String[] memLabels = {"Any", "Members", "F2P"};
+		JButton[] memBtns = new JButton[3];
+		for (int i = 0; i < memKeys.length; i++)
+		{
+			final int idx = i;
+			JButton b = pillButton(memLabels[i]);
+			applySortStyle(b, memKeyMatches(memKeys[idx], optMembers));
+			b.addActionListener(e ->
+			{
+				switch (memKeys[idx])
+				{
+					case "any":     optMembers = null;        break;
+					case "members": optMembers = Boolean.TRUE; break;
+					case "f2p":     optMembers = Boolean.FALSE;break;
+				}
+				for (int j = 0; j < memBtns.length; j++)
+				{
+					applySortStyle(memBtns[j], memKeyMatches(memKeys[j], optMembers));
+				}
+			});
+			memBtns[i] = b;
+			memRow.add(b);
+		}
+		inputs.add(memRow);
+
+		// Row: capital readout + Build button
+		JLabel capitalLabel = new JLabel(buildOptimizerCapitalLabel());
+		capitalLabel.setFont(Fonts.SM);
+		capitalLabel.setForeground(new Color(0xAAAAAA));
+		capitalLabel.setBorder(new EmptyBorder(6, 0, 0, 0));
+		inputs.add(capitalLabel);
+
+		JButton buildBtn = pillButton("Build plan");
+		buildBtn.setBackground(ORANGE);
+		buildBtn.setForeground(Color.BLACK);
+		buildBtn.addActionListener(e ->
+		{
+			if (optInFlight) return;
+			capitalLabel.setText(buildOptimizerCapitalLabel());
+			if (plugin == null) return;
+			long capital = plugin.effectiveCapital();
+			if (capital <= 0)
+			{
+				renderOptimizerEmptyMessage("Set capital first",
+					"Click the pen icon in the header to enter your capital before building a plan.");
+				return;
+			}
+			optInFlight = true;
+			renderOptimizerLoading();
+			plugin.runOptimizer(capital, optSlots, optRisk, optMaxFillHours, optMembers);
+		});
+		// ✕ Clear button — wipes both the local plan and the server-side
+		// session via DELETE /optimize/active. Discreet circular button so
+		// it doesn't compete visually with the orange Build button.
+		JButton clearBtn = pillButton("✕");
+		clearBtn.setForeground(new Color(0x888888));
+		clearBtn.setBackground(new Color(0x2A2A2A));
+		clearBtn.setToolTipText("Clear the active plan (also wipes it on the website)");
+		clearBtn.addActionListener(e ->
+		{
+			if (plugin != null) plugin.clearActivePlan();
+		});
+
+		JPanel buildRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 2));
+		buildRow.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+		buildRow.add(buildBtn);
+		buildRow.add(clearBtn);
+		inputs.add(buildRow);
+
+		optInputsPanel = inputs;
+		optCollapsedPanel = buildOptimizerCollapsedPill();
+
+		// Host swaps between the full inputs and the compact summary pill.
+		// We use a plain panel with one-or-the-other visibility instead of
+		// CardLayout so the surrounding layout doesn't reserve room for the
+		// taller one.
+		optInputsHost = new JPanel(new BorderLayout());
+		optInputsHost.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+		applyOptimizerFormVisibility();
+
+		return assembleTab(optInputsHost, optimizerListPanel, null);
+	}
+
+	/** Builds the compact "100M · 8 slots · medium · 4h ✎ Reconfigure" pill. */
+	private JPanel buildOptimizerCollapsedPill()
+	{
+		JPanel row = new JPanel(new BorderLayout(6, 0));
+		row.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+		row.setBorder(new EmptyBorder(8, 8, 8, 8));
+
+		optCollapsedLabel = new JLabel(buildOptimizerCollapsedLabelHtml());
+		optCollapsedLabel.setFont(Fonts.SM);
+
+		JButton reconfigure = pillButton("Reconfigure");
+		reconfigure.setBackground(new Color(0x3E3E3E));
+		reconfigure.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
+		reconfigure.addActionListener(e ->
+		{
+			optFormCollapsed = false;
+			applyOptimizerFormVisibility();
+		});
+
+		row.add(optCollapsedLabel, BorderLayout.CENTER);
+		row.add(reconfigure,       BorderLayout.EAST);
+		return row;
+	}
+
+	private String buildOptimizerCollapsedLabelHtml()
+	{
+		long cap = plugin != null ? plugin.effectiveCapital() : 0L;
+		StringBuilder sb = new StringBuilder("<html><font color='#FFFFFF'><b>")
+			.append(formatCapital(cap)).append("</b></font>")
+			.append("  <font color='#888888'>· ").append(optSlots).append(" slots</font>")
+			.append("  <font color='#888888'>· ").append(optRisk).append("</font>")
+			.append("  <font color='#888888'>· ").append(optMaxFillHours).append("h</font>")
+			.append("</html>");
+		return sb.toString();
+	}
+
+	private void applyOptimizerFormVisibility()
+	{
+		if (optInputsHost == null) return;
+		optInputsHost.removeAll();
+		if (optFormCollapsed && optCollapsedPanel != null)
+		{
+			optCollapsedLabel.setText(buildOptimizerCollapsedLabelHtml());
+			optInputsHost.add(optCollapsedPanel, BorderLayout.CENTER);
+		}
+		else if (optInputsPanel != null)
+		{
+			optInputsHost.add(optInputsPanel, BorderLayout.CENTER);
+		}
+		optInputsHost.revalidate();
+		optInputsHost.repaint();
+	}
+
+	private static boolean memKeyMatches(String key, Boolean state)
+	{
+		switch (key)
+		{
+			case "members": return Boolean.TRUE.equals(state);
+			case "f2p":     return Boolean.FALSE.equals(state);
+			case "any":
+			default:        return state == null;
+		}
+	}
+
+	private String buildOptimizerCapitalLabel()
+	{
+		long cap = plugin != null ? plugin.effectiveCapital() : 0L;
+		if (cap <= 0)
+		{
+			return "<html><font color='#E85050'>Capital not set</font></html>";
+		}
+		return "<html><font color='#888888'>Capital: </font><font color='#FFFFFF'>"
+			+ formatCapital(cap) + "</font></html>";
+	}
+
+	/**
+	 * Helper for the {Slots, Composition} stepper row. Both fields use ◀ / ▶
+	 * buttons + a centered numeric label, kept side-by-side at narrow panel
+	 * widths.
+	 */
+	private JPanel buildLabeledStepperRow(String labelA, java.util.function.IntSupplier getA,
+		java.util.function.IntConsumer setA, int minA, int maxA,
+		String labelB, java.util.function.IntSupplier getB,
+		java.util.function.IntConsumer setB, int minB, int maxB)
+	{
+		JPanel row = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 2));
+		row.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+		row.add(buildStepper(labelA, getA, setA, minA, maxA));
+		row.add(buildStepper(labelB, getB, setB, minB, maxB));
+		return row;
+	}
+
+	private JPanel buildStepper(String label, java.util.function.IntSupplier getter,
+		java.util.function.IntConsumer setter, int min, int max)
+	{
+		JPanel s = new JPanel(new FlowLayout(FlowLayout.LEFT, 2, 0));
+		s.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+		JLabel l = new JLabel(label);
+		l.setFont(Fonts.SM);
+		l.setForeground(new Color(0xAAAAAA));
+		JButton dec = pillButton("◀");
+		JButton inc = pillButton("▶");
+		dec.setBackground(new Color(0x3E3E3E));
+		dec.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
+		inc.setBackground(new Color(0x3E3E3E));
+		inc.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
+		JLabel value = new JLabel(String.valueOf(getter.getAsInt()));
+		value.setFont(Fonts.BOLD);
+		value.setForeground(Color.WHITE);
+		value.setBorder(new EmptyBorder(0, 6, 0, 6));
+		dec.addActionListener(e ->
+		{
+			int v = Math.max(min, getter.getAsInt() - 1);
+			setter.accept(v);
+			value.setText(String.valueOf(getter.getAsInt()));
+		});
+		inc.addActionListener(e ->
+		{
+			int v = Math.min(max, getter.getAsInt() + 1);
+			setter.accept(v);
+			value.setText(String.valueOf(getter.getAsInt()));
+		});
+		s.add(l);
+		s.add(dec);
+		s.add(value);
+		s.add(inc);
+		return s;
+	}
+
+	/** Called by the plugin when an optimizer response lands. */
+	public void onOptimizeResult(com.o7flip.model.OptimizeResult result)
+	{
+		optInFlight = false;
+		lastOptimize = result;
+		// Collapse the form so allocations get the panel's vertical space.
+		// Reconfigure button expands again.
+		optFormCollapsed = true;
+		applyOptimizerFormVisibility();
+		renderOptimizerResult(result);
+	}
+
+	public void onOptimizePremiumRequired(String upgradeUrl)
+	{
+		optInFlight = false;
+		renderOptimizerPremium(upgradeUrl);
+	}
+
+	/**
+	 * Called by the plugin when a per-card swap request returns. Replaces
+	 * the allocation at {@code index} in {@link #lastOptimize} and re-renders.
+	 * Summary stays untouched — the total expected profit shifts slightly,
+	 * but recomputing client-side would drift from the server's reality, so
+	 * we just refresh the rows.
+	 */
+	public void onOptimizeSlotSwapped(int index, com.o7flip.model.OptimizeResult.Allocation next)
+	{
+		if (lastOptimize == null || lastOptimize.allocations == null
+			|| index < 0 || index >= lastOptimize.allocations.size() || next == null)
+		{
+			return;
+		}
+		lastOptimize.allocations.set(index, next);
+		renderOptimizerResult(lastOptimize);
+	}
+
+	public void onOptimizeError(String reason)
+	{
+		optInFlight = false;
+		renderOptimizerEmptyMessage("Couldn't build plan",
+			"Server returned: " + reason + ". Try again, or adjust your inputs.");
+	}
+
+	/**
+	 * Hydrates the Plan tab from a server-saved {@link OptimizerSession}.
+	 * Called on startup (GET /optimize/active) and on the 30s poll cycle so
+	 * the panel always reflects whichever surface last wrote.
+	 *
+	 * Re-uses the existing optimize-result render path by stuffing the live
+	 * slots into a synthetic {@link OptimizeResult} — the card visuals don't
+	 * care which endpoint the data came from.
+	 */
+	public void hydrateOptimizerSession(com.o7flip.model.OptimizerSession session)
+	{
+		if (session == null || session.slots == null || session.slots.isEmpty()) return;
+		// Restore the input controls so the user can see what generated this plan.
+		optSlots        = session.inputs.slots > 0 ? Math.min(8, session.inputs.slots) : optSlots;
+		optRisk         = session.inputs.risk != null && !session.inputs.risk.isEmpty() ? session.inputs.risk : optRisk;
+		optMaxFillHours = session.inputs.maxFillHours != null ? session.inputs.maxFillHours : optMaxFillHours;
+		optMembers      = session.inputs.members;
+
+		com.o7flip.model.OptimizeResult result = new com.o7flip.model.OptimizeResult();
+		result.updatedAt   = session.generatedAt;
+		result.allocations = new java.util.ArrayList<>(session.slots);
+		// Best-effort summary reconstruction — sums what we have without
+		// re-deriving anything the server hadn't already computed.
+		long deployed = 0, cycleProfit = 0;
+		for (com.o7flip.model.OptimizeResult.Allocation a : session.slots)
+		{
+			if (a == null) continue;
+			deployed    += a.gpAllocated;
+			cycleProfit += a.expectedProfit;
+		}
+		result.summary.capitalInput        = session.inputs.capital;
+		result.summary.capitalDeployed     = deployed;
+		result.summary.capitalUnused       = Math.max(0L, session.inputs.capital - deployed);
+		result.summary.slotsRequested      = session.inputs.slots;
+		result.summary.slotsUsed           = session.slots.size();
+		result.summary.risk                = optRisk;
+		result.summary.maxFillHours        = optMaxFillHours;
+		result.summary.members             = optMembers;
+		result.summary.expectedProfitTotal = cycleProfit;
+
+		lastOptimize = result;
+		optFormCollapsed = true;
+		applyOptimizerFormVisibility();
+		renderOptimizerResult(result);
+	}
+
+	/** Called by the plugin after a successful DELETE /optimize/active. */
+	public void onActivePlanCleared()
+	{
+		lastOptimize = null;
+		optFormCollapsed = false;
+		applyOptimizerFormVisibility();
+		renderOptimizerEmpty();
+	}
+
+	private void renderOptimizerEmpty()
+	{
+		renderOptimizerEmptyMessage("Build a plan",
+			"Pick slots / risk / fill window above, then click Build plan.");
+	}
+
+	private void renderOptimizerEmptyMessage(String title, String sub)
+	{
+		if (optimizerListPanel == null) return;
+		optimizerListPanel.removeAll();
+		optimizerListPanel.add(emptyLabel(title, sub));
+		optimizerListPanel.revalidate();
+		optimizerListPanel.repaint();
+	}
+
+	private void renderOptimizerLoading()
+	{
+		renderOptimizerEmptyMessage("Building plan…", "Asking the server to allocate your capital.");
+	}
+
+	private void renderOptimizerPremium(String upgradeUrl)
+	{
+		if (optimizerListPanel == null) return;
+		optimizerListPanel.removeAll();
+
+		JLabel title = new JLabel("Premium required");
+		title.setFont(Fonts.BOLD);
+		title.setForeground(ORANGE);
+		title.setBorder(new EmptyBorder(20, 14, 4, 14));
+		title.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+		JLabel sub = new JLabel("<html><font color='#888888'>"
+			+ "The 8-slot Optimizer is a premium feature. Upgrade to unlock<br>"
+			+ "automatic capital allocation across the best risk-adjusted flips."
+			+ "</font></html>");
+		sub.setFont(Fonts.SM);
+		sub.setBorder(new EmptyBorder(0, 14, 12, 14));
+		sub.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+		JButton upgrade = pillButton("Unlock with Premium");
+		upgrade.setBackground(ORANGE);
+		upgrade.setForeground(Color.BLACK);
+		upgrade.setAlignmentX(Component.LEFT_ALIGNMENT);
+		final String href = upgradeUrl != null && !upgradeUrl.isEmpty() ? upgradeUrl : "https://07flip.com/premium";
+		upgrade.addActionListener(e -> openUrl(href));
+
+		JPanel wrap = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
+		wrap.setBackground(ColorScheme.DARK_GRAY_COLOR);
+		wrap.setBorder(new EmptyBorder(0, 14, 16, 14));
+		wrap.setAlignmentX(Component.LEFT_ALIGNMENT);
+		wrap.add(upgrade);
+
+		optimizerListPanel.add(title);
+		optimizerListPanel.add(sub);
+		optimizerListPanel.add(wrap);
+		optimizerListPanel.revalidate();
+		optimizerListPanel.repaint();
+	}
+
+	private void renderOptimizerResult(com.o7flip.model.OptimizeResult r)
+	{
+		if (optimizerListPanel == null) return;
+		optimizerListPanel.removeAll();
+
+		if (r.allocations == null || r.allocations.isEmpty())
+		{
+			optimizerListPanel.add(emptyLabel("No allocations possible",
+				"Try widening the risk to 'High', or lengthening the fill window."));
+			optimizerListPanel.revalidate();
+			optimizerListPanel.repaint();
+			return;
+		}
+
+		// Summary block first — most important info up top.
+		optimizerListPanel.add(buildOptimizerSummary(r.summary));
+		optimizerListPanel.add(sep());
+
+		for (int i = 0; i < r.allocations.size(); i++)
+		{
+			final int idx = i;
+			Runnable swap = () ->
+			{
+				if (plugin != null && lastOptimize != null)
+				{
+					plugin.swapPlanSlot(idx, lastOptimize);
+				}
+			};
+			optimizerListPanel.add(new com.o7flip.ui.OptimizerAllocationCard(
+				r.allocations.get(i), itemManager, i % 2 != 0, plugin, swap));
+			optimizerListPanel.add(sep());
+		}
+
+		optimizerListPanel.revalidate();
+		optimizerListPanel.repaint();
+	}
+
+	private JPanel buildOptimizerSummary(com.o7flip.model.OptimizeResult.Summary s)
+	{
+		JPanel p = new JPanel();
+		p.setLayout(new BoxLayout(p, BoxLayout.Y_AXIS));
+		p.setBackground(new Color(0x1F1F1F));
+		p.setBorder(new EmptyBorder(10, 12, 10, 12));
+		p.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+		JLabel title = new JLabel("<html><font color='#FF981F'><b>Plan summary</b></font></html>");
+		title.setFont(Fonts.BOLD);
+		title.setAlignmentX(Component.LEFT_ALIGNMENT);
+		p.add(title);
+
+		// Cycle total, NOT per-hour — server changed semantics. The figure is
+		// "what you keep after tax once every slot completes one buy→sell".
+		JLabel profit = new JLabel("<html>"
+			+ "<font color='#888888'>Expected profit: </font>"
+			+ "<font color='#00C27A'><b>+" + FlipItemPanel.formatGpCompact(s.expectedProfitTotal) + "</b></font>"
+			+ "</html>");
+		profit.setFont(Fonts.SM);
+		profit.setAlignmentX(Component.LEFT_ALIGNMENT);
+		profit.setBorder(new EmptyBorder(4, 0, 0, 0));
+		profit.setToolTipText("After-tax profit when all slots complete one buy→sell cycle. Not a per-hour rate.");
+		p.add(profit);
+
+		JLabel capital = new JLabel("<html>"
+			+ "<font color='#888888'>Deployed: </font>"
+			+ "<font color='#FFFFFF'>" + FlipItemPanel.formatGpCompact(s.capitalDeployed) + "</font>"
+			+ "<font color='#888888'> / " + FlipItemPanel.formatGpCompact(s.capitalInput) + "</font>"
+			+ (s.capitalUnused > 0
+				? "  <font color='#888888'>· Unused " + FlipItemPanel.formatGpCompact(s.capitalUnused) + "</font>"
+				: "")
+			+ "</html>");
+		capital.setFont(Fonts.SM);
+		capital.setAlignmentX(Component.LEFT_ALIGNMENT);
+		p.add(capital);
+
+		StringBuilder mix = new StringBuilder("<html><font color='#888888'>Slots: </font>")
+			.append("<font color='#FFFFFF'>").append(s.slotsUsed).append("</font>")
+			.append("<font color='#888888'> / ").append(s.slotsRequested).append("</font>");
+		mix.append("  <font color='#888888'>· ").append(s.risk).append(" risk</font>");
+		if (s.maxFillHours != null)
+		{
+			mix.append("<font color='#888888'> · ").append(s.maxFillHours).append("h window</font>");
+		}
+		mix.append("</html>");
+		JLabel mixLbl = new JLabel(mix.toString());
+		mixLbl.setFont(Fonts.SM);
+		mixLbl.setAlignmentX(Component.LEFT_ALIGNMENT);
+		p.add(mixLbl);
+
+		// Contextual hints. The optimizer returning fewer slots / leftover
+		// capital isn't always a problem — sometimes (small capital → ≤2
+		// concentrated positions) it's the genuinely optimal play. Other
+		// times it's a signal that the risk gate or fill window is too tight.
+		// We branch on the case so the message is directive, not generic.
+		JLabel hint = buildPlanHint(s);
+		if (hint != null)
+		{
+			hint.setBorder(new EmptyBorder(6, 0, 0, 0));
+			p.add(hint);
+		}
+
+		return p;
+	}
+
+	/**
+	 * Produces a contextual one-or-two-line hint about the plan's deployment
+	 * profile, or null when everything looks normal (full slots + full
+	 * capital). Cases distinguished:
+	 *
+	 * <ol>
+	 *   <li><b>Optimal concentration</b> — ≤2 slots used + ≥95% deployed.
+	 *       Likely small capital funnelling into one bulk position. Positive
+	 *       framing, no warning icon.</li>
+	 *   <li><b>Gates too tight</b> — slots short on Low/Medium risk. Suggest
+	 *       widening risk so more items qualify.</li>
+	 *   <li><b>Window too short</b> — slots short on High risk (no further
+	 *       risk knob to widen). Suggest a longer fill window.</li>
+	 *   <li><b>Capital unused</b> — slots full but ≥5% of capital sits
+	 *       idle. Generic widen-the-knobs prompt.</li>
+	 * </ol>
+	 */
+	private JLabel buildPlanHint(com.o7flip.model.OptimizeResult.Summary s)
+	{
+		boolean meaningfulUnused = s.capitalUnused > 100_000 && s.capitalInput > 0
+			&& (s.capitalUnused * 100) / s.capitalInput >= 5;
+		boolean slotsShort = s.slotsUsed < s.slotsRequested;
+		boolean nearFullyDeployed = s.capitalInput > 0
+			&& (s.capitalDeployed * 100) / s.capitalInput >= 95;
+		String risk = s.risk == null ? "medium" : s.risk.toLowerCase();
+		boolean isLowOrMedium = "low".equals(risk) || "medium".equals(risk);
+
+		// Case 1 — optimal small-capital concentration. Encouraging copy.
+		if (slotsShort && s.slotsUsed > 0 && s.slotsUsed <= 2 && nearFullyDeployed)
+		{
+			String html = "<html><font color='#00C27A'>● </font>"
+				+ "<font color='#FFFFFF'>" + FlipItemPanel.formatGpCompact(s.capitalInput) + "</font>"
+				+ "<font color='#888888'> was best deployed into "
+				+ (s.slotsUsed == 1 ? "a single position" : s.slotsUsed + " concentrated positions")
+				+ ".</font><br>"
+				+ "<font color='#888888'>This is the optimal play at this capital — "
+				+ "split across sessions for more breadth.</font></html>";
+			JLabel l = new JLabel(html);
+			l.setFont(Fonts.SM);
+			l.setAlignmentX(Component.LEFT_ALIGNMENT);
+			return l;
+		}
+
+		// Case 2 — slots short on Low/Medium → gates filtering aggressively.
+		if (slotsShort && isLowOrMedium)
+		{
+			String suggest = "low".equals(risk) ? "Medium or High" : "High";
+			String html = "<html><font color='#FF981F'>⚠ </font>"
+				+ "<font color='#FFFFFF'>Only " + s.slotsUsed + "</font>"
+				+ "<font color='#888888'> of " + s.slotsRequested + " slots filled at </font>"
+				+ "<font color='#FFFFFF'>" + risk + "</font>"
+				+ "<font color='#888888'> risk — not enough items pass the tier's gates.</font><br>"
+				+ "<font color='#888888'>Try </font>"
+				+ "<font color='#FFFFFF'>" + suggest + "</font>"
+				+ "<font color='#888888'> to fill the remaining slots.</font></html>";
+			JLabel l = new JLabel(html);
+			l.setFont(Fonts.SM);
+			l.setAlignmentX(Component.LEFT_ALIGNMENT);
+			return l;
+		}
+
+		// Case 3 — slots short on High → risk already maxed; suggest window.
+		if (slotsShort)
+		{
+			String html = "<html><font color='#FF981F'>⚠ </font>"
+				+ "<font color='#FFFFFF'>Only " + s.slotsUsed + "</font>"
+				+ "<font color='#888888'> of " + s.slotsRequested + " slots filled.</font><br>"
+				+ "<font color='#888888'>Try a longer Window so slower-filling items qualify.</font></html>";
+			JLabel l = new JLabel(html);
+			l.setFont(Fonts.SM);
+			l.setAlignmentX(Component.LEFT_ALIGNMENT);
+			return l;
+		}
+
+		// Case 4 — slots full but capital idle (server's volume cap doing its job).
+		if (meaningfulUnused)
+		{
+			String html = "<html><font color='#FF981F'>⚠ </font>"
+				+ "<font color='#FFFFFF'>" + FlipItemPanel.formatGpCompact(s.capitalUnused) + "</font>"
+				+ "<font color='#888888'> can't be deployed at </font>"
+				+ "<font color='#FFFFFF'>" + risk + "</font>"
+				+ (s.maxFillHours != null
+					? "<font color='#888888'> / </font>"
+						+ "<font color='#FFFFFF'>" + s.maxFillHours + "h</font>"
+					: "")
+				+ "<font color='#888888'>.</font><br>"
+				+ "<font color='#888888'>Try a longer Window or higher Risk to absorb more capital.</font></html>";
+			JLabel l = new JLabel(html);
+			l.setFont(Fonts.SM);
+			l.setAlignmentX(Component.LEFT_ALIGNMENT);
+			return l;
+		}
+
+		return null;
+	}
+
+	private JPanel buildScreenersTab()
+	{
+		// ── List view ────────────────────────────────────────────────────────
+		screenersListPanel = listPanel();
+		JPanel listView = assembleTab(null, screenersListPanel, null);
+
+		// ── Detail view ──────────────────────────────────────────────────────
+		screenersDetailPanel = listPanel();
+		screenersDetailTitle = new JLabel("");
+		screenersDetailTitle.setFont(Fonts.BOLD);
+		screenersDetailTitle.setForeground(Color.WHITE);
+
+		JButton backBtn = pillButton("← Back");
+		backBtn.setBackground(new Color(0x3E3E3E));
+		backBtn.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
+		backBtn.addActionListener(e ->
+		{
+			activeScreenerPreset = null;
+			renderScreenersList();
+		});
+
+		JPanel detailHeader = new JPanel(new BorderLayout(8, 0));
+		detailHeader.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+		detailHeader.setBorder(new EmptyBorder(6, 8, 6, 8));
+		detailHeader.add(backBtn,              BorderLayout.WEST);
+		detailHeader.add(screenersDetailTitle, BorderLayout.CENTER);
+
+		ListWrapperPanel detailWrapper = new ListWrapperPanel(screenersDetailPanel);
+		detailWrapper.setBackground(ColorScheme.DARK_GRAY_COLOR);
+		JScrollPane detailSp = new JScrollPane(detailWrapper);
+		detailSp.setBorder(BorderFactory.createEmptyBorder());
+		detailSp.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
+		detailSp.getViewport().setBackground(ColorScheme.DARK_GRAY_COLOR);
+		detailSp.getVerticalScrollBar().setPreferredSize(new Dimension(6, 0));
+
+		JPanel detailView = new JPanel(new BorderLayout());
+		detailView.setBackground(ColorScheme.DARK_GRAY_COLOR);
+		detailView.add(detailHeader, BorderLayout.NORTH);
+		detailView.add(detailSp,     BorderLayout.CENTER);
+
+		// ── CardLayout shell ─────────────────────────────────────────────────
+		screenersTabCard = new JPanel(new CardLayout());
+		screenersTabCard.add(listView,   "list");
+		screenersTabCard.add(detailView, "detail");
+		return screenersTabCard;
+	}
+
+	/**
+	 * Returns the tab index that sits at the TOP-LEFT of the rendered tab
+	 * strip — i.e. the visually-first sub-tab the user sees. With our
+	 * {@code shouldRotateTabRuns=false} pinning, first-inserted tabs land
+	 * on the BOTTOM run (closest to content) and later tabs on rows above.
+	 * The top-left position is therefore the first tab of the LAST run.
+	 *
+	 * For n ≤ perRow → all on one row → top-left = index 0.
+	 * Otherwise → the partial-bottom-row holds the first (n mod perRow)
+	 * tabs (or all perRow if it divides evenly), so the top row's first
+	 * tab is at index (bottomRowSize).
+	 *
+	 * Examples (with perRow = 3): n=6 → 3+3 → top-left index 3.
+	 * (with perRow = 4): n=8 → 4+4 → top-left index 4.
+	 */
+	private int topLeftSubTabIndex(int n)
+	{
+		if (n <= 0) return 0;
+		int perRow;
+		if (n <= 4)      perRow = n;
+		else if (n <= 6) perRow = 3;
+		else if (n <= 8) perRow = 4;
+		else             perRow = (int) Math.ceil(n / 2.0);
+		if (n <= perRow) return 0;
+		int bottomRowSize = n % perRow;
+		if (bottomRowSize == 0) bottomRowSize = perRow;
+		return bottomRowSize;
+	}
+
+	/**
+	 * The Other tab — a nested {@link JTabbedPane} hosting any feature from
+	 * {@link #MOVABLE_POOL} that the user didn't promote to Row 1. Auto-
+	 * populates based on the user's top-row selection: swap Dumps in to
+	 * Row 1 and it disappears from Other; swap it out and it reappears.
+	 *
+	 * Six per-feature content panels are passed in (we can't conditionally
+	 * skip building them because list-panel fields like {@code dipsListPanel}
+	 * are read by render methods even when the tab isn't visible).
+	 */
+	private JPanel buildOtherTab(JPanel decantContent, JPanel dipsContent,
+	                             JPanel highAlchContent, JPanel tabletsContent,
+	                             JPanel favouritesContent, JPanel screenersContent,
+	                             JPanel planContent,
+	                             JPanel moonContent, JPanel barrowsContent,
+	                             JPanel dumpsContent, JPanel alertsContent)
+	{
+		JTabbedPane inner = new JTabbedPane(JTabbedPane.TOP, JTabbedPane.WRAP_TAB_LAYOUT);
+		inner.setBackground(ColorScheme.DARK_GRAY_COLOR);
+		inner.setForeground(Color.WHITE);
+		inner.setFont(Fonts.SM);
+		// Other's inner pane has up to 6 sub-tabs — same row-rotation concern
+		// applies. Pin the order so the user sees consistent layout regardless
+		// of which sub-tab is selected.
+		applyStaticOrderUI(inner);
+
+		// Map every movable name → its content panel. We add a tab to Other
+		// only when (a) the feature isn't in Row 1, and (b) the user's
+		// visibility toggle for it is on.
+		java.util.Map<String, JPanel> byName = new java.util.HashMap<>();
+		byName.put("Decant",  decantContent);
+		byName.put("Dips",    dipsContent);
+		byName.put("Alch",    highAlchContent);
+		byName.put("Tablets", tabletsContent);
+		byName.put("Favs",    favouritesContent);
+		byName.put("Screener",screenersContent);
+		byName.put("Plan",    planContent);
+		byName.put("Moons",   moonContent);
+		byName.put("Barrows", barrowsContent);
+		byName.put("Dumps",   dumpsContent);
+		byName.put("Alerts",  alertsContent);
+
+		java.util.Set<String> topRow = new java.util.HashSet<>(resolveTopRow());
+		for (String name : MOVABLE_POOL)
+		{
+			if (topRow.contains(name)) continue;
+			if (!subFeatureEnabled(name)) continue;
+			JPanel content = byName.get(name);
+			if (content == null) continue;
+			inner.addTab(name, content);
+		}
+
+		// Default selection: if the user has a saved sub-tab choice, restore
+		// it; otherwise pick the visually-first tab (top-left of the strip)
+		// rather than index 0 (which is whichever sub-tab landed in
+		// MOVABLE_POOL first and ends up on the bottom run with our static
+		// run-order pinning). Done BEFORE attaching the change listener so
+		// the restore doesn't burn a fetch slot via onOtherSubTabSelected.
+		if (inner.getTabCount() > 0)
+		{
+			int targetIdx = -1;
+			if (lastOtherSubTab != null)
+			{
+				for (int i = 0; i < inner.getTabCount(); i++)
+				{
+					if (lastOtherSubTab.equals(inner.getTitleAt(i)))
+					{
+						targetIdx = i;
+						break;
+					}
+				}
+			}
+			if (targetIdx < 0)
+			{
+				targetIdx = topLeftSubTabIndex(inner.getTabCount());
+			}
+			inner.setSelectedIndex(targetIdx);
+		}
+
+		// Tab-select hook — fetches fresh data for the sub-tab the user just
+		// opened, but only when the data is older than the throttle window
+		// (handled plugin-side). Screeners and Favs keep their dedicated
+		// handlers (Screeners has its own 2-min poll floor; Favs requires
+		// the auth check). Everyone else routes through the generic helper
+		// which enforces a 30-second floor per sub-tab.
+		inner.addChangeListener(e ->
+		{
+			int idx = inner.getSelectedIndex();
+			if (idx < 0 || plugin == null) return;
+			String title = inner.getTitleAt(idx);
+			// If we're leaving the Plan tab (the previous sub-tab was Plan
+			// and the new one isn't), stop the 30s session-poll loop.
+			if ("Plan".equals(lastOtherSubTab) && !"Plan".equals(title))
+			{
+				plugin.onPlanTabDeselected();
+			}
+			lastOtherSubTab = title;
+			switch (title)
+			{
+				case "Screener":
+					plugin.onScreenersTabSelected();
+					return;
+				case "Favs":
+					plugin.onFavouritesTabSelected();
+					return;
+				case "Plan":
+					plugin.onPlanTabSelected();
+					return;
+				default:
+					plugin.onOtherSubTabSelected(title);
+			}
+		});
+
+		JPanel wrap = new JPanel(new BorderLayout());
+		wrap.setBackground(ColorScheme.DARK_GRAY_COLOR);
+		wrap.add(inner, BorderLayout.CENTER);
+		return wrap;
 	}
 
 	/**

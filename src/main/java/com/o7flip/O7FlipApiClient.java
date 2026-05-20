@@ -35,12 +35,18 @@ import com.o7flip.model.BarrowsSet;
 import com.o7flip.model.DecantItem;
 import com.o7flip.model.DumpItem;
 import com.o7flip.model.FlipItem;
+import com.o7flip.model.DipItem;
+import com.o7flip.model.HighAlchItem;
 import com.o7flip.model.ItemInsights;
 import com.o7flip.model.MoonItem;
 import com.o7flip.model.MoonSet;
+import com.o7flip.model.OptimizeResult;
 import com.o7flip.model.RecommendedPrices;
+import com.o7flip.model.ScreenerMatch;
+import com.o7flip.model.ScreenerPreset;
 import com.o7flip.model.SearchResultItem;
 import com.o7flip.model.SpikeItem;
+import com.o7flip.model.TeleTablet;
 import com.o7flip.model.TrackerStats;
 import com.o7flip.model.TradeRecord;
 import org.slf4j.Logger;
@@ -805,7 +811,27 @@ public class O7FlipApiClient
 		}
 		if (sort != null && !sort.isEmpty())
 		{
-			url.append("&sort=").append(sort);
+			// "buyPriceDesc" / "sellPriceDesc" pseudo-keys are split here into
+			// real (sort, order) pairs so the panel can offer ascending +
+			// descending variants of the same field in one dropdown.
+			String realSort = sort;
+			String order = null;
+			if (sort.endsWith("Desc"))
+			{
+				realSort = sort.substring(0, sort.length() - 4);
+				order = "desc";
+			}
+			else if ("buyPrice".equals(sort) || "sellPrice".equals(sort))
+			{
+				// Price ascending is the natural intuition for "buy cheap" —
+				// override the server's default (desc) for these two keys.
+				order = "asc";
+			}
+			url.append("&sort=").append(realSort);
+			if (order != null)
+			{
+				url.append("&order=").append(order);
+			}
 		}
 		if (minProfit > 0)
 		{
@@ -875,6 +901,1008 @@ public class O7FlipApiClient
 		}
 	}
 
+	/**
+	 * Fetches the /dips feed — a mix of dip-window and ATL items distinguished
+	 * by the {@code type} field on each row.
+	 *
+	 * @param sort one of {@code "recent"} (default), {@code "dip_pct"} or
+	 *             {@code "atl_pct"}; pass null/empty for server default.
+	 * @param window {@code "1d"} (default), {@code "7d"}, or {@code "30d"}.
+	 *               Determines which dip window the server uses to populate
+	 *               {@code dip_pct} and to gate the -5% filter.
+	 */
+	public void fetchDips(String sort, String window, int page,
+	                      BiConsumer<List<DipItem>, Integer> callback)
+	{
+		StringBuilder url = new StringBuilder(BASE_URL + "/dips?limit=").append(PAGE_LIMIT)
+			.append("&page=").append(page);
+		if (sort != null && !sort.isEmpty())
+		{
+			url.append("&sort=").append(sort);
+		}
+		// "1d" is the server default — sending it explicitly is redundant.
+		// Anything else gets passed through verbatim.
+		if (window != null && !window.isEmpty() && !"1d".equals(window))
+		{
+			url.append("&activity_window=").append(window);
+		}
+		fetch(url.toString(), new Callback()
+		{
+			@Override
+			public void onFailure(Call call, IOException e)
+			{
+				log.warn("[07Flip] fetchDips failed: {}", e.getMessage());
+				callback.accept(new ArrayList<>(), 0);
+			}
+
+			@Override
+			public void onResponse(Call call, Response response) throws IOException
+			{
+				parsePagedResponse(response, "dips", O7FlipApiClient.this::parseDipItem, callback);
+			}
+		});
+	}
+
+	// -------------------------------------------------------------------------
+	// /high-alch — High Alchemy profit list (anon, no auth)
+	// -------------------------------------------------------------------------
+
+	public void fetchHighAlch(String sort, int page, boolean fireStaff, boolean bryophyta,
+	                          Consumer<HighAlchItem.Response> callback)
+	{
+		StringBuilder url = new StringBuilder(BASE_URL + "/high-alch?limit=").append(PAGE_LIMIT)
+			.append("&page=").append(page);
+		if (sort != null && !sort.isEmpty())
+		{
+			url.append("&sort=").append(sort);
+		}
+		if (fireStaff)
+		{
+			url.append("&fireStaff=true");
+		}
+		if (bryophyta)
+		{
+			url.append("&bryophyta=true");
+		}
+		fetch(url.toString(), new Callback()
+		{
+			@Override
+			public void onFailure(Call call, IOException e)
+			{
+				log.warn("[07Flip] fetchHighAlch failed: {}", e.getMessage());
+				callback.accept(emptyHighAlchResponse());
+			}
+
+			@Override
+			public void onResponse(Call call, Response response) throws IOException
+			{
+				if (response.code() == 429)
+				{
+					markRateLimited();
+				}
+				if (!response.isSuccessful() || response.body() == null)
+				{
+					log.warn("[07Flip] fetchHighAlch HTTP {}", response.code());
+					callback.accept(emptyHighAlchResponse());
+					return;
+				}
+				try
+				{
+					JsonObject root = gson.fromJson(response.body().string(), JsonObject.class);
+					HighAlchItem.Response out = new HighAlchItem.Response();
+					if (root.has("rune_prices") && root.get("rune_prices").isJsonObject())
+					{
+						JsonObject rp = root.getAsJsonObject("rune_prices");
+						out.natureRunePrice = getLong(rp, "nature_rune_price", 0);
+						out.fireRunePrice   = getLong(rp, "fire_rune_price", 0);
+						out.alchCost        = getLong(rp, "alch_cost", 0);
+						out.fireStaff       = getBool(rp, "fire_staff", false);
+						out.bryophytaStaff  = getBool(rp, "bryophyta_staff", false);
+					}
+					out.items = parseArray(root, "items", O7FlipApiClient.this::parseHighAlchItem);
+					out.total = getInt(root, "total", out.items.size());
+					callback.accept(out);
+				}
+				catch (Exception e)
+				{
+					log.warn("[07Flip] fetchHighAlch parse error: {}", e.getMessage());
+					callback.accept(emptyHighAlchResponse());
+				}
+			}
+		});
+	}
+
+	private static HighAlchItem.Response emptyHighAlchResponse()
+	{
+		HighAlchItem.Response r = new HighAlchItem.Response();
+		r.items = new ArrayList<>();
+		return r;
+	}
+
+	private HighAlchItem parseHighAlchItem(JsonObject obj)
+	{
+		HighAlchItem item = new HighAlchItem();
+		item.itemId        = getInt(obj, "item_id", 0);
+		item.name          = getString(obj, "name", "Unknown");
+		item.buyPrice      = getLong(obj, "buy_price", 0);
+		item.highAlchValue = getLong(obj, "high_alch_value", 0);
+		item.runeCost      = getLong(obj, "rune_cost", 0);
+		item.profit        = getLong(obj, "profit", 0);
+		item.roiPct        = getDouble(obj, "roi_pct", 0);
+		item.buyLimit      = getInt(obj, "buy_limit", 0);
+		item.dailyVolume   = getInt(obj, "daily_volume", 0);
+		item.lastUpdated   = getString(obj, "last_updated", "");
+		return item;
+	}
+
+	// -------------------------------------------------------------------------
+	// /tele-tablets — Tablet crafting profitability (anon, no auth)
+	// -------------------------------------------------------------------------
+
+	public void fetchTeleTablets(String sort, String spellbook, boolean profitableOnly,
+	                             Consumer<List<TeleTablet>> callback)
+	{
+		StringBuilder url = new StringBuilder(BASE_URL + "/tele-tablets?");
+		boolean first = true;
+		if (sort != null && !sort.isEmpty())
+		{
+			url.append("sort=").append(sort);
+			first = false;
+		}
+		if (spellbook != null && !spellbook.isEmpty())
+		{
+			if (!first) url.append('&');
+			url.append("spellbook=").append(spellbook);
+			first = false;
+		}
+		if (profitableOnly)
+		{
+			if (!first) url.append('&');
+			url.append("profitable=true");
+		}
+		fetch(url.toString(), new Callback()
+		{
+			@Override
+			public void onFailure(Call call, IOException e)
+			{
+				log.warn("[07Flip] fetchTeleTablets failed: {}", e.getMessage());
+				callback.accept(new ArrayList<>());
+			}
+
+			@Override
+			public void onResponse(Call call, Response response) throws IOException
+			{
+				callback.accept(parseArray(response, "tablets", O7FlipApiClient.this::parseTeleTablet));
+			}
+		});
+	}
+
+	private TeleTablet parseTeleTablet(JsonObject obj)
+	{
+		TeleTablet t = new TeleTablet();
+		t.name         = getString(obj, "name", "Unknown");
+		t.tabletId     = getInt(obj, "tablet_id", 0);
+		t.spellbook    = getString(obj, "spellbook", "Standard");
+		t.materialCost = getLong(obj, "material_cost", 0);
+		t.sellPrice    = getLong(obj, "sell_price", 0);
+		t.sellAfterTax = getLong(obj, "sell_after_tax", 0);
+		t.profit       = getLong(obj, "profit", 0);
+		t.roiPct       = getDouble(obj, "roi_pct", 0);
+		t.dailyVolume  = getIntOrNull(obj, "daily_volume");
+		JsonArray arr  = obj.getAsJsonArray("ingredients");
+		if (arr != null)
+		{
+			for (int i = 0; i < arr.size(); i++)
+			{
+				try
+				{
+					JsonObject io = arr.get(i).getAsJsonObject();
+					TeleTablet.Ingredient ing = new TeleTablet.Ingredient();
+					ing.name       = getString(io, "name", "");
+					ing.itemId     = getInt(io, "item_id", 0);
+					ing.qty        = getInt(io, "qty", 0);
+					ing.unitPrice  = getLong(io, "unit_price", 0);
+					ing.totalPrice = getLong(io, "total_price", 0);
+					t.ingredients.add(ing);
+				}
+				catch (Exception e)
+				{
+					log.warn("[07Flip] tele-tablet ingredient parse skipped: {}", e.getMessage());
+				}
+			}
+		}
+		return t;
+	}
+
+	// -------------------------------------------------------------------------
+	// /favourites — user's saved item list (auth required)
+	// -------------------------------------------------------------------------
+
+	/**
+	 * Calls back with the user's favourites, enriched with the same flip-row
+	 * fields {@link FlipItem} carries. Items the server marks {@code stale}
+	 * are returned with whatever non-null fields it could populate — usually
+	 * just item_id + name.
+	 *
+	 * No API key → callback fires once with an empty list.
+	 */
+	public void fetchFavourites(Consumer<List<FlipItem>> callback)
+	{
+		String key = sanitizedApiKey();
+		if (key == null)
+		{
+			callback.accept(new ArrayList<>());
+			return;
+		}
+		fetch(BASE_URL + "/favourites", new Callback()
+		{
+			@Override
+			public void onFailure(Call call, IOException e)
+			{
+				log.warn("[07Flip] fetchFavourites failed: {}", e.getMessage());
+				callback.accept(new ArrayList<>());
+			}
+
+			@Override
+			public void onResponse(Call call, Response response) throws IOException
+			{
+				int code = response.code();
+				if (code == 401 && onUnauthorized != null)
+				{
+					try { onUnauthorized.run(); } catch (Exception ignored) {}
+					response.close();
+					callback.accept(new ArrayList<>());
+					return;
+				}
+				if (!response.isSuccessful() || response.body() == null)
+				{
+					log.warn("[07Flip] GET /favourites HTTP {}", code);
+					response.close();
+					callback.accept(new ArrayList<>());
+					return;
+				}
+				// Parse + log result count. The body has to be consumed before
+				// we can read the parsed list, so we read the string once and
+				// reuse it for the parse + the diagnostic.
+				try
+				{
+					String body = response.body().string();
+					com.google.gson.JsonObject root = gson.fromJson(body, com.google.gson.JsonObject.class);
+					List<FlipItem> items = new ArrayList<>();
+					com.google.gson.JsonArray arr = root != null && root.has("favourites") && root.get("favourites").isJsonArray()
+						? root.getAsJsonArray("favourites") : null;
+					if (arr != null)
+					{
+						for (int i = 0; i < arr.size(); i++)
+						{
+							try { items.add(parseFlipItem(arr.get(i).getAsJsonObject())); }
+							catch (Exception e) { log.warn("[07Flip] favourites item parse skipped: {}", e.getMessage()); }
+						}
+					}
+					int serverCount = root != null && root.has("count") && !root.get("count").isJsonNull()
+						? root.get("count").getAsInt() : items.size();
+					if (items.isEmpty())
+					{
+						// Surfacing this at INFO is intentional — when the user
+						// has favourites on the website but the plugin reads 0,
+						// this is the diagnostic. (Could be apiKey↔userId
+						// mismatch, replication lag, or an empty list.)
+						log.info("[07Flip] GET /favourites returned 0 items (server count={})", serverCount);
+					}
+					else
+					{
+						log.debug("[07Flip] GET /favourites returned {} items (server count={})",
+							items.size(), serverCount);
+					}
+					callback.accept(items);
+				}
+				catch (Exception e)
+				{
+					log.warn("[07Flip] GET /favourites parse error: {}", e.getMessage());
+					callback.accept(new ArrayList<>());
+				}
+			}
+		});
+	}
+
+	/** Optional handler the plugin sets to be notified of 401s from
+	 *  /favourites. Plugin uses it to surface a "key invalid" prompt. */
+	private volatile Runnable onUnauthorized;
+
+	/** Plugin wires in the 401 handler — invoked from the OkHttp callback
+	 *  thread, so the handler is responsible for marshalling back to EDT. */
+	public void setOnFavouritesUnauthorized(Runnable handler)
+	{
+		this.onUnauthorized = handler;
+	}
+
+	/**
+	 * Adds {@code itemId} to the user's favourites. {@code onResult} is fired
+	 * with {@code true} on a 2xx response and {@code false} otherwise. Always
+	 * fired exactly once.
+	 */
+	public void addFavourite(int itemId, Consumer<Boolean> onResult)
+	{
+		mutateFavourite("POST", itemId, onResult);
+	}
+
+	/** Removes {@code itemId} from the user's favourites. */
+	public void removeFavourite(int itemId, Consumer<Boolean> onResult)
+	{
+		mutateFavourite("DELETE", itemId, onResult);
+	}
+
+	private void mutateFavourite(String method, int itemId, Consumer<Boolean> onResult)
+	{
+		String key = sanitizedApiKey();
+		if (key == null)
+		{
+			onResult.accept(false);
+			return;
+		}
+		JsonObject body = new JsonObject();
+		body.addProperty("item_id", itemId);
+		RequestBody requestBody = RequestBody.create(MEDIA_TYPE_JSON, gson.toJson(body));
+		Request.Builder builder = new Request.Builder()
+			.url(BASE_URL + "/favourites")
+			.header("User-Agent", USER_AGENT)
+			.header("Authorization", "Bearer " + key);
+		if ("DELETE".equals(method))
+		{
+			builder.delete(requestBody);
+		}
+		else
+		{
+			builder.post(requestBody);
+		}
+		okHttpClient.newCall(builder.build()).enqueue(new Callback()
+		{
+			@Override
+			public void onFailure(Call call, IOException e)
+			{
+				log.warn("[07Flip] {} /favourites failed: {}", method, e.getMessage());
+				onResult.accept(false);
+			}
+
+			@Override
+			public void onResponse(Call call, Response response) throws IOException
+			{
+				int code = response.code();
+				boolean ok = response.isSuccessful();
+				if (!ok)
+				{
+					log.warn("[07Flip] {} /favourites HTTP {}", method, code);
+					if (code == 401 && onUnauthorized != null)
+					{
+						try { onUnauthorized.run(); } catch (Exception ignored) {}
+					}
+				}
+				response.close();
+				onResult.accept(ok);
+			}
+		});
+	}
+
+	// -------------------------------------------------------------------------
+	// /optimize — premium-gated 8-slot portfolio optimizer
+	// -------------------------------------------------------------------------
+
+	/**
+	 * Calls {@code POST /api/runelite/optimize} with the user's chosen
+	 * inputs and dispatches one of three callbacks depending on the
+	 * response:
+	 * <ul>
+	 *   <li>{@code onSuccess(OptimizeResult)} on 200 — full allocation plan.</li>
+	 *   <li>{@code onPremiumRequired(upgradeUrl)} on 403 — free user. The
+	 *       URL is the server's upgrade target, ready to feed into LinkBrowser.</li>
+	 *   <li>{@code onError(reason)} on validation 400, transport failure, or
+	 *       parse failure. {@code reason} is the server's error code (e.g.
+	 *       {@code invalid_capital}) or a short transport-error string.</li>
+	 * </ul>
+	 *
+	 * Each callback fires at most once.
+	 */
+	public void fetchOptimize(long capital, int slots, String risk,
+	                          int maxFillHours, Boolean members, java.util.List<Integer> excludeItemIds,
+	                          Consumer<OptimizeResult> onSuccess,
+	                          Consumer<String> onPremiumRequired,
+	                          Consumer<String> onError)
+	{
+		String key = sanitizedApiKey();
+		if (key == null)
+		{
+			if (onError != null) onError.accept("no_api_key");
+			return;
+		}
+
+		JsonObject body = new JsonObject();
+		body.addProperty("capital", capital);
+		body.addProperty("slots", slots);
+		if (risk != null && !risk.isEmpty()) body.addProperty("risk", risk);
+		if (maxFillHours > 0 && maxFillHours != 4) body.addProperty("max_fill_hours", maxFillHours);
+		if (members != null) body.addProperty("members", members);
+		if (excludeItemIds != null && !excludeItemIds.isEmpty())
+		{
+			JsonArray ex = new JsonArray();
+			for (Integer id : excludeItemIds) if (id != null && id > 0) ex.add(id);
+			body.add("exclude_item_ids", ex);
+		}
+
+		RequestBody requestBody = RequestBody.create(MEDIA_TYPE_JSON, gson.toJson(body));
+		Request request = new Request.Builder()
+			.url(BASE_URL + "/optimize")
+			.post(requestBody)
+			.header("User-Agent", USER_AGENT)
+			.header("Authorization", "Bearer " + key)
+			.build();
+
+		okHttpClient.newCall(request).enqueue(new Callback()
+		{
+			@Override
+			public void onFailure(Call call, IOException e)
+			{
+				log.warn("[07Flip] /optimize failed: {}", e.getMessage());
+				if (onError != null) onError.accept("network_error");
+			}
+
+			@Override
+			public void onResponse(Call call, Response response) throws IOException
+			{
+				int code = response.code();
+				try
+				{
+					if (code == 403)
+					{
+						String upgrade = "https://07flip.com/premium";
+						try
+						{
+							JsonObject obj = gson.fromJson(response.body().string(), JsonObject.class);
+							if (obj != null && obj.has("upgrade_url") && !obj.get("upgrade_url").isJsonNull())
+							{
+								upgrade = obj.get("upgrade_url").getAsString();
+							}
+						}
+						catch (Exception ignored) {}
+						if (onPremiumRequired != null) onPremiumRequired.accept(upgrade);
+						return;
+					}
+					if (code == 400)
+					{
+						String reason = "invalid_body";
+						try
+						{
+							JsonObject obj = gson.fromJson(response.body().string(), JsonObject.class);
+							if (obj != null && obj.has("error")) reason = obj.get("error").getAsString();
+						}
+						catch (Exception ignored) {}
+						log.warn("[07Flip] /optimize 400 {}", reason);
+						if (onError != null) onError.accept(reason);
+						return;
+					}
+					if (!response.isSuccessful() || response.body() == null)
+					{
+						log.warn("[07Flip] /optimize HTTP {}", code);
+						if (onError != null) onError.accept("http_" + code);
+						return;
+					}
+					OptimizeResult out = parseOptimizeResponse(response.body().string());
+					if (onSuccess != null) onSuccess.accept(out);
+				}
+				finally
+				{
+					response.close();
+				}
+			}
+		});
+	}
+
+	private OptimizeResult parseOptimizeResponse(String json)
+	{
+		OptimizeResult out = new OptimizeResult();
+		try
+		{
+			JsonObject root = gson.fromJson(json, JsonObject.class);
+			out.updatedAt = getString(root, "updated_at", "");
+			if (root.has("summary") && root.get("summary").isJsonObject())
+			{
+				JsonObject s = root.getAsJsonObject("summary");
+				OptimizeResult.Summary sum = out.summary;
+				sum.capitalInput               = getLong(s, "capital_input", 0);
+				sum.capitalDeployed            = getLong(s, "capital_deployed", 0);
+				sum.capitalUnused              = getLong(s, "capital_unused", 0);
+				sum.slotsUsed                  = getInt(s,  "slots_used", 0);
+				sum.slotsRequested             = getInt(s,  "slots_requested", 0);
+				sum.risk                       = getString(s, "risk", "medium");
+				sum.members                    = getBoolOrNull(s, "members");
+				sum.expectedProfitTotal        = getLong(s, "expected_profit_total", 0);
+				sum.avgFillConfidence          = getDoubleOrNull(s, "avg_fill_confidence");
+				sum.minFillConfidence          = getDoubleOrNull(s, "min_fill_confidence");
+				sum.recommendedCount           = getInt(s, "recommended_count", 0);
+				sum.rawCount                   = getInt(s, "raw_count", 0);
+				sum.maxFillHours               = getIntOrNull(s, "max_fill_hours");
+				sum.avgEstimatedFillHours      = getDoubleOrNull(s, "avg_estimated_fill_hours");
+				sum.maxEstimatedFillHours      = getDoubleOrNull(s, "max_estimated_fill_hours");
+				sum.fillConfidenceFormula      = getString(s, "fill_confidence_formula", "");
+				sum.pricingNote                = getString(s, "pricing_note", "");
+				sum.compositionNote            = getString(s, "composition_note", "");
+				sum.realismNote                = getString(s, "realism_note", "");
+			}
+			if (root.has("allocations") && root.get("allocations").isJsonArray())
+			{
+				JsonArray arr = root.getAsJsonArray("allocations");
+				for (int i = 0; i < arr.size(); i++)
+				{
+					try
+					{
+						JsonObject a = arr.get(i).getAsJsonObject();
+						OptimizeResult.Allocation al = new OptimizeResult.Allocation();
+						al.itemId                = getInt(a, "item_id", 0);
+						al.name                  = getString(a, "name", "Unknown");
+						al.qty                   = getInt(a, "qty", 0);
+						al.gpAllocated           = getLong(a, "gp_allocated", 0);
+						al.buyPrice              = getLong(a, "buy_price", 0);
+						al.sellPrice             = getLong(a, "sell_price", 0);
+						al.profitPerUnit         = getLong(a, "profit_per_unit", 0);
+						al.expectedProfit        = readExpectedProfit(a);
+						al.fillConfidence        = getDoubleOrNull(a, "fill_confidence");
+						al.buyLimit              = getInt(a, "buy_limit", 0);
+						al.hourlyVolume          = getIntOrNull(a, "hourly_volume");
+						String src               = getString(a, "price_source", "");
+						al.priceSource           = src.isEmpty() ? null : src;
+						al.rawBuyPrice           = getLongOrNull(a, "raw_buy_price");
+						al.rawSellPrice          = getLongOrNull(a, "raw_sell_price");
+						al.rawProfitPerUnit      = getLongOrNull(a, "raw_profit_per_unit");
+						al.estimatedFillHours    = getDoubleOrNull(a, "estimated_fill_hours");
+						al.realisticQtyCap       = getIntOrNull(a, "realistic_qty_cap");
+						al.hourlyTrend           = parseIntArray(a, "hourly_trend");
+						// Live-tracking fields (only populated on /optimize/active responses)
+						parseSlotFills(a, "buys",  al.buys);
+						parseSlotFills(a, "sells", al.sells);
+						al.state                 = com.o7flip.model.SlotState.fromWire(getString(a, "state", "pending"));
+						out.allocations.add(al);
+					}
+					catch (Exception e)
+					{
+						log.warn("[07Flip] /optimize allocation parse skipped: {}", e.getMessage());
+					}
+				}
+			}
+		}
+		catch (Exception e)
+		{
+			log.warn("[07Flip] /optimize parse error: {}", e.getMessage());
+		}
+		return out;
+	}
+
+	// -------------------------------------------------------------------------
+	// /optimize/active — cross-surface session sync (website + plugin)
+	// -------------------------------------------------------------------------
+
+	/**
+	 * GET the currently-active optimiser session. The endpoint returns either
+	 * HTTP 200 with the session body or HTTP 204 (no active session). On 204
+	 * the callback receives null — that's the "fresh user, nothing to hydrate"
+	 * signal, NOT an error.
+	 *
+	 * Bearer apiKey auth. 60/min/IP rate-limit on the server side.
+	 */
+	public void fetchActiveSession(Consumer<com.o7flip.model.OptimizerSession> callback)
+	{
+		String key = sanitizedApiKey();
+		if (key == null) { callback.accept(null); return; }
+
+		Request request = new Request.Builder()
+			.url(BASE_URL + "/optimize/active")
+			.get()
+			.header("User-Agent", USER_AGENT)
+			.header("Authorization", "Bearer " + key)
+			.build();
+		okHttpClient.newCall(request).enqueue(new Callback()
+		{
+			@Override
+			public void onFailure(Call call, IOException e)
+			{
+				log.warn("[07Flip] /optimize/active GET failed: {}", e.getMessage());
+				callback.accept(null);
+			}
+
+			@Override
+			public void onResponse(Call call, Response response) throws IOException
+			{
+				try
+				{
+					if (response.code() == 204)
+					{
+						callback.accept(null);
+						return;
+					}
+					if (!response.isSuccessful() || response.body() == null)
+					{
+						log.warn("[07Flip] /optimize/active GET HTTP {}", response.code());
+						callback.accept(null);
+						return;
+					}
+					String json = response.body().string();
+					com.o7flip.model.OptimizerSession session = parseSession(json);
+					callback.accept(session);
+				}
+				finally { response.close(); }
+			}
+		});
+	}
+
+	/**
+	 * Upsert the active session. Body matches the GET response shape. The
+	 * server is last-write-wins (no version check). Caller should debounce
+	 * to ~1s so a flurry of local changes collapses into one POST.
+	 */
+	public void postActiveSession(com.o7flip.model.OptimizerSession session, Consumer<Boolean> onComplete)
+	{
+		String key = sanitizedApiKey();
+		if (key == null) { if (onComplete != null) onComplete.accept(false); return; }
+		if (session == null) { if (onComplete != null) onComplete.accept(false); return; }
+
+		String bodyJson = sessionToJson(session);
+		RequestBody body = RequestBody.create(MEDIA_TYPE_JSON, bodyJson);
+		Request request = new Request.Builder()
+			.url(BASE_URL + "/optimize/active")
+			.post(body)
+			.header("User-Agent", USER_AGENT)
+			.header("Authorization", "Bearer " + key)
+			.build();
+		okHttpClient.newCall(request).enqueue(new Callback()
+		{
+			@Override
+			public void onFailure(Call call, IOException e)
+			{
+				log.warn("[07Flip] /optimize/active POST failed: {}", e.getMessage());
+				if (onComplete != null) onComplete.accept(false);
+			}
+			@Override
+			public void onResponse(Call call, Response response) throws IOException
+			{
+				try
+				{
+					boolean ok = response.isSuccessful();
+					if (!ok) log.warn("[07Flip] /optimize/active POST HTTP {}", response.code());
+					if (onComplete != null) onComplete.accept(ok);
+				}
+				finally { response.close(); }
+			}
+		});
+	}
+
+	/** Clear the active session. 204 expected. */
+	public void deleteActiveSession(Consumer<Boolean> onComplete)
+	{
+		String key = sanitizedApiKey();
+		if (key == null) { if (onComplete != null) onComplete.accept(false); return; }
+
+		Request request = new Request.Builder()
+			.url(BASE_URL + "/optimize/active")
+			.delete()
+			.header("User-Agent", USER_AGENT)
+			.header("Authorization", "Bearer " + key)
+			.build();
+		okHttpClient.newCall(request).enqueue(new Callback()
+		{
+			@Override
+			public void onFailure(Call call, IOException e)
+			{
+				log.warn("[07Flip] /optimize/active DELETE failed: {}", e.getMessage());
+				if (onComplete != null) onComplete.accept(false);
+			}
+			@Override
+			public void onResponse(Call call, Response response) throws IOException
+			{
+				try
+				{
+					boolean ok = response.isSuccessful();
+					if (!ok) log.warn("[07Flip] /optimize/active DELETE HTTP {}", response.code());
+					if (onComplete != null) onComplete.accept(ok);
+				}
+				finally { response.close(); }
+			}
+		});
+	}
+
+	private com.o7flip.model.OptimizerSession parseSession(String json)
+	{
+		com.o7flip.model.OptimizerSession s = new com.o7flip.model.OptimizerSession();
+		try
+		{
+			JsonObject root = gson.fromJson(json, JsonObject.class);
+			if (root == null) return s;
+			// Server wraps the payload in a {"session": {...}} envelope (per
+			// src/app/api/runelite/optimize/active/route.ts). Unwrap when
+			// present; fall through to root-level if a future endpoint
+			// version flattens it.
+			JsonObject body = root.has("session") && root.get("session").isJsonObject()
+				? root.getAsJsonObject("session") : root;
+			s.generatedAt = getString(body, "generated_at", "");
+			s.updatedAt   = getString(body, "updated_at",   "");
+			s.lastPollAt  = body.has("last_poll_at") && !body.get("last_poll_at").isJsonNull()
+				? body.get("last_poll_at").getAsString() : null;
+			if (body.has("inputs") && body.get("inputs").isJsonObject())
+			{
+				JsonObject inp = body.getAsJsonObject("inputs");
+				s.inputs.capital      = getLong(inp, "capital", 0);
+				s.inputs.slots        = getInt(inp,  "slots",   1);
+				s.inputs.maxFillHours = getIntOrNull(inp, "max_fill_hours");
+				s.inputs.risk         = getString(inp, "risk", "medium");
+				s.inputs.members      = getBoolOrNull(inp, "members");
+				if (inp.has("exclude_item_ids") && inp.get("exclude_item_ids").isJsonArray())
+				{
+					JsonArray ex = inp.getAsJsonArray("exclude_item_ids");
+					for (int i = 0; i < ex.size(); i++)
+					{
+						try { s.inputs.excludeItemIds.add(ex.get(i).getAsInt()); }
+						catch (Exception ignored) {}
+					}
+				}
+			}
+			if (body.has("slots") && body.get("slots").isJsonArray())
+			{
+				JsonArray arr = body.getAsJsonArray("slots");
+				for (int i = 0; i < arr.size(); i++)
+				{
+					try
+					{
+						JsonObject a = arr.get(i).getAsJsonObject();
+						OptimizeResult.Allocation al = new OptimizeResult.Allocation();
+						al.itemId                = getInt(a, "item_id", 0);
+						al.name                  = getString(a, "name", "Unknown");
+						al.qty                   = getInt(a, "qty", 0);
+						al.gpAllocated           = getLong(a, "gp_allocated", 0);
+						al.buyPrice              = getLong(a, "buy_price", 0);
+						al.sellPrice             = getLong(a, "sell_price", 0);
+						al.profitPerUnit         = getLong(a, "profit_per_unit", 0);
+						al.expectedProfit        = readExpectedProfit(a);
+						al.fillConfidence        = getDoubleOrNull(a, "fill_confidence");
+						al.buyLimit              = getInt(a, "buy_limit", 0);
+						al.hourlyVolume          = getIntOrNull(a, "hourly_volume");
+						String src               = getString(a, "price_source", "");
+						al.priceSource           = src.isEmpty() ? null : src;
+						al.rawBuyPrice           = getLongOrNull(a, "raw_buy_price");
+						al.rawSellPrice          = getLongOrNull(a, "raw_sell_price");
+						al.rawProfitPerUnit      = getLongOrNull(a, "raw_profit_per_unit");
+						al.estimatedFillHours    = getDoubleOrNull(a, "estimated_fill_hours");
+						al.realisticQtyCap       = getIntOrNull(a, "realistic_qty_cap");
+						al.hourlyTrend           = parseIntArray(a, "hourly_trend");
+						parseSlotFills(a, "buys",  al.buys);
+						parseSlotFills(a, "sells", al.sells);
+						al.state                 = com.o7flip.model.SlotState.fromWire(getString(a, "state", "pending"));
+						s.slots.add(al);
+					}
+					catch (Exception ignored) {}
+				}
+			}
+		}
+		catch (Exception e)
+		{
+			log.warn("[07Flip] /optimize/active parse error: {}", e.getMessage());
+		}
+		return s;
+	}
+
+	/**
+	 * Serialise a session back to the JSON shape the server expects. Mirrors
+	 * the GET response: wrapped in a {@code {"session": {...}}} envelope.
+	 * Keep this symmetric with {@link #parseSession} or POST round-trips
+	 * silently drop fields.
+	 */
+	private String sessionToJson(com.o7flip.model.OptimizerSession session)
+	{
+		JsonObject body = new JsonObject();
+		JsonObject inputs = new JsonObject();
+		inputs.addProperty("capital", session.inputs.capital);
+		inputs.addProperty("slots",   session.inputs.slots);
+		if (session.inputs.maxFillHours != null) inputs.addProperty("max_fill_hours", session.inputs.maxFillHours);
+		if (session.inputs.risk != null && !session.inputs.risk.isEmpty()) inputs.addProperty("risk", session.inputs.risk);
+		if (session.inputs.members != null) inputs.addProperty("members", session.inputs.members);
+		if (session.inputs.excludeItemIds != null && !session.inputs.excludeItemIds.isEmpty())
+		{
+			JsonArray ex = new JsonArray();
+			for (Integer id : session.inputs.excludeItemIds) if (id != null && id > 0) ex.add(id);
+			inputs.add("exclude_item_ids", ex);
+		}
+		body.add("inputs", inputs);
+
+		JsonArray slots = new JsonArray();
+		if (session.slots != null)
+		{
+			for (OptimizeResult.Allocation al : session.slots)
+			{
+				if (al == null) continue;
+				JsonObject s = new JsonObject();
+				s.addProperty("item_id",                  al.itemId);
+				s.addProperty("name",                     al.name);
+				s.addProperty("qty",                      al.qty);
+				s.addProperty("gp_allocated",             al.gpAllocated);
+				s.addProperty("buy_price",                al.buyPrice);
+				s.addProperty("sell_price",               al.sellPrice);
+				s.addProperty("profit_per_unit",          al.profitPerUnit);
+				s.addProperty("expected_profit",          al.expectedProfit);
+				if (al.fillConfidence != null) s.addProperty("fill_confidence", al.fillConfidence);
+				s.addProperty("buy_limit",                al.buyLimit);
+				if (al.hourlyVolume != null)    s.addProperty("hourly_volume", al.hourlyVolume);
+				if (al.priceSource != null)     s.addProperty("price_source",  al.priceSource);
+				if (al.rawBuyPrice != null)     s.addProperty("raw_buy_price", al.rawBuyPrice);
+				if (al.rawSellPrice != null)    s.addProperty("raw_sell_price", al.rawSellPrice);
+				if (al.rawProfitPerUnit != null) s.addProperty("raw_profit_per_unit", al.rawProfitPerUnit);
+				if (al.estimatedFillHours != null) s.addProperty("estimated_fill_hours", al.estimatedFillHours);
+				if (al.realisticQtyCap != null) s.addProperty("realistic_qty_cap", al.realisticQtyCap);
+				if (al.hourlyTrend != null)
+				{
+					JsonArray ht = new JsonArray();
+					for (int v : al.hourlyTrend) ht.add(v);
+					s.add("hourly_trend", ht);
+				}
+				s.add("buys",  fillsToJson(al.buys));
+				s.add("sells", fillsToJson(al.sells));
+				s.addProperty("state", al.state == null ? "pending" : al.state.wire());
+				slots.add(s);
+			}
+		}
+		body.add("slots", slots);
+
+		if (session.generatedAt != null) body.addProperty("generated_at", session.generatedAt);
+		if (session.lastPollAt != null)  body.addProperty("last_poll_at", session.lastPollAt);
+		if (session.updatedAt != null && !session.updatedAt.isEmpty())
+		{
+			body.addProperty("updated_at", session.updatedAt);
+		}
+		// POST body is the raw session shape (not wrapped in a "session"
+		// envelope). The envelope only appears on the GET RESPONSE side —
+		// confirmed via a 400 from the server when we wrapped the POST too.
+		return gson.toJson(body);
+	}
+
+	private JsonArray fillsToJson(java.util.List<com.o7flip.model.SlotFill> fills)
+	{
+		JsonArray arr = new JsonArray();
+		if (fills == null) return arr;
+		for (com.o7flip.model.SlotFill f : fills)
+		{
+			if (f == null) continue;
+			JsonObject o = new JsonObject();
+			o.addProperty("qty",        f.qty);
+			o.addProperty("price_each", f.priceEach);
+			if (f.tradedAt != null) o.addProperty("traded_at", f.tradedAt);
+			arr.add(o);
+		}
+		return arr;
+	}
+
+	// -------------------------------------------------------------------------
+	// /screeners — technical screeners (premium gates matches)
+	// -------------------------------------------------------------------------
+
+	/**
+	 * Fetches the list of all available screener presets and their current
+	 * matches. For free / anonymous callers, {@code matches} is empty on every
+	 * preset and the per-preset {@code premiumRequired} flag is set.
+	 */
+	public void fetchScreeners(Consumer<ScreenerPreset.Bundle> callback)
+	{
+		fetch(BASE_URL + "/screeners?limit=25", new Callback()
+		{
+			@Override
+			public void onFailure(Call call, IOException e)
+			{
+				log.warn("[07Flip] fetchScreeners failed: {}", e.getMessage());
+				callback.accept(new ScreenerPreset.Bundle());
+			}
+
+			@Override
+			public void onResponse(Call call, Response response) throws IOException
+			{
+				if (response.code() == 429)
+				{
+					markRateLimited();
+				}
+				if (!response.isSuccessful() || response.body() == null)
+				{
+					log.warn("[07Flip] fetchScreeners HTTP {}", response.code());
+					callback.accept(new ScreenerPreset.Bundle());
+					return;
+				}
+				try
+				{
+					JsonObject root = gson.fromJson(response.body().string(), JsonObject.class);
+					ScreenerPreset.Bundle bundle = new ScreenerPreset.Bundle();
+					bundle.premium       = getBool(root, "premium", false);
+					bundle.authenticated = getBool(root, "authenticated", false);
+					bundle.updatedAt     = getString(root, "updated_at", "");
+					bundle.systemPresets = parsePresetArray(root, "system_presets", false, bundle.premium);
+					bundle.userPresets   = parsePresetArray(root, "user_presets",   true,  bundle.premium);
+					callback.accept(bundle);
+				}
+				catch (Exception e)
+				{
+					log.warn("[07Flip] fetchScreeners parse error: {}", e.getMessage());
+					callback.accept(new ScreenerPreset.Bundle());
+				}
+			}
+		});
+	}
+
+	private List<ScreenerPreset> parsePresetArray(JsonObject root, String key, boolean userScope, boolean premium)
+	{
+		List<ScreenerPreset> out = new ArrayList<>();
+		if (!root.has(key) || !root.get(key).isJsonArray())
+		{
+			return out;
+		}
+		JsonArray arr = root.getAsJsonArray(key);
+		for (int i = 0; i < arr.size(); i++)
+		{
+			try
+			{
+				JsonObject obj = arr.get(i).getAsJsonObject();
+				ScreenerPreset p = new ScreenerPreset();
+				p.key         = getString(obj, "key", "");
+				p.name        = getString(obj, "name", "Untitled");
+				p.description = getString(obj, "description", "");
+				p.timeframe   = getString(obj, "timeframe", "daily");
+				p.scope       = getString(obj, "scope", userScope ? "user" : "system");
+				p.count       = getInt(obj, "count", 0);
+				// matches array may legitimately be empty for premium-gated rows.
+				JsonArray m = obj.getAsJsonArray("matches");
+				if (m != null)
+				{
+					for (int j = 0; j < m.size(); j++)
+					{
+						try
+						{
+							p.matches.add(parseScreenerMatch(m.get(j).getAsJsonObject()));
+						}
+						catch (Exception e)
+						{
+							log.warn("[07Flip] screener match parse skipped: {}", e.getMessage());
+						}
+					}
+				}
+				// Server marks per-row gating via a top-level premium_required on single-mode,
+				// and implicit empty-matches on list-mode for non-premium callers.
+				p.premiumRequired = !premium && p.count == 0 && p.matches.isEmpty();
+				p.upgradeUrl      = getString(obj, "upgrade_url", "https://07flip.com/premium");
+				out.add(p);
+			}
+			catch (Exception e)
+			{
+				log.warn("[07Flip] screener preset parse skipped: {}", e.getMessage());
+			}
+		}
+		return out;
+	}
+
+	private ScreenerMatch parseScreenerMatch(JsonObject obj)
+	{
+		ScreenerMatch m = new ScreenerMatch();
+		m.itemId       = getInt(obj, "item_id", 0);
+		m.name         = getString(obj, "name", "Unknown");
+		m.macdHist     = getDoubleOrNull(obj, "macd_hist");
+		String cross   = getString(obj, "macd_cross", "");
+		m.macdCross    = cross.isEmpty() ? null : cross;
+		m.volSurge     = getDoubleOrNull(obj, "vol_surge");
+		m.bbPosition   = getDoubleOrNull(obj, "bb_position");
+		m.pricePos30d  = getDoubleOrNull(obj, "price_pos_30d");
+		m.pricePos90d  = getDoubleOrNull(obj, "price_pos_90d");
+		m.pct1d        = getDoubleOrNull(obj, "pct_1d");
+		m.pct7d        = getDoubleOrNull(obj, "pct_7d");
+		m.pct30d       = getDoubleOrNull(obj, "pct_30d");
+		// Optional market-data fields — null when the server doesn't ship
+		// them. The plugin enriches from cached Flip data as a fallback.
+		m.buyPrice     = getLongOrNull(obj,   "buy_price");
+		m.sellPrice    = getLongOrNull(obj,   "sell_price");
+		m.profit       = getLongOrNull(obj,   "profit");
+		m.roiPct       = getDoubleOrNull(obj, "roi_pct");
+		m.flip07Score  = getIntOrNull(obj,    "flip07_score");
+		return m;
+	}
+
 	public void fetchSpikes(String sort, int page, BiConsumer<List<SpikeItem>, Integer> callback)
 	{
 		StringBuilder url = new StringBuilder(BASE_URL + "/spikes?limit=").append(PAGE_LIMIT)
@@ -901,8 +1929,12 @@ public class O7FlipApiClient
 	}
 
 	public void fetchDumps(String sort, long minProfit, long priceMin, long priceMax,
-	                       int page, BiConsumer<List<DumpItem>, Integer> callback)
+	                       int minScore, boolean activeOnly, String tier,
+	                       int page, Consumer<DumpItem.Response> callback)
 	{
+		// confirmedOnly was dropped — the server now enforces confirmed_bot=true
+		// as a base filter on /dumps, so every row in the response is verified.
+		// Sending the param is a no-op; not sending it keeps the URL clean.
 		StringBuilder url = new StringBuilder(BASE_URL + "/dumps?limit=").append(PAGE_LIMIT)
 			.append("&page=").append(page);
 		if (sort != null && !sort.isEmpty())
@@ -921,21 +1953,74 @@ public class O7FlipApiClient
 		{
 			url.append("&priceMax=").append(priceMax);
 		}
+		if (minScore > 0)
+		{
+			url.append("&minScore=").append(minScore);
+		}
+		if (activeOnly)
+		{
+			url.append("&activeOnly=true");
+		}
+		// v5 tier filter — pass "confirmed" or "likely" to narrow, omit for All.
+		// "all" is the server default; sending it explicitly is fine but verbose.
+		if (tier != null && !tier.isEmpty() && !"all".equals(tier))
+		{
+			url.append("&tier=").append(tier);
+		}
 		fetch(url.toString(), new Callback()
 		{
 			@Override
 			public void onFailure(Call call, IOException e)
 			{
 				log.warn("[07Flip] fetchDumps failed: {}", e.getMessage());
-				callback.accept(new ArrayList<>(), 0);
+				callback.accept(emptyDumpsResponse());
 			}
 
 			@Override
 			public void onResponse(Call call, Response response) throws IOException
 			{
-				parsePagedResponse(response, "dumps", O7FlipApiClient.this::parseDumpItem, callback);
+				callback.accept(parseDumpsResponse(response));
 			}
 		});
+	}
+
+	private static DumpItem.Response emptyDumpsResponse()
+	{
+		DumpItem.Response r = new DumpItem.Response();
+		r.items = new ArrayList<>();
+		return r;
+	}
+
+	private DumpItem.Response parseDumpsResponse(Response response) throws IOException
+	{
+		if (response.code() == 429)
+		{
+			markRateLimited();
+		}
+		if (!response.isSuccessful() || response.body() == null)
+		{
+			log.warn("[07Flip] /dumps HTTP {}", response.code());
+			return emptyDumpsResponse();
+		}
+		try
+		{
+			JsonObject json = gson.fromJson(response.body().string(), JsonObject.class);
+			DumpItem.Response out = new DumpItem.Response();
+			out.items = parseArray(json, "dumps", O7FlipApiClient.this::parseDumpItem);
+			out.total = getInt(json, "total", out.items.size());
+			if (json.has("tier_totals") && json.get("tier_totals").isJsonObject())
+			{
+				JsonObject t = json.getAsJsonObject("tier_totals");
+				out.confirmedCount = getInt(t, "confirmed", 0);
+				out.likelyCount    = getInt(t, "likely",    0);
+			}
+			return out;
+		}
+		catch (Exception e)
+		{
+			log.warn("[07Flip] /dumps parse error: {}", e.getMessage());
+			return emptyDumpsResponse();
+		}
 	}
 
 	/**
@@ -945,8 +2030,11 @@ public class O7FlipApiClient
 	 * specifically from the bot-driven dump signal.
 	 */
 	public void fetchBotDumps(String sort, long minProfit, long priceMin, long priceMax,
-	                          int page, BiConsumer<List<DumpItem>, Integer> callback)
+	                          int minScore, boolean activeOnly, String tier,
+	                          int page, Consumer<DumpItem.Response> callback)
 	{
+		// confirmedOnly removed from /bot-dumps for the same reason as /dumps —
+		// server enforces the base confirmed-bot filter.
 		StringBuilder url = new StringBuilder(BASE_URL + "/bot-dumps?limit=").append(PAGE_LIMIT)
 			.append("&page=").append(page);
 		if (sort != null && !sort.isEmpty())
@@ -965,19 +2053,31 @@ public class O7FlipApiClient
 		{
 			url.append("&priceMax=").append(priceMax);
 		}
+		if (minScore > 0)
+		{
+			url.append("&minScore=").append(minScore);
+		}
+		if (activeOnly)
+		{
+			url.append("&activeOnly=true");
+		}
+		if (tier != null && !tier.isEmpty() && !"all".equals(tier))
+		{
+			url.append("&tier=").append(tier);
+		}
 		fetch(url.toString(), new Callback()
 		{
 			@Override
 			public void onFailure(Call call, IOException e)
 			{
 				log.warn("[07Flip] fetchBotDumps failed: {}", e.getMessage());
-				callback.accept(new ArrayList<>(), 0);
+				callback.accept(emptyDumpsResponse());
 			}
 
 			@Override
 			public void onResponse(Call call, Response response) throws IOException
 			{
-				parsePagedResponse(response, "dumps", O7FlipApiClient.this::parseDumpItem, callback);
+				callback.accept(parseDumpsResponse(response));
 			}
 		});
 	}
@@ -1365,6 +2465,31 @@ public class O7FlipApiClient
 		item.recBuyPrice     = getLongOrNull(obj, "rec_buy_price");
 		item.recSellPrice    = getLongOrNull(obj, "rec_sell_price");
 		item.recProfit       = getLongOrNull(obj, "rec_profit");
+		// Volume fields — null on rows where server doesn't echo them.
+		item.hourlyVolume    = getIntOrNull(obj, "hourly_volume");
+		item.dailyVolume     = getIntOrNull(obj, "daily_volume");
+		return item;
+	}
+
+	private DipItem parseDipItem(JsonObject obj)
+	{
+		DipItem item = new DipItem();
+		item.itemId       = getInt(obj, "item_id", 0);
+		item.name         = getString(obj, "name", "Unknown");
+		item.buyPrice     = getLong(obj, "buy_price", 0);
+		item.hourlyVolume = getInt(obj, "hourly_volume", 0);
+		item.dailyVolume  = getInt(obj, "daily_volume", 0);
+		item.buyLimit     = getInt(obj, "buy_limit", 0);
+		item.members      = getBool(obj, "members", true);
+		item.lastUpdated  = getString(obj, "last_updated", "");
+		item.type         = getString(obj, "type", "24h_dip");
+		item.avg24hBuy    = getLongOrNull(obj,   "avg_24h_buy");
+		item.dipPct       = getDoubleOrNull(obj, "dip_pct");
+		item.atlFloor     = getLongOrNull(obj,   "atl_floor");
+		item.buyVsAtlPct  = getDoubleOrNull(obj, "buy_vs_atl_pct");
+		item.dipPct1d     = getDoubleOrNull(obj, "dip_pct_1d");
+		item.dipPct7d     = getDoubleOrNull(obj, "dip_pct_7d");
+		item.dipPct30d    = getDoubleOrNull(obj, "dip_pct_30d");
 		return item;
 	}
 
@@ -1387,6 +2512,10 @@ public class O7FlipApiClient
 	private DumpItem parseDumpItem(JsonObject obj)
 	{
 		DumpItem item = new DumpItem();
+		// v5 tier classification — null on older responses; the renderer
+		// treats null the same way it treats "likely" for safety.
+		String t = getString(obj, "tier", "");
+		item.tier             = t.isEmpty() ? null : t;
 		item.itemId           = getInt(obj, "item_id", 0);
 		item.name             = getString(obj, "name", "Unknown");
 		item.buyPrice         = getLong(obj, "buy_price", 0);
@@ -1406,6 +2535,37 @@ public class O7FlipApiClient
 		item.hourlyVolume     = getInt(obj, "hourly_volume", 0);
 		item.buyLimit         = getInt(obj, "buy_limit", 0);
 		item.members          = getBool(obj, "members", true);
+
+		// ── v3 dump-engine fields. All nullable — older responses skip them ─
+		item.roiPct              = getDoubleOrNull(obj, "roi_pct");
+		item.maxProfitAtLimit    = getLongOrNull(obj,   "max_profit_at_limit");
+		item.patternStale        = getBoolOrNull(obj,   "pattern_stale");
+		item.dailyVolume         = getIntOrNull(obj,    "daily_volume");
+		item.periodHours         = getIntOrNull(obj,    "period_hours");
+		item.dumpPeakHourUtc     = getIntOrNull(obj,    "dump_peak_hour_utc");
+		item.isClockAligned      = getBoolOrNull(obj,   "is_clock_aligned");
+		item.confirmedBot        = getBoolOrNull(obj,   "confirmed_bot");
+		item.sellRatio           = getDoubleOrNull(obj, "sell_ratio");
+		item.avgBurstIntervalMin = getDoubleOrNull(obj, "avg_burst_interval_min");
+		item.recoveryPct         = getDoubleOrNull(obj, "recovery_pct");
+		item.recoveryHours       = getDoubleOrNull(obj, "recovery_hours");
+		item.recoverySamples     = getIntOrNull(obj,    "recovery_samples");
+
+		// hourly_volumes — 24-element int array. Tolerant of missing / wrong
+		// length: anything other than a non-empty array becomes null and the
+		// row simply skips the sparkline.
+		JsonArray hv = obj.has("hourly_volumes") && obj.get("hourly_volumes").isJsonArray()
+			? obj.getAsJsonArray("hourly_volumes") : null;
+		if (hv != null && hv.size() > 0)
+		{
+			int[] arr = new int[hv.size()];
+			for (int i = 0; i < hv.size(); i++)
+			{
+				try { arr[i] = hv.get(i).getAsInt(); }
+				catch (Exception e) { arr[i] = 0; }
+			}
+			item.hourlyVolumes = arr;
+		}
 		return item;
 	}
 
@@ -1595,6 +2755,85 @@ public class O7FlipApiClient
 		return result;
 	}
 
+	/**
+	 * Reads the new {@code expected_profit} (cycle total, after tax) with a
+	 * fallback that tolerates two legacy shapes during the transition:
+	 * <ol>
+	 *   <li>Old {@code expected_profit_per_hour} × {@code estimated_fill_hours}
+	 *       — the math that produced the old extrapolated rate, reversed to
+	 *       approximate the new cycle figure.</li>
+	 *   <li>{@code qty × profit_per_unit} — last-ditch derivation if neither
+	 *       new nor old fields are present.</li>
+	 * </ol>
+	 * Sessions saved before the server's semantic change still carry the
+	 * old field, so a stale-cache GET round-trip doesn't blank the card.
+	 */
+	private long readExpectedProfit(JsonObject obj)
+	{
+		if (obj == null) return 0L;
+		if (obj.has("expected_profit") && !obj.get("expected_profit").isJsonNull())
+		{
+			try { return obj.get("expected_profit").getAsLong(); }
+			catch (Exception ignored) {}
+		}
+		Long perHour = getLongOrNull(obj, "expected_profit_per_hour");
+		Double fillHrs = getDoubleOrNull(obj, "estimated_fill_hours");
+		if (perHour != null && fillHrs != null && fillHrs > 0)
+		{
+			return Math.round(perHour * fillHrs);
+		}
+		int  qty   = getInt(obj,  "qty",             0);
+		long perU  = getLong(obj, "profit_per_unit", 0);
+		return (long) qty * perU;
+	}
+
+	/**
+	 * Pulls a plain {@code int[]} out of a JSON array field. Returns null if
+	 * the field is missing or null (matching the server's "null when the DB
+	 * query failed" semantic for {@code hourly_trend}). Non-numeric entries
+	 * are skipped silently.
+	 */
+	private int[] parseIntArray(JsonObject obj, String key)
+	{
+		if (obj == null || !obj.has(key) || obj.get(key).isJsonNull()) return null;
+		JsonElement el = obj.get(key);
+		if (!el.isJsonArray()) return null;
+		JsonArray arr = el.getAsJsonArray();
+		int[] out = new int[arr.size()];
+		for (int i = 0; i < arr.size(); i++)
+		{
+			try { out[i] = arr.get(i).getAsInt(); }
+			catch (Exception ignored) { out[i] = 0; }
+		}
+		return out;
+	}
+
+	/**
+	 * Reads a {@code SlotFill[]} JSON array onto an existing target list.
+	 * Used for {@code buys} / {@code sells} on LiveSlot — present only on
+	 * {@code /optimize/active} responses, absent on plain {@code /optimize}.
+	 */
+	private void parseSlotFills(JsonObject obj, String key, List<com.o7flip.model.SlotFill> target)
+	{
+		if (obj == null || !obj.has(key) || obj.get(key).isJsonNull()) return;
+		JsonElement el = obj.get(key);
+		if (!el.isJsonArray()) return;
+		JsonArray arr = el.getAsJsonArray();
+		for (int i = 0; i < arr.size(); i++)
+		{
+			try
+			{
+				JsonObject f = arr.get(i).getAsJsonObject();
+				com.o7flip.model.SlotFill fill = new com.o7flip.model.SlotFill();
+				fill.qty       = getInt(f,    "qty",        0);
+				fill.priceEach = getLong(f,   "price_each", 0);
+				fill.tradedAt  = getString(f, "traded_at",  "");
+				target.add(fill);
+			}
+			catch (Exception ignored) {}
+		}
+	}
+
 	/** Parses an array from an HTTP response (used by non-paginated endpoints). */
 	private <T> List<T> parseArray(Response response, String arrayKey, JsonMapper<T> mapper)
 	{
@@ -1647,6 +2886,12 @@ public class O7FlipApiClient
 	{
 		JsonElement el = obj.get(key);
 		return (el == null || el.isJsonNull()) ? def : el.getAsBoolean();
+	}
+
+	private Boolean getBoolOrNull(JsonObject obj, String key)
+	{
+		JsonElement el = obj.get(key);
+		return (el == null || el.isJsonNull()) ? null : el.getAsBoolean();
 	}
 
 	private Double getDoubleOrNull(JsonObject obj, String key)

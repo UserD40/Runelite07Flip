@@ -24,36 +24,31 @@
  */
 package com.o7flip.model;
 
-public class FlipItem
+import java.util.List;
+
+/** One row from /api/runelite/high-alch. */
+public class HighAlchItem
 {
-	public int itemId;
-	public String name;
-	public long buyPrice;
-	public long sellPrice;
-	public long profit;
-	public double roiPct;
-	public long potentialProfit;
-	public int buyLimit;
-	public boolean members;
+	public int     itemId;
+	public String  name;
+	public long    buyPrice;
+	public long    highAlchValue;
+	public long    runeCost;
+	public long    profit;
+	public double  roiPct;
+	public int     buyLimit;
+	public int     dailyVolume;
+	public String  lastUpdated;
 
-	// Optional cash-stack annotation (only present when the request used
-	// ?cashStack=…&annotate=affordableQty). Null otherwise.
-	public Integer affordableQty;
-
-	// Composite "07Flip Score" 0–100. Null when the item had < 20 trades
-	// in the last hour (illiquid or fresh items).
-	public Integer flip07Score;
-
-	// Recommended buy / sell prices from the server's last-hour p10/p90 of
-	// fills. Use for the GE auto-fill overlay and the item-detail drawer.
-	// Null together when the item had < 10 snapshots in the last hour.
-	public Long recBuyPrice;
-	public Long recSellPrice;
-	public Long recProfit;
-
-	// Hourly / daily volume. Server doesn't always echo these on /flips rows
-	// — when null, the volume filter is a pass-through. Server agent offered
-	// to add them to /flips response; once that ships these light up.
-	public Integer hourlyVolume;
-	public Integer dailyVolume;
+	/** Container that ships rune-price context alongside the items. */
+	public static class Response
+	{
+		public long   natureRunePrice;
+		public long   fireRunePrice;
+		public long   alchCost;
+		public boolean fireStaff;
+		public boolean bryophytaStaff;
+		public List<HighAlchItem> items;
+		public int    total;
+	}
 }

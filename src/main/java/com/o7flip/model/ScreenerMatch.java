@@ -24,36 +24,30 @@
  */
 package com.o7flip.model;
 
-public class FlipItem
+/** One technical-indicator match inside a {@link ScreenerPreset}. */
+public class ScreenerMatch
 {
-	public int itemId;
+	public int    itemId;
 	public String name;
-	public long buyPrice;
-	public long sellPrice;
-	public long profit;
-	public double roiPct;
-	public long potentialProfit;
-	public int buyLimit;
-	public boolean members;
 
-	// Optional cash-stack annotation (only present when the request used
-	// ?cashStack=…&annotate=affordableQty). Null otherwise.
-	public Integer affordableQty;
+	// Technical indicators — any of these may be null when not relevant
+	// to the preset that produced the row.
+	public Double macdHist;
+	public String macdCross;        // "bullish" | "bearish" | null
+	public Double volSurge;          // multiple-of-mean volume
+	public Double bbPosition;        // Bollinger band position [0..1]
+	public Double pricePos30d;       // 30-day price position [0..1]
+	public Double pricePos90d;       // 90-day price position [0..1]
+	public Double pct1d;
+	public Double pct7d;
+	public Double pct30d;
 
-	// Composite "07Flip Score" 0–100. Null when the item had < 20 trades
-	// in the last hour (illiquid or fresh items).
+	// Optional market data — populated either by the server (future) or by
+	// the plugin enriching from cached FlipItem rows. Null when neither
+	// source has data for this item, in which case the UI shows "—".
+	public Long    buyPrice;
+	public Long    sellPrice;
+	public Long    profit;
+	public Double  roiPct;
 	public Integer flip07Score;
-
-	// Recommended buy / sell prices from the server's last-hour p10/p90 of
-	// fills. Use for the GE auto-fill overlay and the item-detail drawer.
-	// Null together when the item had < 10 snapshots in the last hour.
-	public Long recBuyPrice;
-	public Long recSellPrice;
-	public Long recProfit;
-
-	// Hourly / daily volume. Server doesn't always echo these on /flips rows
-	// — when null, the volume filter is a pass-through. Server agent offered
-	// to add them to /flips response; once that ships these light up.
-	public Integer hourlyVolume;
-	public Integer dailyVolume;
 }

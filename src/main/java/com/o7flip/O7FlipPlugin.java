@@ -689,6 +689,17 @@ public class O7FlipPlugin extends Plugin
 		loadBlocklist();
 		loadSlotRecordedFills();
 
+		// Surface 401s from /favourites to the user via a one-shot notifier
+		// pointing at the key-setup step. Same channel used by other auth-
+		// gated flows — keeps the failure mode visible instead of silent.
+		apiClient.setOnFavouritesUnauthorized(() -> SwingUtilities.invokeLater(() ->
+			notifier.notify("Your 07Flip API key was rejected. Open the plugin config and paste it again.")));
+
+		// Replay cached data from the last session so the panel doesn't render
+		// empty during the ~0.5–2s gap before the first fetchAll lands. Cheap
+		// and purely client-side — no server impact.
+		hydrateCachedTabs();
+
 		executor = Executors.newSingleThreadScheduledExecutor();
 		fetchAuthStatus();
 		// Re-check auth periodically so subscription upgrades take effect without a
@@ -699,6 +710,10 @@ public class O7FlipPlugin extends Plugin
 		executor.execute(() -> fetchAll(true)); // forced — panel not yet visible at startup
 		executor.execute(this::doSyncTrackerHistory);
 		executor.execute(this::doFetchTrackerStats);
+		// Cross-surface optimiser session — pull whatever was last saved on
+		// the website (or from a previous plugin session) so the user sees
+		// their plan immediately, without having to click Build again.
+		executor.execute(this::doHydrateOptimizerSession);
 		refreshTask = executor.scheduleAtFixedRate(
 			() -> fetchAll(false),
 			config.refreshIntervalSeconds(),
@@ -1236,24 +1251,37 @@ public class O7FlipPlugin extends Plugin
 			case "showMoon":
 			case "showBarrows":
 			case "showDecant":
+			case "showDips":
+			case "showFavourites":
+			case "showHighAlch":
+			case "showTeleTablets":
+			case "showScreeners":
 			case "showMyFlips":
 			case "tabOrder":
+			case "topRowTabs":
 				return true;
 			default:
 				return false;
 		}
 	}
 
-	/** Opens the reorder dialog. Called by the panel header's reorder button. */
+	/**
+	 * Opens the "Customise top row tabs" picker. The bottom row (Flips,
+	 * My Trades, Item, Other) is fixed; this dialog only manages the four
+	 * customisable Row-1 slots — anything the user leaves out shows up
+	 * inside the Other tab on Row 2.
+	 */
 	public void openTabReorderDialog()
 	{
-		java.util.List<String> current = panel.resolveTabOrder();
-		com.o7flip.ui.TabOrderDialog.show(panel, current, O7FlipPanel.DEFAULT_TAB_ORDER, ordered ->
-		{
-			String csv = String.join(",", ordered);
-			configManager.setConfiguration("o7flip", "tabOrder", csv);
-			panel.rebuildTabs();
-		});
+		java.util.List<String> topRow = panel.resolveTopRow();
+		com.o7flip.ui.TabOrderDialog.show(panel, topRow,
+			O7FlipPanel.MOVABLE_POOL, O7FlipPanel.DEFAULT_TOP_ROW,
+			selected ->
+			{
+				String csv = String.join(",", selected);
+				configManager.setConfiguration("o7flip", "topRowTabs", csv);
+				panel.rebuildTabs();
+			});
 	}
 
 	// -------------------------------------------------------------------------
@@ -1416,21 +1444,31 @@ public class O7FlipPlugin extends Plugin
 				rebuildTrackedItems();
 				SwingUtilities.invokeLater(() -> panel.updateSpikes(items, total, spikesPage));
 			} : null,
-			config.showDumps() ? (items, total) ->
-			{
-				lastDumps = items;
-				rebuildTrackedItems();
-				SwingUtilities.invokeLater(() -> panel.updateDumps(items, total, dumpsPage));
-			} : null,
+			// Dumps no longer piggyback on the bundle — tier_totals (v5)
+			// only ship from the dedicated /dumps endpoint, so a fetchDumps
+			// call below replaces the bundle's dumps section.
+			null,
 			config.showAlerts() ? (items, total) ->
 			{
 				lastAlerts = items;
 				rebuildTrackedItems();
 				SwingUtilities.invokeLater(() -> panel.updateAlerts(items));
 			} : null,
-			(config.showBarrows() && includeSlow) ? sets    -> SwingUtilities.invokeLater(() -> panel.updateBarrows(sets))    : null,
-			(config.showMoon()    && includeSlow) ? sets    -> SwingUtilities.invokeLater(() -> panel.updateMoon(sets))       : null,
-			(config.showDecant()  && includeSlow) ? decants -> SwingUtilities.invokeLater(() -> panel.updateDecanting(decants)) : null,
+			(config.showBarrows() && includeSlow) ? sets ->
+			{
+				if (sets != null && !sets.isEmpty()) saveCache("barrows", sets);
+				SwingUtilities.invokeLater(() -> panel.updateBarrows(sets));
+			} : null,
+			(config.showMoon()    && includeSlow) ? sets ->
+			{
+				if (sets != null && !sets.isEmpty()) saveCache("moon", sets);
+				SwingUtilities.invokeLater(() -> panel.updateMoon(sets));
+			} : null,
+			(config.showDecant()  && includeSlow) ? decants ->
+			{
+				if (decants != null && !decants.isEmpty()) saveCache("decant", decants);
+				SwingUtilities.invokeLater(() -> panel.updateDecanting(decants));
+			} : null,
 			connectUrl ->
 			{
 				String key = config.apiKey();
@@ -1445,6 +1483,45 @@ public class O7FlipPlugin extends Plugin
 			fetchFlipsAtPage(flipsPage);
 		}
 
+		// Dips lives on its own /dips endpoint outside the bundle.
+		if (config.showDips())
+		{
+			fetchDipsAtPage(panel.getDipsSortKey(), panel.getDipsPage());
+		}
+
+		// Dumps fires through the dedicated endpoint so tier_totals come
+		// back in the response. The bot-dumps branch below still applies
+		// when the user has switched the source toggle in the panel.
+		if (config.showDumps() && !panel.dumpsUsesBotEndpoint())
+		{
+			fetchDumpsAtPage(panel.getDumpsSortKey(), panel.getDumpsPage());
+		}
+
+		// High Alch, Tele Tablets, Favourites — all on their own /runelite
+		// endpoints, polled at the same 60s cadence.
+		if (config.showHighAlch())
+		{
+			fetchHighAlchAtPage(panel.getHighAlchSortKey(), panel.getHighAlchPage());
+		}
+		if (config.showTeleTablets())
+		{
+			fetchTeleTabletsCurrent();
+		}
+		if (config.showFavourites() && hasApiKey())
+		{
+			apiClient.fetchFavourites(items ->
+			{
+				if (items != null && !items.isEmpty()) saveCache("favourites", items);
+				rebuildFavouriteIds(items);
+				SwingUtilities.invokeLater(() -> panel.updateFavourites(items));
+			});
+		}
+		// Screeners poll on a 2-min floor — fire only when due.
+		if (config.showScreeners() && shouldPollScreeners())
+		{
+			fetchScreenersNow();
+		}
+
 		// Bot-dumps lives on a dedicated endpoint outside the bundle. When
 		// the Dumps tab is in bot mode, fire the additional fetch in parallel.
 		if (config.showDumps() && panel.dumpsUsesBotEndpoint())
@@ -1453,12 +1530,13 @@ public class O7FlipPlugin extends Plugin
 			apiClient.fetchBotDumps(
 				panel.getDumpsSortKey(),
 				panel.getDumpsMinProfit(), panel.getDumpsPriceMin(), panel.getDumpsPriceMax(),
+				panel.getDumpsMinScore(), panel.getDumpsActiveOnly(), panel.getDumpsTier(),
 				botDumpsPage,
-				(items, total) ->
+				resp ->
 				{
-					lastDumps = items;
+					lastDumps = resp.items;
 					rebuildTrackedItems();
-					SwingUtilities.invokeLater(() -> panel.updateDumps(items, total, botDumpsPage));
+					SwingUtilities.invokeLater(() -> panel.updateDumps(resp, botDumpsPage));
 				});
 		}
 	}
@@ -1492,6 +1570,156 @@ public class O7FlipPlugin extends Plugin
 			config.showDecant()  ? decants -> SwingUtilities.invokeLater(() -> panel.updateDecanting(decants)) : null,
 			null
 		);
+	}
+
+	// -------------------------------------------------------------------------
+	// Tab data cache — persists each tab's last fetched payload to RuneLite's
+	// config store so the next plugin launch shows cached data immediately
+	// instead of empty states. Net server-load impact is zero (writes are
+	// purely client-side) and reads on startup avoid the visual gap between
+	// "panel opens" and "first periodic poll lands".
+	// -------------------------------------------------------------------------
+
+	/** Per-cache-key cap. Skip writes that would exceed this so a runaway
+	 *  payload can't bloat settings.properties indefinitely. */
+	private static final int CACHE_MAX_BYTES = 200_000;
+
+	private void saveCache(String key, Object data)
+	{
+		if (data == null) return;
+		try
+		{
+			String json = gson.toJson(data);
+			if (json.length() > CACHE_MAX_BYTES)
+			{
+				log.warn("[07Flip] Cache for '{}' too large ({} bytes) — skipping", key, json.length());
+				return;
+			}
+			configManager.setConfiguration("o7flip", "cache_" + key, json);
+		}
+		catch (Exception e)
+		{
+			log.warn("[07Flip] Failed to save cache '{}': {}", key, e.getMessage());
+		}
+	}
+
+	private <T> T loadCache(String key, Class<T> type)
+	{
+		try
+		{
+			String json = configManager.getConfiguration("o7flip", "cache_" + key);
+			if (json == null || json.isEmpty()) return null;
+			return gson.fromJson(json, type);
+		}
+		catch (Exception e)
+		{
+			log.warn("[07Flip] Failed to load cache '{}': {}", key, e.getMessage());
+			return null;
+		}
+	}
+
+	private <T> List<T> loadListCache(String key, Class<T> elementType)
+	{
+		try
+		{
+			String json = configManager.getConfiguration("o7flip", "cache_" + key);
+			if (json == null || json.isEmpty()) return null;
+			java.lang.reflect.Type listType =
+				com.google.gson.reflect.TypeToken.getParameterized(List.class, elementType).getType();
+			return gson.fromJson(json, listType);
+		}
+		catch (Exception e)
+		{
+			log.warn("[07Flip] Failed to load list cache '{}': {}", key, e.getMessage());
+			return null;
+		}
+	}
+
+	/**
+	 * Replays the last-known data from each tab's cache into the panel so the
+	 * UI doesn't render empty before the periodic poll lands. Called once
+	 * from startUp after the panel has been constructed.
+	 *
+	 * Each branch is best-effort: malformed JSON, missing fields, or a class
+	 * shape that's evolved since the cache was written all result in a null
+	 * load and the tab simply waits for fresh data.
+	 */
+	private void hydrateCachedTabs()
+	{
+		if (panel == null) return;
+
+		// Dumps — full Response wrapper (tier totals + items)
+		com.o7flip.model.DumpItem.Response cd = loadCache("dumps", com.o7flip.model.DumpItem.Response.class);
+		if (cd != null && cd.items != null && !cd.items.isEmpty())
+		{
+			lastDumps = cd.items;
+			final com.o7flip.model.DumpItem.Response snap = cd;
+			SwingUtilities.invokeLater(() -> panel.updateDumps(snap, 0));
+		}
+
+		// Dips
+		List<com.o7flip.model.DipItem> cdips = loadListCache("dips", com.o7flip.model.DipItem.class);
+		if (cdips != null && !cdips.isEmpty())
+		{
+			final List<com.o7flip.model.DipItem> snap = cdips;
+			SwingUtilities.invokeLater(() -> panel.updateDips(snap, snap.size(), 0));
+		}
+
+		// High Alch
+		com.o7flip.model.HighAlchItem.Response ca = loadCache("highAlch", com.o7flip.model.HighAlchItem.Response.class);
+		if (ca != null && ca.items != null && !ca.items.isEmpty())
+		{
+			final com.o7flip.model.HighAlchItem.Response snap = ca;
+			SwingUtilities.invokeLater(() -> panel.updateHighAlch(snap, 0));
+		}
+
+		// Tele Tablets
+		List<com.o7flip.model.TeleTablet> ct = loadListCache("tablets", com.o7flip.model.TeleTablet.class);
+		if (ct != null && !ct.isEmpty())
+		{
+			final List<com.o7flip.model.TeleTablet> snap = ct;
+			SwingUtilities.invokeLater(() -> panel.updateTeleTablets(snap));
+		}
+
+		// Favourites — requires the IDs set to be rebuilt for the star icon
+		List<FlipItem> cf = loadListCache("favourites", FlipItem.class);
+		if (cf != null && !cf.isEmpty())
+		{
+			rebuildFavouriteIds(cf);
+			final List<FlipItem> snap = cf;
+			SwingUtilities.invokeLater(() -> panel.updateFavourites(snap));
+		}
+
+		// Screeners
+		com.o7flip.model.ScreenerPreset.Bundle cs = loadCache("screeners", com.o7flip.model.ScreenerPreset.Bundle.class);
+		if (cs != null && (cs.systemPresets != null || cs.userPresets != null))
+		{
+			final com.o7flip.model.ScreenerPreset.Bundle snap = cs;
+			SwingUtilities.invokeLater(() -> panel.updateScreeners(snap));
+		}
+
+		// Decant
+		List<com.o7flip.model.DecantItem> cdec = loadListCache("decant", com.o7flip.model.DecantItem.class);
+		if (cdec != null && !cdec.isEmpty())
+		{
+			final List<com.o7flip.model.DecantItem> snap = cdec;
+			SwingUtilities.invokeLater(() -> panel.updateDecanting(snap));
+		}
+
+		// Barrows + Moons — slow-refresh feeds, especially worth caching since
+		// their full cycle is ~15 minutes.
+		List<com.o7flip.model.BarrowsSet> cb = loadListCache("barrows", com.o7flip.model.BarrowsSet.class);
+		if (cb != null && !cb.isEmpty())
+		{
+			final List<com.o7flip.model.BarrowsSet> snap = cb;
+			SwingUtilities.invokeLater(() -> panel.updateBarrows(snap));
+		}
+		List<com.o7flip.model.MoonSet> cm = loadListCache("moon", com.o7flip.model.MoonSet.class);
+		if (cm != null && !cm.isEmpty())
+		{
+			final List<com.o7flip.model.MoonSet> snap = cm;
+			SwingUtilities.invokeLater(() -> panel.updateMoon(snap));
+		}
 	}
 
 	// -------------------------------------------------------------------------
@@ -1590,7 +1818,17 @@ public class O7FlipPlugin extends Plugin
 			}
 		}
 		inventoryItemIds = Collections.unmodifiableSet(next);
-		inventoryCoins   = coins;
+		long previousCoins = inventoryCoins;
+		inventoryCoins     = coins;
+
+		// Keep the panel's Capital readout in sync when Auto mode is on. We
+		// don't refetch here — Auto-derived capital changes naturally as the
+		// 60-second poll lifts the new value — this just refreshes the
+		// displayed number so the user sees their inventory update live.
+		if (panel != null && previousCoins != coins)
+		{
+			SwingUtilities.invokeLater(panel::onInventoryCoinsChanged);
+		}
 	}
 
 	// -------------------------------------------------------------------------
@@ -1654,6 +1892,18 @@ public class O7FlipPlugin extends Plugin
 		}
 		lastActiveOffersHash = hash;
 		activeOffers = Collections.unmodifiableMap(next);
+
+		// Active-offer state moved — deployed capital probably changed, so
+		// refresh the capital readout and re-apply the affordability filter.
+		// Cheap: no refetch, just re-render rows from in-memory data.
+		if (panel != null)
+		{
+			SwingUtilities.invokeLater(() ->
+			{
+				panel.onCapitalAutoAdjusted();
+				panel.rerenderCapitalAffectedTabs();
+			});
+		}
 
 		final List<TradeRecord> snap = tradeHistory;
 		SwingUtilities.invokeLater(() -> panel.updateMyFlips(snap));
@@ -1989,6 +2239,17 @@ public class O7FlipPlugin extends Plugin
 
 		final List<TradeRecord> snapshot = tradeHistory;
 		SwingUtilities.invokeLater(() -> panel.updateMyFlips(snapshot));
+
+		// Adjust the user's typed Capital bankroll by this fill's cash flow.
+		// Manual-mode users keep their typed total in sync with actual trades
+		// (no-op for Auto / Off modes — see adjustCapitalForTrade).
+		adjustCapitalForTrade(offer.getItemId(), isBuy, deltaQty, deltaGp);
+
+		// Cross-surface optimiser session — when the fill is for an item in
+		// the active plan, push a SlotFill so the website's polling can
+		// surface the same fills on its end (and vice versa via mergeRemoteFills).
+		long pricePer = deltaQty > 0 ? deltaGp / deltaQty : fallbackPriceEach;
+		attributeTradeToActiveSlot(offer.getItemId(), deltaQty, pricePer, isBuy, timestamp);
 
 		if (!isBuy && config.showGpDropOverlay())
 		{
@@ -2933,14 +3194,187 @@ public class O7FlipPlugin extends Plugin
 	 * personalised-flips toggle is on, or 0 when the feature is disabled or
 	 * the player has no coins. The bucketed value (never the exact wealth)
 	 * is what we send to the server as ?cashStack=…
+	 *
+	 * Delegates to {@link #effectiveCapital()} so the legacy toggle and the
+	 * new explicit Capital input share one source of truth.
 	 */
 	private long cashStackBucketGp()
 	{
-		if (!config.usePersonalisedFlips() || inventoryCoins <= 0)
+		return effectiveCapital();
+	}
+
+	/**
+	 * Single source of truth for the affordability filter — how much GP the
+	 * user has free to deploy on a NEW flip right now. Returns 0 when capital
+	 * tracking is off (callers treat 0 as "no filter").
+	 *
+	 * Equals {@link #freeCapital()} bucketed to the nearest 100K — the bucket
+	 * preserves the original {@code cashStack} privacy semantic (we never
+	 * expose exact wealth to the server).
+	 */
+	public long effectiveCapital()
+	{
+		long free = freeCapital();
+		if (free <= 0)
 		{
 			return 0L;
 		}
-		return (inventoryCoins / CASH_BUCKET) * CASH_BUCKET;
+		return (free / CASH_BUCKET) * CASH_BUCKET;
+	}
+
+	/**
+	 * The user's free (unlocked) capital. In Auto mode this is just inventory
+	 * coins — the GE has already deducted gp from inventory when offers were
+	 * placed, so what's left in your pouch IS your free capital. In Manual
+	 * mode it's the user's typed total minus what's locked in active buy
+	 * offers, so the figure tracks live as offers fill / cancel.
+	 */
+	public long freeCapital()
+	{
+		O7FlipConfig.CapitalMode mode = resolveCapitalMode();
+		switch (mode)
+		{
+			case AUTO:
+				return Math.max(0L, inventoryCoins);
+			case MANUAL:
+				return Math.max(0L, config.capitalManual() - deployedCapital());
+			case OFF:
+			default:
+				return 0L;
+		}
+	}
+
+	/** Total bankroll figure shown in the UI readout — free + deployed. */
+	public long totalCapital()
+	{
+		O7FlipConfig.CapitalMode mode = resolveCapitalMode();
+		switch (mode)
+		{
+			case AUTO:
+				return Math.max(0L, inventoryCoins) + deployedCapital();
+			case MANUAL:
+				return Math.max(0L, config.capitalManual());
+			case OFF:
+			default:
+				return 0L;
+		}
+	}
+
+	/**
+	 * GP currently locked in unfilled portions of active GE buy offers.
+	 * Filled portions are excluded (the gp already became items). Sell offers
+	 * don't count — they tie up items, not GP.
+	 */
+	public long deployedCapital()
+	{
+		long sum = 0L;
+		for (com.o7flip.model.ActiveOfferSnapshot s : activeOffers.values())
+		{
+			if (s == null || s.state != GrandExchangeOfferState.BUYING)
+			{
+				continue;
+			}
+			int remaining = s.totalQuantity - s.quantitySold;
+			if (remaining > 0 && s.price > 0)
+			{
+				sum += s.price * (long) remaining;
+			}
+		}
+		return sum;
+	}
+
+	private O7FlipConfig.CapitalMode resolveCapitalMode()
+	{
+		O7FlipConfig.CapitalMode mode = config.capitalMode();
+		// Legacy: usePersonalisedFlips=true with mode=OFF means the user
+		// migrated from the old toggle but hasn't touched the new control —
+		// treat it as AUTO so their experience doesn't silently change.
+		if (mode == O7FlipConfig.CapitalMode.OFF && config.usePersonalisedFlips())
+		{
+			return O7FlipConfig.CapitalMode.AUTO;
+		}
+		return mode;
+	}
+
+	/** Called by the panel when the user types or toggles the Capital input. */
+	public void onCapitalChanged()
+	{
+		executor.execute(() ->
+		{
+			if (config.showFlips())
+			{
+				fetchFlipsAtPage(panel.getFlipsPage());
+			}
+		});
+		// Client-side-filtered tabs (Dips / Alch / Tablets / Favourites / Spikes
+		// / Dumps) don't need a refetch — they already have the rows, the filter
+		// just changed. Trigger a re-render on the EDT so the new ceiling
+		// applies immediately.
+		SwingUtilities.invokeLater(() -> panel.rerenderCapitalAffectedTabs());
+	}
+
+	/** Panel helper for persisting the Capital mode through ConfigManager. */
+	public void persistCapitalMode(O7FlipConfig.CapitalMode mode)
+	{
+		configManager.setConfiguration("o7flip", "capitalMode", mode);
+	}
+
+	/** Panel helper for persisting the manual capital value. */
+	public void persistCapitalManual(long gp)
+	{
+		configManager.setConfiguration("o7flip", "capitalManual", gp);
+	}
+
+	/** Panel helper for persisting the capital-locked flag. */
+	public void persistCapitalLocked(boolean locked)
+	{
+		configManager.setConfiguration("o7flip", "capitalLocked", locked);
+	}
+
+	/**
+	 * Auto-adjusts the manual capital figure when a GE offer fills. In
+	 * Manual mode the user's typed value represents their flipping bankroll,
+	 * so a fresh fill should move it: a buy converts liquid GP into items
+	 * (subtract cost), a sell converts items back into GP (add after-tax
+	 * proceeds). Auto mode is a no-op — it derives from inventory coins
+	 * which already update naturally.
+	 *
+	 * Called from {@link #recordTrade} on every fill delta.
+	 */
+	private void adjustCapitalForTrade(int itemId, boolean isBuy, int deltaQty, long deltaGp)
+	{
+		if (config.capitalMode() != O7FlipConfig.CapitalMode.MANUAL || deltaQty <= 0)
+		{
+			return;
+		}
+		long current = config.capitalManual();
+		long adjusted;
+		if (isBuy)
+		{
+			adjusted = current - deltaGp;
+		}
+		else
+		{
+			// deltaGp is the per-fill change in offer.getSpent(), which for
+			// sells is already NET of GE tax in current RuneLite — adding it
+			// straight to capital is correct. Subtracting tax here was the
+			// double-deduction bug that produced phantom -2.5M-ish losses on
+			// high-value sells.
+			adjusted = current + deltaGp;
+		}
+		if (adjusted < 0)
+		{
+			adjusted = 0;
+		}
+		if (adjusted == current)
+		{
+			return;
+		}
+		persistCapitalManual(adjusted);
+		if (panel != null)
+		{
+			SwingUtilities.invokeLater(panel::onCapitalAutoAdjusted);
+		}
 	}
 
 	void onSpikesPageChanged(int page)
@@ -2960,6 +3394,737 @@ public class O7FlipPlugin extends Plugin
 		executor.execute(() -> fetchDumpsAtPage(panel.getDumpsSortKey(), page));
 	}
 
+	void onDipsPageChanged(int page)
+	{
+		executor.execute(() -> fetchDipsAtPage(panel.getDipsSortKey(), page));
+	}
+
+	void onDipsSortChanged(String sort)
+	{
+		executor.execute(() -> fetchDipsAtPage(sort, 0));
+	}
+
+	private void fetchDipsAtPage(String sort, int page)
+	{
+		apiClient.fetchDips(sort, panel.getDipsActivityWindow(), page, (items, total) ->
+		{
+			if (items != null && !items.isEmpty()) saveCache("dips", items);
+			SwingUtilities.invokeLater(() -> panel.updateDips(items, total, page));
+		});
+	}
+
+	// -------------------------------------------------------------------------
+	// High Alch / Tele Tablets / Favourites / Screeners — "Other" tab feeds
+	// -------------------------------------------------------------------------
+
+	/** Last screeners-fetch time in epoch ms. Honoured by {@link #shouldPollScreeners}. */
+	private volatile long lastScreenersFetchMs = 0L;
+	/** Minimum interval between /screeners requests — spec says ≥ 2 minutes. */
+	private static final long SCREENERS_MIN_INTERVAL_MS = 2 * 60 * 1000L;
+
+	void onHighAlchPageChanged(int page)
+	{
+		executor.execute(() -> fetchHighAlchAtPage(panel.getHighAlchSortKey(), page));
+	}
+
+	void onHighAlchSortChanged(String sort)
+	{
+		executor.execute(() -> fetchHighAlchAtPage(sort, 0));
+	}
+
+	void onHighAlchModifierChanged()
+	{
+		executor.execute(() -> fetchHighAlchAtPage(panel.getHighAlchSortKey(), 0));
+	}
+
+	private void fetchHighAlchAtPage(String sort, int page)
+	{
+		apiClient.fetchHighAlch(sort, page,
+			panel.getHighAlchFireStaff(), panel.getHighAlchBryophyta(),
+			resp ->
+			{
+				if (resp != null && resp.items != null && !resp.items.isEmpty())
+				{
+					saveCache("highAlch", resp);
+				}
+				SwingUtilities.invokeLater(() -> panel.updateHighAlch(resp, page));
+			});
+	}
+
+	void onTeleTabletsFilterChanged()
+	{
+		executor.execute(this::fetchTeleTabletsCurrent);
+	}
+
+	private void fetchTeleTabletsCurrent()
+	{
+		apiClient.fetchTeleTablets(
+			panel.getTabletsSortKey(),
+			panel.getTabletsSpellbook(),
+			panel.getTabletsProfitableOnly(),
+			items ->
+			{
+				if (items != null && !items.isEmpty()) saveCache("tablets", items);
+				SwingUtilities.invokeLater(() -> panel.updateTeleTablets(items));
+			});
+	}
+
+	/**
+	 * Tab-select fetch throttle. Holds the last-fetch wall-clock per sub-tab
+	 * name; a select event only fires a fresh request if its entry is older
+	 * than {@link #TAB_SELECT_FRESHNESS_MS}. Caps "user-clicks-tab" load on
+	 * the server at one request per sub-tab per 30 seconds, regardless of
+	 * how rapidly the user toggles.
+	 */
+	private final java.util.Map<String, Long> lastTabSelectFetchMs = new java.util.concurrent.ConcurrentHashMap<>();
+	private static final long TAB_SELECT_FRESHNESS_MS = 30_000L;
+
+	private boolean tabSelectFresh(String name)
+	{
+		long now = System.currentTimeMillis();
+		long last = lastTabSelectFetchMs.getOrDefault(name, 0L);
+		if (now - last < TAB_SELECT_FRESHNESS_MS) return false;
+		lastTabSelectFetchMs.put(name, now);
+		return true;
+	}
+
+	/**
+	 * Called when the user navigates to one of the Other tab's sub-tabs.
+	 * Fires a fresh fetch for that sub-tab if its data is stale per
+	 * {@link #TAB_SELECT_FRESHNESS_MS}. The 30-second floor keeps "user
+	 * rapidly clicking sub-tabs" from amplifying load on the server.
+	 */
+	void onOtherSubTabSelected(String name)
+	{
+		if (name == null || executor == null || executor.isShutdown()) return;
+		if (!tabSelectFresh(name)) return;
+		switch (name)
+		{
+			case "Tablets":
+				executor.execute(this::fetchTeleTabletsCurrent);
+				break;
+			case "Dips":
+				executor.execute(() -> fetchDipsAtPage(panel.getDipsSortKey(), panel.getDipsPage()));
+				break;
+			case "Alch":
+				executor.execute(() -> fetchHighAlchAtPage(panel.getHighAlchSortKey(), panel.getHighAlchPage()));
+				break;
+			case "Decant":
+				// Decant lives in the bundle, so a select triggers fetchSlow
+				// (cheap: only the slow sections come back).
+				executor.execute(this::fetchSlow);
+				break;
+			// Favs + Screener have their own dedicated handlers below — keep
+			// them out of this switch so the throttle doesn't double-count.
+			default:
+				break;
+		}
+	}
+
+	void onFavouritesTabSelected()
+	{
+		if (!hasApiKey())
+		{
+			return;
+		}
+		executor.execute(() -> apiClient.fetchFavourites(items ->
+		{
+			if (items != null && !items.isEmpty()) saveCache("favourites", items);
+			rebuildFavouriteIds(items);
+			SwingUtilities.invokeLater(() -> panel.updateFavourites(items));
+		}));
+	}
+
+	// -------------------------------------------------------------------------
+	// Favourites — server is the source of truth, plugin holds an in-memory
+	// mirror of the user's favourite item IDs so star-toggle UIs can render
+	// the correct filled/hollow state without a refetch.
+	// -------------------------------------------------------------------------
+
+	/** Item IDs the server says the user has favourited. Refreshed on every
+	 *  GET /favourites; optimistically updated on every star toggle. */
+	private volatile java.util.Set<Integer> favouriteItemIds = java.util.Collections.emptySet();
+
+	/** Items the user has just-added but the server's GET hasn't reflected
+	 *  yet. Lives for {@link #FAV_BUFFER_TTL_MS} so a slow read-after-write
+	 *  doesn't wipe an optimistic toggle. Keyed by itemId → wall-clock ms. */
+	private final java.util.Map<Integer, Long> recentlyAddedFavs = new java.util.concurrent.ConcurrentHashMap<>();
+
+	/** Mirror of {@link #recentlyAddedFavs} for the remove direction. */
+	private final java.util.Map<Integer, Long> recentlyRemovedFavs = new java.util.concurrent.ConcurrentHashMap<>();
+
+	/** How long a recent local toggle survives a stale server response.
+	 *  5 min is plenty for any reasonable read-after-write delay; longer
+	 *  starts to mask real "user cleared all favs on the website" syncs. */
+	private static final long FAV_BUFFER_TTL_MS = 5 * 60 * 1000L;
+
+	/** True when the user has favourited this item. Cheap lookup for star
+	 *  icons rendered on item rows. */
+	public boolean isFavourite(int itemId)
+	{
+		return favouriteItemIds.contains(itemId);
+	}
+
+	/**
+	 * Toggles favourite state for an item — optimistically flips the local
+	 * cache and fires POST or DELETE to the server. On non-2xx the local
+	 * state is reverted and {@code onError} is invoked so the caller can
+	 * toast / revert UI. {@code onSuccess} runs on the EDT after the
+	 * server confirms.
+	 */
+	public void toggleFavourite(int itemId, boolean currentlyFav, Runnable onSuccess, Runnable onError)
+	{
+		if (!hasApiKey() || itemId <= 0)
+		{
+			if (onError != null) SwingUtilities.invokeLater(onError);
+			return;
+		}
+		// Optimistic: flip immediately so the UI feels instant. We snapshot
+		// the previous set so a revert can be exact (no race with a
+		// concurrent /favourites GET overwriting it).
+		java.util.Set<Integer> snapshot = favouriteItemIds;
+		java.util.Set<Integer> next = new java.util.HashSet<>(snapshot);
+		if (currentlyFav) next.remove(itemId); else next.add(itemId);
+		favouriteItemIds = java.util.Collections.unmodifiableSet(next);
+		// Refresh any panel that displays favourite state.
+		SwingUtilities.invokeLater(() -> panel.onFavouriteToggled(itemId));
+
+		java.util.function.Consumer<Boolean> done = ok -> SwingUtilities.invokeLater(() ->
+		{
+			if (Boolean.TRUE.equals(ok))
+			{
+				// Stamp the toggle into the recent-toggle buffer so the next
+				// periodic poll's GET response can't wipe it via a stale
+				// read-after-write. The opposite buffer is cleared because
+				// the user's intent is now unambiguous.
+				long now = System.currentTimeMillis();
+				if (currentlyFav)
+				{
+					recentlyRemovedFavs.put(itemId, now);
+					recentlyAddedFavs.remove(itemId);
+				}
+				else
+				{
+					recentlyAddedFavs.put(itemId, now);
+					recentlyRemovedFavs.remove(itemId);
+				}
+				// No immediate refetch — the optimistic update is already
+				// what the user expects to see, and an immediate GET often
+				// races a slow read-after-write on the server side. The
+				// 60-second periodic poll is the reconciliation path.
+				if (onSuccess != null) onSuccess.run();
+			}
+			else
+			{
+				// Server rejected — revert the optimistic update and notify.
+				favouriteItemIds = snapshot;
+				panel.onFavouriteToggled(itemId);
+				if (onError != null) onError.run();
+			}
+		});
+
+		if (currentlyFav)
+		{
+			apiClient.removeFavourite(itemId, done);
+		}
+		else
+		{
+			apiClient.addFavourite(itemId, done);
+		}
+	}
+
+	/**
+	 * Reconciles the favourite-id set with a fresh server response, then
+	 * overlays the recently-toggled buffers so we don't lose a confirmed
+	 * local toggle that the server's GET hasn't yet caught up to.
+	 *
+	 * Buffer entries are dropped when (a) the server's response already
+	 * reflects them — no longer needed — or (b) they've aged past
+	 * {@link #FAV_BUFFER_TTL_MS} — eventual consistency wins.
+	 */
+	private void rebuildFavouriteIds(java.util.List<FlipItem> items)
+	{
+		long now = System.currentTimeMillis();
+		java.util.Set<Integer> serverSet = new java.util.HashSet<>(items.size());
+		for (FlipItem f : items)
+		{
+			if (f.itemId > 0) serverSet.add(f.itemId);
+		}
+
+		// Expire stale buffer entries — server is source of truth once the
+		// TTL window has passed.
+		recentlyAddedFavs.entrySet().removeIf(e -> now - e.getValue() > FAV_BUFFER_TTL_MS);
+		recentlyRemovedFavs.entrySet().removeIf(e -> now - e.getValue() > FAV_BUFFER_TTL_MS);
+
+		// If the server has caught up to a buffered toggle, clear the buffer
+		// entry — we no longer need to "protect" it from being wiped.
+		recentlyAddedFavs.keySet().removeIf(serverSet::contains);
+		recentlyRemovedFavs.keySet().removeIf(id -> !serverSet.contains(id));
+
+		// Merged set = (server ∪ recentlyAdded) − recentlyRemoved.
+		java.util.Set<Integer> merged = new java.util.HashSet<>(serverSet);
+		merged.addAll(recentlyAddedFavs.keySet());
+		merged.removeAll(recentlyRemovedFavs.keySet());
+		favouriteItemIds = java.util.Collections.unmodifiableSet(merged);
+
+		// Diagnostic logging — surfaces server-side sync issues without
+		// spamming. INFO when there's a divergence; DEBUG otherwise.
+		if (!recentlyAddedFavs.isEmpty() || !recentlyRemovedFavs.isEmpty())
+		{
+			log.info("[07Flip] /favourites GET = {} items; local toggle buffer: +{} / -{} (merged: {})",
+				serverSet.size(),
+				recentlyAddedFavs.size(),
+				recentlyRemovedFavs.size(),
+				merged.size());
+		}
+		else
+		{
+			log.debug("[07Flip] /favourites GET = {} items", serverSet.size());
+		}
+	}
+
+	/**
+	 * Kicks off an optimizer request and routes the three outcomes to the
+	 * panel. Called from the Plan sub-tab's Build button. Always non-blocking
+	 * — runs on the executor so the EDT stays free for animations.
+	 *
+	 * On success, also seeds the cross-surface session (sets activeSession +
+	 * schedules a debounced POST so the website sees the same plan).
+	 */
+	public void runOptimizer(long capital, int slots, String risk,
+	                         int maxFillHours, Boolean members)
+	{
+		if (executor == null || executor.isShutdown()) return;
+		executor.execute(() -> apiClient.fetchOptimize(
+			capital, slots, risk, maxFillHours, members,
+			null,
+			result -> SwingUtilities.invokeLater(() ->
+			{
+				panel.onOptimizeResult(result);
+				seedActiveSessionFrom(result, capital, slots, risk, maxFillHours, members);
+				scheduleSessionPost();
+			}),
+			upgradeUrl -> SwingUtilities.invokeLater(() -> panel.onOptimizePremiumRequired(upgradeUrl)),
+			reason -> SwingUtilities.invokeLater(() -> panel.onOptimizeError(reason))));
+	}
+
+	/**
+	 * Swaps a single allocation in the user's current plan. Re-uses the main
+	 * /optimize endpoint with slots=1, capital = the original slot's gp, and
+	 * exclude_item_ids = all currently-allocated items (so the same item
+	 * never comes back).
+	 *
+	 * The panel's onOptimizeSlotSwapped callback receives the swap index +
+	 * the new allocation, and edits its local result in place.
+	 */
+	public void swapPlanSlot(int swapIndex, com.o7flip.model.OptimizeResult current)
+	{
+		if (executor == null || executor.isShutdown() || current == null
+			|| current.allocations == null || swapIndex < 0 || swapIndex >= current.allocations.size())
+		{
+			return;
+		}
+		com.o7flip.model.OptimizeResult.Allocation old = current.allocations.get(swapIndex);
+		long slotCapital = old.gpAllocated;
+		// Exclude every currently-allocated item id so the server can't return
+		// any of them — including the slot being swapped.
+		java.util.List<Integer> excludes = new java.util.ArrayList<>();
+		for (com.o7flip.model.OptimizeResult.Allocation a : current.allocations)
+		{
+			if (a != null && a.itemId > 0) excludes.add(a.itemId);
+		}
+		String risk = current.summary != null && current.summary.risk != null
+			? current.summary.risk : "medium";
+		int maxFillHours = current.summary != null && current.summary.maxFillHours != null
+			? current.summary.maxFillHours : 4;
+		Boolean members = current.summary != null ? current.summary.members : null;
+
+		executor.execute(() -> apiClient.fetchOptimize(
+			slotCapital, 1, risk, maxFillHours, members, excludes,
+			result -> SwingUtilities.invokeLater(() ->
+			{
+				if (result == null || result.allocations == null || result.allocations.isEmpty())
+				{
+					return;
+				}
+				panel.onOptimizeSlotSwapped(swapIndex, result.allocations.get(0));
+				replaceSlotInActiveSession(swapIndex, result.allocations.get(0));
+				scheduleSessionPost();
+			}),
+			upgradeUrl -> SwingUtilities.invokeLater(() -> panel.onOptimizePremiumRequired(upgradeUrl)),
+			reason -> SwingUtilities.invokeLater(() -> panel.onOptimizeError(reason))));
+	}
+
+	// -------------------------------------------------------------------------
+	// Cross-surface optimiser session (/optimize/active)
+	// -------------------------------------------------------------------------
+	//
+	// Shared row between the website and the plugin. Last-write-wins. The
+	// plugin POSTs blindly on local changes (1s debounce) and polls GET every
+	// 30s while the Plan tab is open so web-side edits become visible.
+	//
+	// activeSession is the single source of truth on the plugin side; both
+	// the panel UI and the wire-format converter (sessionToJson) read from it.
+
+	private volatile com.o7flip.model.OptimizerSession activeSession;
+	private ScheduledFuture<?> pendingSessionPost;
+	private ScheduledFuture<?> sessionPollTask;
+	private static final long SESSION_POST_DEBOUNCE_MS = 1000L;
+	/** Poll cadence WHILE the Plan tab is open. Server cap is 60/min/IP so a
+	 *  15s loop is comfortably under it (4 GET/min) while still feeling live. */
+	private static final long SESSION_POLL_INTERVAL_S  = 15L;
+
+	/** Startup GET — pulls whatever was last saved on either surface. */
+	private void doHydrateOptimizerSession()
+	{
+		apiClient.fetchActiveSession(session ->
+		{
+			if (session == null || session.slots == null || session.slots.isEmpty())
+			{
+				return;
+			}
+			activeSession = session;
+			SwingUtilities.invokeLater(() -> panel.hydrateOptimizerSession(session));
+		});
+	}
+
+	/**
+	 * Called by the panel when the Plan sub-tab is selected. Triggers an
+	 * immediate GET (fresh snapshot the moment the user looks) and starts a
+	 * recurring poll so live edits made on the website appear in the panel
+	 * within the next interval.
+	 *
+	 * The poll is bounded by tab visibility — when the user navigates away,
+	 * {@link #onPlanTabDeselected} cancels it. Net result: live updates
+	 * while the tab is active, zero idle traffic otherwise.
+	 */
+	public void onPlanTabSelected()
+	{
+		if (executor == null || executor.isShutdown()) return;
+		executor.execute(this::doPollActiveSession);
+		if (sessionPollTask == null || sessionPollTask.isCancelled() || sessionPollTask.isDone())
+		{
+			sessionPollTask = executor.scheduleAtFixedRate(
+				this::doPollActiveSession,
+				SESSION_POLL_INTERVAL_S, SESSION_POLL_INTERVAL_S, TimeUnit.SECONDS);
+		}
+	}
+
+	/** Called when the Plan tab loses focus — stops the live-update poll. */
+	public void onPlanTabDeselected()
+	{
+		if (sessionPollTask != null) sessionPollTask.cancel(false);
+	}
+
+	private void doPollActiveSession()
+	{
+		apiClient.fetchActiveSession(remote ->
+		{
+			if (remote == null) return;
+			com.o7flip.model.OptimizerSession local = activeSession;
+			if (local == null)
+			{
+				activeSession = remote;
+				SwingUtilities.invokeLater(() -> panel.hydrateOptimizerSession(remote));
+				return;
+			}
+			// Merge any new buys/sells the website's tracker poll discovered,
+			// so the plugin's next POST doesn't clobber them. Item identity
+			// is by item_id; per-slot fill arrays are unioned by traded_at
+			// (de-duped against what we already have locally).
+			boolean changed = mergeRemoteFills(local, remote);
+			if (changed)
+			{
+				SwingUtilities.invokeLater(() -> panel.hydrateOptimizerSession(local));
+			}
+		});
+	}
+
+	private boolean mergeRemoteFills(com.o7flip.model.OptimizerSession local,
+	                                 com.o7flip.model.OptimizerSession remote)
+	{
+		if (local.slots == null || remote.slots == null) return false;
+		boolean anyChange = false;
+		// Build remote lookup by item_id — last-write-wins on item identity
+		// rather than slot position so a swap on one side reflects on the other.
+		java.util.Map<Integer, com.o7flip.model.OptimizeResult.Allocation> byId = new java.util.HashMap<>();
+		for (com.o7flip.model.OptimizeResult.Allocation r : remote.slots)
+		{
+			if (r != null && r.itemId > 0) byId.put(r.itemId, r);
+		}
+		for (com.o7flip.model.OptimizeResult.Allocation l : local.slots)
+		{
+			if (l == null) continue;
+			com.o7flip.model.OptimizeResult.Allocation r = byId.get(l.itemId);
+			if (r == null) continue;
+			if (mergeFillList(l.buys, r.buys))  anyChange = true;
+			if (mergeFillList(l.sells, r.sells)) anyChange = true;
+			com.o7flip.model.SlotState derived =
+				com.o7flip.model.SlotState.derive(l.qty, l.buys, l.sells);
+			if (l.state != derived) { l.state = derived; anyChange = true; }
+		}
+		local.lastPollAt = remote.lastPollAt;
+		return anyChange;
+	}
+
+	/** Union remote fills into local on (qty, price_each, traded_at) identity. */
+	private boolean mergeFillList(java.util.List<com.o7flip.model.SlotFill> local,
+	                              java.util.List<com.o7flip.model.SlotFill> remote)
+	{
+		if (remote == null || remote.isEmpty()) return false;
+		boolean any = false;
+		java.util.Set<String> seen = new java.util.HashSet<>();
+		for (com.o7flip.model.SlotFill f : local) if (f != null) seen.add(fillKey(f));
+		for (com.o7flip.model.SlotFill rf : remote)
+		{
+			if (rf == null) continue;
+			if (seen.add(fillKey(rf))) { local.add(rf); any = true; }
+		}
+		return any;
+	}
+
+	private static String fillKey(com.o7flip.model.SlotFill f)
+	{
+		return f.qty + "@" + f.priceEach + "@" + (f.tradedAt == null ? "" : f.tradedAt);
+	}
+
+	/** Builds an OptimizerSession from a fresh /optimize response. */
+	private void seedActiveSessionFrom(com.o7flip.model.OptimizeResult result, long capital, int slots,
+	                                   String risk, int maxFillHours, Boolean members)
+	{
+		if (result == null || result.allocations == null) return;
+		com.o7flip.model.OptimizerSession s = new com.o7flip.model.OptimizerSession();
+		s.inputs.capital      = capital;
+		s.inputs.slots        = slots;
+		s.inputs.risk         = risk;
+		s.inputs.maxFillHours = maxFillHours;
+		s.inputs.members      = members;
+		s.slots               = new java.util.ArrayList<>(result.allocations);
+		s.generatedAt         = result.updatedAt;
+		activeSession         = s;
+	}
+
+	/** Drop-in replacement when a single slot was swapped via /optimize (slots=1). */
+	private void replaceSlotInActiveSession(int idx, com.o7flip.model.OptimizeResult.Allocation next)
+	{
+		com.o7flip.model.OptimizerSession s = activeSession;
+		if (s == null || s.slots == null || idx < 0 || idx >= s.slots.size()) return;
+		s.slots.set(idx, next);
+	}
+
+	/** Debounce window — collapse a flurry of local edits into one POST. */
+	private void scheduleSessionPost()
+	{
+		if (executor == null || executor.isShutdown()) return;
+		if (pendingSessionPost != null) pendingSessionPost.cancel(false);
+		pendingSessionPost = executor.schedule(this::doPostActiveSession,
+			SESSION_POST_DEBOUNCE_MS, TimeUnit.MILLISECONDS);
+	}
+
+	private void doPostActiveSession()
+	{
+		com.o7flip.model.OptimizerSession snap = activeSession;
+		if (snap == null) return;
+		apiClient.postActiveSession(snap, ok -> { /* fire-and-forget */ });
+	}
+
+	/** Called from the panel's ✕ Clear button — wipe both local and remote. */
+	public void clearActivePlan()
+	{
+		activeSession = null;
+		if (executor == null || executor.isShutdown()) return;
+		executor.execute(() -> apiClient.deleteActiveSession(ok ->
+		{
+			SwingUtilities.invokeLater(() -> panel.onActivePlanCleared());
+		}));
+	}
+
+	/**
+	 * Hook called from {@code recordTrade} when a trade matches an item in
+	 * the active allocation. Pushes a SlotFill onto the relevant slot, re-
+	 * derives state, and runs two transition side-effects:
+	 *
+	 * <ul>
+	 *   <li><b>PENDING/BUYING → FILLED</b>: silently arm the GE sell-side
+	 *       queue at the slot's recommended {@code sell_price} so the next
+	 *       time the user lists this item the ask auto-fills.</li>
+	 *   <li><b>SELLING → CLOSED</b>: realised profit is added to the slot's
+	 *       allocation and a fresh single-slot {@code /optimize} call rolls
+	 *       a new recommendation into the same position, excluding all other
+	 *       items currently in the plan. The new allocation is POSTed to
+	 *       {@code /optimize/active} so the website sees the rolled plan.</li>
+	 * </ul>
+	 */
+	private void attributeTradeToActiveSlot(int itemId, int qty, long pricePer, boolean isBuy, long timestampMs)
+	{
+		com.o7flip.model.OptimizerSession s = activeSession;
+		if (s == null || s.slots == null || qty <= 0 || itemId <= 0) return;
+		int slotIdx = -1;
+		com.o7flip.model.OptimizeResult.Allocation slot = null;
+		for (int i = 0; i < s.slots.size(); i++)
+		{
+			com.o7flip.model.OptimizeResult.Allocation a = s.slots.get(i);
+			if (a != null && a.itemId == itemId) { slot = a; slotIdx = i; break; }
+		}
+		if (slot == null) return;
+		com.o7flip.model.SlotState prevState = slot.state;
+
+		com.o7flip.model.SlotFill fill = new com.o7flip.model.SlotFill();
+		fill.qty       = qty;
+		fill.priceEach = pricePer;
+		fill.tradedAt  = java.time.Instant.ofEpochMilli(timestampMs).toString();
+		if (isBuy) slot.buys.add(fill); else slot.sells.add(fill);
+		slot.state = com.o7flip.model.SlotState.derive(slot.qty, slot.buys, slot.sells);
+		scheduleSessionPost();
+
+		// FILLED transition — arm sell-side auto-fill so the user's GE sell
+		// listing reads the recommended ask without further action. Silent
+		// (no notifier ping) to avoid double-notifying — the regular flow
+		// already notified them on the initial buy queue.
+		if (prevState != com.o7flip.model.SlotState.FILLED
+			&& slot.state == com.o7flip.model.SlotState.FILLED
+			&& slot.sellPrice > 0)
+		{
+			armSellAutoFill(slot.itemId, slot.sellPrice, slot.name);
+		}
+
+		// CLOSED transition — recycle the slot. Capture realised profit and
+		// roll it into a new allocation for the same slot index.
+		if (prevState != com.o7flip.model.SlotState.CLOSED
+			&& slot.state == com.o7flip.model.SlotState.CLOSED)
+		{
+			recycleClosedSlot(slotIdx, slot);
+		}
+
+		final com.o7flip.model.OptimizerSession snap = s;
+		SwingUtilities.invokeLater(() -> panel.hydrateOptimizerSession(snap));
+	}
+
+	/**
+	 * Quietly arms the GE sell-side overlay at the supplied price. Unlike
+	 * the user-initiated {@link #queueGeSell} this does NOT call the
+	 * notifier — the action is automatic, the user didn't ask for a ping.
+	 */
+	private void armSellAutoFill(int itemId, long price, String name)
+	{
+		log.debug("[07Flip] Plan slot armed for sell auto-fill: {} ({}) at {}", name, itemId, price);
+		overlayQueueItemId    = itemId;
+		overlayQueuePrice     = price;
+		overlayQueueIsBuy     = false;
+		overlayQueueExpiresAt = System.currentTimeMillis() + OVERLAY_QUEUE_TTL_MS;
+		pendingGeSellItemId   = itemId;
+		pendingGeSellPrice    = price;
+		pendingGeSellName     = name;
+	}
+
+	/**
+	 * Rolls a closed slot into the next allocation. Realised profit
+	 * (sum sells.gp − sum buys.gp) is folded into the new slot's gp budget,
+	 * and the existing item is added to the exclude list so the server
+	 * doesn't recommend the same item back to itself immediately.
+	 */
+	private void recycleClosedSlot(int slotIdx, com.o7flip.model.OptimizeResult.Allocation closed)
+	{
+		if (executor == null || executor.isShutdown()) return;
+		com.o7flip.model.OptimizerSession s = activeSession;
+		if (s == null || s.slots == null) return;
+
+		long boughtGp = sumGp(closed.buys);
+		long soldGp   = sumGp(closed.sells);
+		long realisedProfit = Math.max(0L, soldGp - boughtGp);
+		long newCapital = closed.gpAllocated + realisedProfit;
+
+		// Exclude the just-closed item + every other currently-active item.
+		java.util.List<Integer> excludes = new java.util.ArrayList<>();
+		for (com.o7flip.model.OptimizeResult.Allocation a : s.slots)
+		{
+			if (a != null && a.itemId > 0) excludes.add(a.itemId);
+		}
+
+		String risk = s.inputs.risk != null ? s.inputs.risk : "medium";
+		int maxFillHours = s.inputs.maxFillHours != null ? s.inputs.maxFillHours : 4;
+		Boolean members = s.inputs.members;
+
+		log.debug("[07Flip] Plan: recycling closed slot {} ({}). gp budget {} -> {} (+{} profit)",
+			slotIdx, closed.name, closed.gpAllocated, newCapital, realisedProfit);
+
+		executor.execute(() -> apiClient.fetchOptimize(
+			newCapital, 1, risk, maxFillHours, members, excludes,
+			result -> SwingUtilities.invokeLater(() ->
+			{
+				if (result == null || result.allocations == null || result.allocations.isEmpty())
+				{
+					log.debug("[07Flip] Plan: recycle returned no candidate for slot {}", slotIdx);
+					return;
+				}
+				panel.onOptimizeSlotSwapped(slotIdx, result.allocations.get(0));
+				replaceSlotInActiveSession(slotIdx, result.allocations.get(0));
+				scheduleSessionPost();
+			}),
+			upgradeUrl -> SwingUtilities.invokeLater(() -> panel.onOptimizePremiumRequired(upgradeUrl)),
+			reason -> log.debug("[07Flip] Plan: recycle failed: {}", reason)));
+	}
+
+	private static long sumGp(java.util.List<com.o7flip.model.SlotFill> fills)
+	{
+		if (fills == null) return 0L;
+		long total = 0L;
+		for (com.o7flip.model.SlotFill f : fills)
+		{
+			if (f != null) total += (long) f.qty * f.priceEach;
+		}
+		return total;
+	}
+
+	void onScreenersTabSelected()
+	{
+		if (!shouldPollScreeners())
+		{
+			return;
+		}
+		executor.execute(this::fetchScreenersNow);
+	}
+
+	private boolean shouldPollScreeners()
+	{
+		return System.currentTimeMillis() - lastScreenersFetchMs >= SCREENERS_MIN_INTERVAL_MS;
+	}
+
+	private void fetchScreenersNow()
+	{
+		lastScreenersFetchMs = System.currentTimeMillis();
+		apiClient.fetchScreeners(bundle ->
+		{
+			boolean hasContent = bundle != null
+				&& ((bundle.systemPresets != null && !bundle.systemPresets.isEmpty())
+				||  (bundle.userPresets   != null && !bundle.userPresets.isEmpty()));
+			if (hasContent) saveCache("screeners", bundle);
+			SwingUtilities.invokeLater(() -> panel.updateScreeners(bundle));
+		});
+	}
+
+	/**
+	 * Persists a High Alch staff-modifier toggle through RuneLite's config
+	 * system. Called from the panel so the UI doesn't need to inject
+	 * {@link ConfigManager} directly.
+	 */
+	public void persistHighAlchModifier(String keyName, boolean value)
+	{
+		configManager.setConfiguration("o7flip", keyName, value);
+	}
+
+	/** Public mirror of {@link #hasApiKey} for UI consumers in {@code com.o7flip.ui}. */
+	public boolean hasApiKeyPublic()
+	{
+		return hasApiKey();
+	}
+
+	private boolean hasApiKey()
+	{
+		String k = config.apiKey();
+		return k != null && !k.trim().isEmpty();
+	}
+
 	/**
 	 * Single source-of-truth for fetching the Dumps tab. Routes to either
 	 * {@code /dumps} or {@code /bot-dumps} depending on the panel's source
@@ -2968,22 +4133,38 @@ public class O7FlipPlugin extends Plugin
 	 */
 	private void fetchDumpsAtPage(String sort, int page)
 	{
-		BiConsumer<List<DumpItem>, Integer> cb = (items, total) ->
+		java.util.function.Consumer<DumpItem.Response> cb = resp ->
 		{
-			lastDumps = items;
+			// Persist only when we actually got rows back — empty responses
+			// shouldn't overwrite a previously-good cache (server hiccup
+			// shouldn't wipe yesterday's data from disk).
+			if (resp != null && resp.items != null && !resp.items.isEmpty())
+			{
+				saveCache("dumps", resp);
+			}
+			lastDumps = resp.items;
 			rebuildTrackedItems();
-			SwingUtilities.invokeLater(() -> panel.updateDumps(items, total, page));
+			SwingUtilities.invokeLater(() -> panel.updateDumps(resp, page));
 		};
+		// Filters plumbed from the panel. confirmedOnly removed — server
+		// enforces it as a base filter now. v5 adds a tier filter
+		// (all/confirmed/likely) so users can narrow to just the
+		// structural-evidence rows.
+		int     minScore   = panel.getDumpsMinScore();
+		boolean activeOnly = panel.getDumpsActiveOnly();
+		String  tier       = panel.getDumpsTier();
 		if (panel.dumpsUsesBotEndpoint())
 		{
 			apiClient.fetchBotDumps(sort,
 				panel.getDumpsMinProfit(), panel.getDumpsPriceMin(), panel.getDumpsPriceMax(),
+				minScore, activeOnly, tier,
 				page, cb);
 		}
 		else
 		{
 			apiClient.fetchDumps(sort,
 				panel.getDumpsMinProfit(), panel.getDumpsPriceMin(), panel.getDumpsPriceMax(),
+				minScore, activeOnly, tier,
 				page, cb);
 		}
 	}

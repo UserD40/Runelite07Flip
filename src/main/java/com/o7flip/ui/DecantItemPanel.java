@@ -123,6 +123,19 @@ public class DecantItemPanel extends JPanel
 				setBackground(bg);
 				textPanel.setBackground(bg);
 			}
+			@Override
+			public void mousePressed(MouseEvent e)
+			{
+				// Right-click queues the source-dose potion for purchase. The
+				// /decant response doesn't carry a specific buy price (the
+				// strategy spans multiple doses at different prices) so we
+				// pass 0 — the GE search auto-fills with the item, but the
+				// user enters their own price.
+				if (SwingUtilities.isRightMouseButton(e) && !e.isShiftDown() && plugin != null && item.itemId > 0)
+				{
+					plugin.queueGeBuy(item.itemId, 0L, item.potionName);
+				}
+			}
 		});
 		setMaximumSize(new Dimension(Integer.MAX_VALUE, getPreferredSize().height));
 	}

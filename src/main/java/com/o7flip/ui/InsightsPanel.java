@@ -73,6 +73,14 @@ public class InsightsPanel extends JPanel
 	private List<FlipItem> recommended = Collections.emptyList();
 	private boolean inEmptyState = true;
 
+	// Star toggle state — tracked separately from the rebuilt subtree so we
+	// can repaint without a full panel rerender when the favourite state
+	// flips. {@link #currentItemId} reflects whatever Insights last rendered;
+	// {@link #starLabel} is the JLabel inside the header.
+	private int     currentItemId;
+	private String  currentItemName;
+	private JLabel  starLabel;
+
 	public InsightsPanel(ItemManager itemManager)
 	{
 		this(itemManager, null);
@@ -381,6 +389,11 @@ public class InsightsPanel extends JPanel
 
 	private JPanel buildHeader(int itemId, String name, boolean members, int buyLimit, Integer highAlch, Integer lowAlch)
 	{
+		// Remember what we're rendering so refreshFavouriteState() can find
+		// the right item when the plugin pings us.
+		this.currentItemId   = itemId;
+		this.currentItemName = name;
+
 		JPanel panel = new JPanel(new BorderLayout(8, 0));
 		panel.setBackground(SECTION_BG);
 		panel.setBorder(new EmptyBorder(8, 10, 8, 10));
@@ -414,9 +427,85 @@ public class InsightsPanel extends JPanel
 		text.add(Box.createVerticalStrut(2));
 		text.add(subLabel);
 
-		panel.add(icon, BorderLayout.WEST);
-		panel.add(text, BorderLayout.CENTER);
+		// ── Star toggle (right edge) ─────────────────────────────────────────
+		starLabel = new JLabel();
+		starLabel.setFont(starLabel.getFont().deriveFont(20f));
+		starLabel.setBorder(new EmptyBorder(0, 8, 0, 0));
+		starLabel.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+		paintStar();
+		starLabel.addMouseListener(new MouseAdapter()
+		{
+			@Override
+			public void mouseClicked(MouseEvent e)
+			{
+				onStarClicked();
+			}
+		});
+
+		panel.add(icon,      BorderLayout.WEST);
+		panel.add(text,      BorderLayout.CENTER);
+		panel.add(starLabel, BorderLayout.EAST);
 		return panel;
+	}
+
+	/** Reflects current favourite + auth state into the star icon. */
+	private void paintStar()
+	{
+		if (starLabel == null) return;
+		boolean hasKey   = plugin != null && plugin.hasApiKeyPublic();
+		boolean favourited = plugin != null && plugin.isFavourite(currentItemId);
+		if (!hasKey)
+		{
+			starLabel.setText("☆");
+			starLabel.setForeground(new Color(0x444444));
+			starLabel.setToolTipText("<html>Paste your 07flip.com API key in the plugin config<br>"
+				+ "to use favourites.</html>");
+		}
+		else if (favourited)
+		{
+			starLabel.setText("★");
+			starLabel.setForeground(new Color(0xFFC845));
+			starLabel.setToolTipText("Favourited — click to remove from your list.");
+		}
+		else
+		{
+			starLabel.setText("☆");
+			starLabel.setForeground(new Color(0xAAAAAA));
+			starLabel.setToolTipText("Click to favourite this item — it'll appear in the Favs tab.");
+		}
+	}
+
+	private void onStarClicked()
+	{
+		if (plugin == null || currentItemId <= 0) return;
+		if (!plugin.hasApiKeyPublic())
+		{
+			// No key — open the config so they can paste one in. We don't
+			// have a dedicated setup flow yet; the plugin config is the
+			// canonical entry point.
+			return;
+		}
+		boolean wasFav = plugin.isFavourite(currentItemId);
+		plugin.toggleFavourite(currentItemId, wasFav,
+			() -> { /* success — UI already updated optimistically */ },
+			() ->
+			{
+				// Server rejected — paint reverted state and let the user know.
+				paintStar();
+				if (starLabel != null)
+				{
+					starLabel.setToolTipText("Couldn't update favourites — try again in a moment.");
+				}
+			});
+	}
+
+	/**
+	 * Called by O7FlipPanel when the plugin's favourite-id set changes.
+	 * Cheap repaint of just the star — no full insights rebuild.
+	 */
+	public void refreshFavouriteState()
+	{
+		paintStar();
 	}
 
 	private JPanel buildLivePrices(ItemInsights ins)

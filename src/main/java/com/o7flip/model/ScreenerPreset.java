@@ -24,36 +24,36 @@
  */
 package com.o7flip.model;
 
-public class FlipItem
+import java.util.ArrayList;
+import java.util.List;
+
+/**
+ * A screener entry from /api/runelite/screeners. Either system-curated
+ * ({@code scope == "system"}) or user-defined ({@code scope == "user"}).
+ *
+ * For free/anonymous callers, system presets are returned with empty
+ * {@link #matches} and {@link #premiumRequired} set to true so the UI
+ * can show an upgrade CTA in the row.
+ */
+public class ScreenerPreset
 {
-	public int itemId;
-	public String name;
-	public long buyPrice;
-	public long sellPrice;
-	public long profit;
-	public double roiPct;
-	public long potentialProfit;
-	public int buyLimit;
-	public boolean members;
+	public String  key;
+	public String  name;
+	public String  description;
+	public String  timeframe;      // e.g. "daily"
+	public String  scope;          // "system" | "user"
+	public boolean premiumRequired;
+	public String  upgradeUrl;
+	public int     count;
+	public List<ScreenerMatch> matches = new ArrayList<>();
 
-	// Optional cash-stack annotation (only present when the request used
-	// ?cashStack=…&annotate=affordableQty). Null otherwise.
-	public Integer affordableQty;
-
-	// Composite "07Flip Score" 0–100. Null when the item had < 20 trades
-	// in the last hour (illiquid or fresh items).
-	public Integer flip07Score;
-
-	// Recommended buy / sell prices from the server's last-hour p10/p90 of
-	// fills. Use for the GE auto-fill overlay and the item-detail drawer.
-	// Null together when the item had < 10 snapshots in the last hour.
-	public Long recBuyPrice;
-	public Long recSellPrice;
-	public Long recProfit;
-
-	// Hourly / daily volume. Server doesn't always echo these on /flips rows
-	// — when null, the volume filter is a pass-through. Server agent offered
-	// to add them to /flips response; once that ships these light up.
-	public Integer hourlyVolume;
-	public Integer dailyVolume;
+	/** Container the API client populates from a list-mode /screeners response. */
+	public static class Bundle
+	{
+		public List<ScreenerPreset> systemPresets = new ArrayList<>();
+		public List<ScreenerPreset> userPresets   = new ArrayList<>();
+		public boolean premium;
+		public boolean authenticated;
+		public String  updatedAt;
+	}
 }

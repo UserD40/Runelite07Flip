@@ -31,7 +31,9 @@ public class TradeRecord
 	public boolean isBuy;
 	public int    quantity;
 	public long   priceEach;  // effective fill price = totalGp / quantity
-	public long   totalGp;    // total gp spent (buy) or received (sell)
+	public long   totalGp;    // buy: gross gp spent. sell: NET gp received
+	                          //   (post-tax — what GrandExchangeOffer.getSpent()
+	                          //   reports in current RuneLite, NOT pre-tax gross)
 	public long   timestamp;  // System.currentTimeMillis() when recorded
 	public boolean partial;   // true when CANCELLED with a non-zero partial fill
 

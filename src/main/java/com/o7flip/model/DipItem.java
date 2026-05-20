@@ -24,36 +24,41 @@
  */
 package com.o7flip.model;
 
-public class FlipItem
+/**
+ * One row from /api/runelite/dips. The endpoint mixes two row shapes
+ * (distinguished by the {@code type} field): {@code "24h_dip"} rows
+ * carry {@code avg24hBuy} + {@code dipPct}, {@code "atl"} rows carry
+ * {@code atlFloor} + {@code buyVsAtlPct}. The other type's fields are
+ * null.
+ */
+public class DipItem
 {
-	public int itemId;
-	public String name;
-	public long buyPrice;
-	public long sellPrice;
-	public long profit;
-	public double roiPct;
-	public long potentialProfit;
-	public int buyLimit;
+	public int     itemId;
+	public String  name;
+	public long    buyPrice;
+	public int     hourlyVolume;
+	public int     dailyVolume;
+	public int     buyLimit;
 	public boolean members;
+	public String  lastUpdated;
 
-	// Optional cash-stack annotation (only present when the request used
-	// ?cashStack=…&annotate=affordableQty). Null otherwise.
-	public Integer affordableQty;
+	/** "24h_dip" or "atl". */
+	public String  type;
 
-	// Composite "07Flip Score" 0–100. Null when the item had < 20 trades
-	// in the last hour (illiquid or fresh items).
-	public Integer flip07Score;
+	// 24h_dip fields (null when type == "atl")
+	public Long    avg24hBuy;
+	public Double  dipPct;
 
-	// Recommended buy / sell prices from the server's last-hour p10/p90 of
-	// fills. Use for the GE auto-fill overlay and the item-detail drawer.
-	// Null together when the item had < 10 snapshots in the last hour.
-	public Long recBuyPrice;
-	public Long recSellPrice;
-	public Long recProfit;
+	// Window-specific dip percentages — server now ships all three on every
+	// dip row, so the UI can show "↓ X% in 7d" without re-fetching when the
+	// user switches windows. Nullable when the data window doesn't have
+	// enough history (server returns null below the minimum sample size).
+	public Double  dipPct1d;
+	public Double  dipPct7d;
+	public Double  dipPct30d;
 
-	// Hourly / daily volume. Server doesn't always echo these on /flips rows
-	// — when null, the volume filter is a pass-through. Server agent offered
-	// to add them to /flips response; once that ships these light up.
-	public Integer hourlyVolume;
-	public Integer dailyVolume;
+	// atl fields (null when type == "24h_dip"). The atl_floor now uses a
+	// 5-year lookback (was 1-year) — purely additive, semantics unchanged.
+	public Long    atlFloor;
+	public Double  buyVsAtlPct;
 }

@@ -13,7 +13,7 @@ Most of the plugin works out of the box. An API key from [07flip.com](https://07
 | Flips, Dumps, Item, Decant tabs | ✅ | ✅ |
 | All Grand Exchange overlays and auto price-fill | ✅ | ✅ |
 | Local My Trades history | ✅ | ✅ |
-| Merch Alerts (premium) | — | ✅ paid |
+| Merch Alerts (premium) | — | ✅ |
 | Moon armour repair flips | — | ✅ |
 | Barrows armour repair flips | — | ✅ |
 | My Trades website sync | — | ✅ |

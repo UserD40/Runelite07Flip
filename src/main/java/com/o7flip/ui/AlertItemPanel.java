@@ -31,9 +31,7 @@ import net.runelite.client.game.ItemManager;
 import net.runelite.client.ui.ColorScheme;
 import javax.swing.BoxLayout;
 import javax.swing.JLabel;
-import javax.swing.JMenuItem;
 import javax.swing.JPanel;
-import javax.swing.JPopupMenu;
 import javax.swing.SwingUtilities;
 import javax.swing.border.EmptyBorder;
 import java.awt.BasicStroke;
@@ -137,9 +135,16 @@ public class AlertItemPanel extends JPanel
 			@Override
 			public void mousePressed(MouseEvent e)
 			{
+				// Right-click anywhere on the row queues a Buy directly (Flips
+				// template — no menu). Uses livePrice when the server has a
+				// fresh sample, falling back to the detection-time price.
 				if (SwingUtilities.isRightMouseButton(e) && !e.isShiftDown() && plugin != null)
 				{
-					showContextMenu(e, alert, plugin);
+					long buyPrice = alert.livePrice != null ? alert.livePrice : alert.startingPrice;
+					if (buyPrice > 0)
+					{
+						plugin.queueGeBuy(alert.itemId, buyPrice, alert.name);
+					}
 				}
 			}
 		});
@@ -311,22 +316,4 @@ public class AlertItemPanel extends JPanel
 		}
 	}
 
-	private static void showContextMenu(MouseEvent e, AlertItem alert, O7FlipPlugin plugin)
-	{
-		JPopupMenu menu = new JPopupMenu();
-		long buyPrice = alert.livePrice != null ? alert.livePrice : alert.startingPrice;
-		JMenuItem buyItem = new JMenuItem("Buy on GE — " + formatGp(buyPrice));
-		buyItem.addActionListener(ae -> plugin.queueGeBuy(alert.itemId, buyPrice, alert.name));
-		menu.add(buyItem);
-		boolean inInventory = plugin.inventoryItemIds.contains(alert.itemId);
-		if (!plugin.getConfig().inventoryCheckOnSell() || inInventory)
-		{
-			JMenuItem sellItem = new JMenuItem("Sell on GE — " + formatGp(alert.sellTarget));
-			sellItem.addActionListener(ae -> plugin.queueGeSell(alert.itemId, alert.sellTarget, alert.name));
-			menu.add(sellItem);
-		}
-		menu.addSeparator();
-		FlipItemPanel.addHideMenuItem(menu, plugin, alert.itemId, alert.name);
-		menu.show(e.getComponent(), e.getX(), e.getY());
-	}
 }

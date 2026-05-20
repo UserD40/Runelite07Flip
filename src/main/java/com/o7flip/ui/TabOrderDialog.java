@@ -30,6 +30,11 @@ import java.awt.Color;
 import java.awt.Component;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
+import java.awt.GridLayout;
+import java.awt.datatransfer.DataFlavor;
+import java.awt.datatransfer.Transferable;
+import java.awt.datatransfer.UnsupportedFlavorException;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Consumer;
@@ -37,7 +42,9 @@ import javax.swing.BorderFactory;
 import javax.swing.Box;
 import javax.swing.BoxLayout;
 import javax.swing.DefaultListModel;
+import javax.swing.DropMode;
 import javax.swing.JButton;
+import javax.swing.JComponent;
 import javax.swing.JDialog;
 import javax.swing.JLabel;
 import javax.swing.JList;
@@ -45,85 +52,133 @@ import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 import javax.swing.ListSelectionModel;
 import javax.swing.SwingConstants;
+import javax.swing.TransferHandler;
 import javax.swing.border.EmptyBorder;
 import net.runelite.client.ui.ColorScheme;
 
 /**
- * Modal dialog that lets the user reorder the 07Flip panel tabs.
+ * Customise-top-row picker. Two lists: "Top Row" (max 4) on the left, "In
+ * Other" on the right. Items can be moved between lists with the &lt;/&gt;
+ * buttons, reordered within Top Row with ▲ / ▼, and (where Swing's drag
+ * support cooperates) dragged between lists with the mouse.
  *
- * Pick a tab in the list, click ▲ / ▼ to move it. Save commits the new
- * order back to the plugin via the {@code onSave} callback. Reset
- * restores the default order. Cancel closes without changes.
- *
- * Tab visibility (showFlips, showDumps, etc.) is controlled separately
- * in plugin config — this dialog is purely about ordering.
+ * The bottom-row tabs (Flips · My Trades · Item · Other) aren't shown
+ * here — they're fixed and out of scope for this picker.
  */
 public class TabOrderDialog extends JDialog
 {
 	private static final Color ORANGE = new Color(0xFF981F);
 	private static final Color BG     = ColorScheme.DARK_GRAY_COLOR;
 	private static final Color BG_ALT = ColorScheme.DARKER_GRAY_COLOR;
+	private static final int   MAX_TOP = 4;
 
-	public static void show(Component owner, List<String> currentOrder, List<String> defaultOrder,
-		Consumer<List<String>> onSave)
+	/** Marker DataFlavor for inter-list drags so we only accept our own payloads. */
+	private static final DataFlavor STRING_LIST_FLAVOR =
+		new DataFlavor(String.class, "TabOrderDialog/list-item");
+
+	/**
+	 * @param currentTop  the user's current top-row selection (≤ 4 items)
+	 * @param pool        all candidates that may live in either list
+	 * @param defaultTop  what "Reset" restores
+	 * @param onSave      receives the new top-row selection in display order
+	 */
+	public static void show(Component owner, List<String> currentTop, List<String> pool,
+		List<String> defaultTop, Consumer<List<String>> onSave)
 	{
 		java.awt.Window parent = owner == null ? null : javax.swing.SwingUtilities.getWindowAncestor(owner);
-		TabOrderDialog dialog = new TabOrderDialog(parent, currentOrder, defaultOrder, onSave);
+		TabOrderDialog dialog = new TabOrderDialog(parent, currentTop, pool, defaultTop, onSave);
 		dialog.setLocationRelativeTo(owner);
 		dialog.setVisible(true);
 	}
 
-	private TabOrderDialog(java.awt.Window parent, List<String> currentOrder, List<String> defaultOrder,
-		Consumer<List<String>> onSave)
+	private TabOrderDialog(java.awt.Window parent, List<String> currentTop, List<String> pool,
+		List<String> defaultTop, Consumer<List<String>> onSave)
 	{
-		super(parent, "07Flip — Tab Order", ModalityType.APPLICATION_MODAL);
+		super(parent, "07Flip — Customise top row", ModalityType.APPLICATION_MODAL);
 
-		DefaultListModel<String> model = new DefaultListModel<>();
-		for (String name : currentOrder)
+		DefaultListModel<String> topModel = new DefaultListModel<>();
+		DefaultListModel<String> otherModel = new DefaultListModel<>();
+		for (String name : currentTop) topModel.addElement(name);
+		for (String name : pool)
 		{
-			model.addElement(name);
+			if (!currentTop.contains(name)) otherModel.addElement(name);
 		}
 
-		JList<String> list = new JList<>(model);
-		list.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
-		list.setBackground(BG_ALT);
-		list.setForeground(Color.WHITE);
-		list.setSelectionBackground(ORANGE);
-		list.setSelectionForeground(Color.BLACK);
-		list.setFont(Fonts.REG);
-		list.setFixedCellHeight(24);
-		list.setBorder(new EmptyBorder(4, 4, 4, 4));
-		list.setSelectedIndex(0);
+		JList<String> topList = buildList(topModel);
+		JList<String> otherList = buildList(otherModel);
 
-		JScrollPane listScroll = new JScrollPane(list);
-		listScroll.setPreferredSize(new Dimension(180, 220));
-		listScroll.setBorder(BorderFactory.createLineBorder(BG_ALT));
+		// Drag-and-drop between lists. The reorder-within behaviour is built
+		// into Swing's MOVE action when we wire a TransferHandler that knows
+		// how to accept the dragged item; cross-list drops use the same code
+		// path because each list's handler removes the dragged item from its
+		// source model and inserts into the target.
+		topList.setTransferHandler(new TabTransferHandler(topModel, otherModel, true));
+		otherList.setTransferHandler(new TabTransferHandler(otherModel, topModel, false));
+		topList.setDragEnabled(true);
+		otherList.setDragEnabled(true);
+		topList.setDropMode(DropMode.INSERT);
+		otherList.setDropMode(DropMode.INSERT);
 
-		JButton upBtn = arrowButton("▲ Move up");
-		JButton dnBtn = arrowButton("▼ Move down");
-		upBtn.addActionListener(ev -> move(list, model, -1));
-		dnBtn.addActionListener(ev -> move(list, model, +1));
+		JScrollPane topScroll = new JScrollPane(topList);
+		topScroll.setPreferredSize(new Dimension(150, 200));
+		topScroll.setBorder(BorderFactory.createLineBorder(BG_ALT));
+
+		JScrollPane otherScroll = new JScrollPane(otherList);
+		otherScroll.setPreferredSize(new Dimension(150, 200));
+		otherScroll.setBorder(BorderFactory.createLineBorder(BG_ALT));
+
+		JLabel topHeader = listHeader("Top row (max " + MAX_TOP + ")");
+		JLabel otherHeader = listHeader("In Other tab");
+
+		JPanel topCol = new JPanel(new BorderLayout());
+		topCol.setBackground(BG);
+		topCol.add(topHeader, BorderLayout.NORTH);
+		topCol.add(topScroll, BorderLayout.CENTER);
+
+		JPanel otherCol = new JPanel(new BorderLayout());
+		otherCol.setBackground(BG);
+		otherCol.add(otherHeader, BorderLayout.NORTH);
+		otherCol.add(otherScroll, BorderLayout.CENTER);
+
+		// ── Middle button column: ◀ ▶ ▲ ▼ ───────────────────────────────────
+		JButton toTop    = arrowButton("◀");
+		JButton toOther  = arrowButton("▶");
+		JButton moveUp   = arrowButton("▲");
+		JButton moveDown = arrowButton("▼");
+		toTop.setToolTipText("Move to Top row");
+		toOther.setToolTipText("Move to Other");
+		moveUp.setToolTipText("Move up within Top row");
+		moveDown.setToolTipText("Move down within Top row");
+
+		toTop.addActionListener(ev -> moveBetween(otherList, otherModel, topList, topModel, true));
+		toOther.addActionListener(ev -> moveBetween(topList, topModel, otherList, otherModel, false));
+		moveUp.addActionListener(ev -> reorder(topList, topModel, -1));
+		moveDown.addActionListener(ev -> reorder(topList, topModel, +1));
 
 		JPanel arrowCol = new JPanel();
 		arrowCol.setLayout(new BoxLayout(arrowCol, BoxLayout.Y_AXIS));
 		arrowCol.setBackground(BG);
-		arrowCol.setBorder(new EmptyBorder(0, 6, 0, 0));
 		arrowCol.add(Box.createVerticalGlue());
-		arrowCol.add(upBtn);
-		arrowCol.add(Box.createVerticalStrut(6));
-		arrowCol.add(dnBtn);
+		arrowCol.add(toTop);
+		arrowCol.add(Box.createVerticalStrut(4));
+		arrowCol.add(toOther);
+		arrowCol.add(Box.createVerticalStrut(16));
+		arrowCol.add(moveUp);
+		arrowCol.add(Box.createVerticalStrut(4));
+		arrowCol.add(moveDown);
 		arrowCol.add(Box.createVerticalGlue());
 
-		JPanel content = new JPanel(new BorderLayout());
+		JPanel content = new JPanel(new GridLayout(1, 3, 4, 0));
 		content.setBackground(BG);
-		content.setBorder(new EmptyBorder(10, 10, 8, 10));
-		JLabel hint = new JLabel("Pick a tab and use the arrows to move it.");
+		content.setBorder(new EmptyBorder(8, 10, 6, 10));
+		content.add(topCol);
+		content.add(arrowCol);
+		content.add(otherCol);
+
+		JLabel hint = new JLabel("Drag items between lists, or use the arrow buttons.");
 		hint.setFont(Fonts.SM);
 		hint.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
-		hint.setBorder(new EmptyBorder(0, 0, 8, 0));
-		content.add(hint,       BorderLayout.NORTH);
-		content.add(listScroll, BorderLayout.CENTER);
-		content.add(arrowCol,   BorderLayout.EAST);
+		hint.setBorder(new EmptyBorder(8, 12, 0, 12));
 
 		JButton resetBtn  = pillButton("Reset");
 		JButton cancelBtn = pillButton("Cancel");
@@ -133,21 +188,25 @@ public class TabOrderDialog extends JDialog
 
 		resetBtn.addActionListener(ev ->
 		{
-			model.clear();
-			for (String name : defaultOrder)
+			topModel.clear();
+			otherModel.clear();
+			for (String name : defaultTop) topModel.addElement(name);
+			for (String name : pool)
 			{
-				model.addElement(name);
+				if (!defaultTop.contains(name)) otherModel.addElement(name);
 			}
-			list.setSelectedIndex(0);
 		});
 		cancelBtn.addActionListener(ev -> dispose());
 		saveBtn.addActionListener(ev ->
 		{
-			List<String> result = new ArrayList<>(model.getSize());
-			for (int i = 0; i < model.getSize(); i++)
+			if (topModel.getSize() > MAX_TOP)
 			{
-				result.add(model.get(i));
+				// Defensive: shouldn't happen because we cap moves, but trim
+				// any overflow before persisting so the panel layout is sane.
+				while (topModel.getSize() > MAX_TOP) topModel.remove(topModel.getSize() - 1);
 			}
+			List<String> result = new ArrayList<>(topModel.getSize());
+			for (int i = 0; i < topModel.getSize(); i++) result.add(topModel.get(i));
 			onSave.accept(result);
 			dispose();
 		});
@@ -162,6 +221,7 @@ public class TabOrderDialog extends JDialog
 
 		JPanel root = new JPanel(new BorderLayout());
 		root.setBackground(BG);
+		root.add(hint,    BorderLayout.NORTH);
 		root.add(content, BorderLayout.CENTER);
 		root.add(footer,  BorderLayout.SOUTH);
 
@@ -170,18 +230,48 @@ public class TabOrderDialog extends JDialog
 		setResizable(false);
 	}
 
-	private static void move(JList<String> list, DefaultListModel<String> model, int delta)
+	private static JList<String> buildList(DefaultListModel<String> model)
+	{
+		JList<String> list = new JList<>(model);
+		list.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
+		list.setBackground(BG_ALT);
+		list.setForeground(Color.WHITE);
+		list.setSelectionBackground(ORANGE);
+		list.setSelectionForeground(Color.BLACK);
+		list.setFont(Fonts.REG);
+		list.setFixedCellHeight(24);
+		list.setBorder(new EmptyBorder(4, 4, 4, 4));
+		return list;
+	}
+
+	private static JLabel listHeader(String text)
+	{
+		JLabel l = new JLabel(text);
+		l.setFont(Fonts.BOLD);
+		l.setForeground(ORANGE);
+		l.setBorder(new EmptyBorder(4, 4, 6, 4));
+		return l;
+	}
+
+	private void moveBetween(JList<String> srcList, DefaultListModel<String> srcModel,
+		JList<String> dstList, DefaultListModel<String> dstModel, boolean intoTop)
+	{
+		int i = srcList.getSelectedIndex();
+		if (i < 0) return;
+		// Cap the top row at MAX_TOP — extra moves silently no-op so the user
+		// can't end up with a 5-item top row.
+		if (intoTop && dstModel.getSize() >= MAX_TOP) return;
+		String item = srcModel.remove(i);
+		dstModel.addElement(item);
+		dstList.setSelectedValue(item, true);
+	}
+
+	private static void reorder(JList<String> list, DefaultListModel<String> model, int delta)
 	{
 		int i = list.getSelectedIndex();
-		if (i < 0)
-		{
-			return;
-		}
+		if (i < 0) return;
 		int j = i + delta;
-		if (j < 0 || j >= model.getSize())
-		{
-			return;
-		}
+		if (j < 0 || j >= model.getSize()) return;
 		String item = model.remove(i);
 		model.add(j, item);
 		list.setSelectedIndex(j);
@@ -196,7 +286,8 @@ public class TabOrderDialog extends JDialog
 		b.setForeground(Color.WHITE);
 		b.setFocusable(false);
 		b.setAlignmentX(Component.CENTER_ALIGNMENT);
-		b.setMaximumSize(new Dimension(120, 28));
+		b.setMaximumSize(new Dimension(60, 24));
+		b.setPreferredSize(new Dimension(50, 24));
 		b.setHorizontalAlignment(SwingConstants.CENTER);
 		return b;
 	}
@@ -210,5 +301,104 @@ public class TabOrderDialog extends JDialog
 		b.setFocusable(false);
 		b.setBorder(new EmptyBorder(4, 14, 4, 14));
 		return b;
+	}
+
+	/**
+	 * TransferHandler that supports drag-and-drop reorder within a single
+	 * list AND drag between two lists. Each list owns one handler instance;
+	 * the {@code source} is its own model, and {@code peer} is the other
+	 * list's model. The handler enforces the top-row 4-item cap.
+	 */
+	private static final class TabTransferHandler extends TransferHandler
+	{
+		private final DefaultListModel<String> source;
+		private final DefaultListModel<String> peer;
+		private final boolean sourceIsTop;
+		private int dragFromIndex = -1;
+
+		TabTransferHandler(DefaultListModel<String> source, DefaultListModel<String> peer, boolean sourceIsTop)
+		{
+			this.source = source;
+			this.peer = peer;
+			this.sourceIsTop = sourceIsTop;
+		}
+
+		@Override
+		public int getSourceActions(JComponent c) { return MOVE; }
+
+		@Override
+		protected Transferable createTransferable(JComponent c)
+		{
+			@SuppressWarnings("unchecked")
+			JList<String> list = (JList<String>) c;
+			dragFromIndex = list.getSelectedIndex();
+			final String item = list.getSelectedValue();
+			if (item == null) return null;
+			return new Transferable()
+			{
+				@Override
+				public DataFlavor[] getTransferDataFlavors() { return new DataFlavor[]{STRING_LIST_FLAVOR}; }
+				@Override
+				public boolean isDataFlavorSupported(DataFlavor flavor) { return STRING_LIST_FLAVOR.equals(flavor); }
+				@Override
+				public Object getTransferData(DataFlavor flavor) throws UnsupportedFlavorException, IOException
+				{
+					if (!STRING_LIST_FLAVOR.equals(flavor)) throw new UnsupportedFlavorException(flavor);
+					return item;
+				}
+			};
+		}
+
+		@Override
+		public boolean canImport(TransferSupport support)
+		{
+			if (!support.isDataFlavorSupported(STRING_LIST_FLAVOR)) return false;
+			// Enforce the top-row cap: refuse cross-list drops that would
+			// push the top row to 5+ entries.
+			if (sourceIsTop) return true; // reordering within top is always fine
+			if (source.getSize() >= MAX_TOP) return false;
+			return true;
+		}
+
+		@Override
+		public boolean importData(TransferSupport support)
+		{
+			if (!canImport(support)) return false;
+			try
+			{
+				String item = (String) support.getTransferable().getTransferData(STRING_LIST_FLAVOR);
+				JList.DropLocation dl = (JList.DropLocation) support.getDropLocation();
+				int dropIndex = dl.getIndex();
+
+				// Reorder within the same list — figure this out by checking
+				// whether the dragged item is already in our model.
+				int existingIdx = source.indexOf(item);
+				if (existingIdx >= 0)
+				{
+					source.remove(existingIdx);
+					if (dropIndex > existingIdx) dropIndex--;
+					if (dropIndex < 0) dropIndex = 0;
+					if (dropIndex > source.getSize()) dropIndex = source.getSize();
+					source.add(dropIndex, item);
+					return true;
+				}
+
+				// Cross-list drop — remove from peer, insert into us.
+				int peerIdx = peer.indexOf(item);
+				if (peerIdx < 0) return false;
+				peer.remove(peerIdx);
+				if (dropIndex < 0) dropIndex = 0;
+				if (dropIndex > source.getSize()) dropIndex = source.getSize();
+				source.add(dropIndex, item);
+				return true;
+			}
+			catch (Exception e)
+			{
+				return false;
+			}
+		}
+
+		@Override
+		protected void exportDone(JComponent source, Transferable data, int action) { dragFromIndex = -1; }
 	}
 }

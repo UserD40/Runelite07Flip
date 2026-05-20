@@ -70,8 +70,8 @@ public final class ProfitCalculator
 	}
 
 	/**
-	 * Computes the OSRS GE sales tax that would have been deducted from a sell
-	 * offer. Mirrors the in-game rules:
+	 * Computes the OSRS GE sales tax that would be deducted from a sell at
+	 * the supplied <b>gross</b> sale value. Mirrors the in-game rules:
 	 * <ul>
 	 *   <li>Sells only — buys pay no tax.</li>
 	 *   <li>2% of the per-item sale price, rounded down per item.</li>
@@ -80,20 +80,18 @@ public final class ProfitCalculator
 	 *   <li>Bonds ({@link #BOND_ITEM_ID}) are tax-exempt.</li>
 	 * </ul>
 	 *
-	 * @param itemId    item id of the sell
-	 * @param sellTotal gross sale value (price × qty, before tax) — this is
-	 *                  what {@code GrandExchangeOffer.getSpent()} reports for
-	 *                  a completed sell offer
-	 * @param quantity  number of items sold
-	 * @return total gp deducted as tax across the whole offer
+	 * Do NOT feed this {@code GrandExchangeOffer.getSpent()} for a sell —
+	 * that value is already <b>net</b> (post-tax) in current RuneLite; pass
+	 * gross only. For tax derived from net, see
+	 * {@link #estimateTaxFromNet(int, long, int)}.
 	 */
-	public static long geTaxFor(int itemId, long sellTotal, int quantity)
+	public static long geTaxFor(int itemId, long grossSellTotal, int quantity)
 	{
-		if (itemId == BOND_ITEM_ID || quantity <= 0 || sellTotal <= 0)
+		if (itemId == BOND_ITEM_ID || quantity <= 0 || grossSellTotal <= 0)
 		{
 			return 0L;
 		}
-		long pricePerItem = sellTotal / quantity;
+		long pricePerItem = grossSellTotal / quantity;
 		if (pricePerItem < GE_TAX_MIN_PRICE_PER_ITEM)
 		{
 			return 0L;
@@ -102,6 +100,47 @@ public final class ProfitCalculator
 		if (taxPerItem > GE_TAX_CAP_PER_ITEM)
 		{
 			taxPerItem = GE_TAX_CAP_PER_ITEM;
+		}
+		return taxPerItem * quantity;
+	}
+
+	/**
+	 * Back-calculates the GE tax taken on a sell when only the <b>net</b>
+	 * received amount is known. Inverse of {@link #geTaxFor} — used because
+	 * RuneLite's {@code GrandExchangeOffer.getSpent()} reports net for
+	 * sells, but the panel still needs an honest "GE tax paid" figure.
+	 *
+	 * For non-capped tiers: {@code gross ≈ round(net / 0.98)}, then
+	 * {@code tax = gross − net}. For per-item gross at or above 250M
+	 * (where the 5M cap kicks in) the relationship becomes linear:
+	 * {@code gross = net + 5M}.
+	 *
+	 * Sub-100 gp items, zero-qty offers, and bonds return 0.
+	 */
+	public static long estimateTaxFromNet(int itemId, long netSellTotal, int quantity)
+	{
+		if (itemId == BOND_ITEM_ID || quantity <= 0 || netSellTotal <= 0)
+		{
+			return 0L;
+		}
+		long netPerItem = netSellTotal / quantity;
+		// Gross-per-item must exceed 100gp for tax to apply at all. If the
+		// net is already below 100, gross is too — exempt either way.
+		if (netPerItem < GE_TAX_MIN_PRICE_PER_ITEM)
+		{
+			return 0L;
+		}
+		long taxPerItem;
+		// Cap range: gross-per-item ≥ 250M → tax fixed at 5M → net ≥ 245M.
+		// Detect by checking the uncapped 2% estimate against the cap.
+		long uncapped = Math.round(netPerItem / 0.98) - netPerItem;
+		if (uncapped > GE_TAX_CAP_PER_ITEM)
+		{
+			taxPerItem = GE_TAX_CAP_PER_ITEM;
+		}
+		else
+		{
+			taxPerItem = Math.max(0L, uncapped);
 		}
 		return taxPerItem * quantity;
 	}
@@ -269,11 +308,24 @@ public final class ProfitCalculator
 		public final int quantity;
 		/** Total gp paid for the buy leg(s), FIFO-matched. */
 		public final long buyTotal;
-		/** Gross sale value — what the buyer paid, BEFORE the GE took its 2% tax. */
+		/**
+		 * <b>Net</b> sale value — what the seller actually received after the
+		 * GE took its 2% tax. This is what {@code GrandExchangeOffer.getSpent()}
+		 * reports for a completed sell in current RuneLite, so the value
+		 * flowing in from {@code TradeRecord.totalGp} is already net.
+		 *
+		 * Historical naming: this field was originally documented as gross,
+		 * which led to a double-tax bug. The field name is kept for binary
+		 * stability with any serialised callers.
+		 */
 		public final long sellTotal;
-		/** GE sales tax deducted from this sell (always {@code >= 0}). */
+		/** GE sales tax deducted from this sell (always {@code >= 0}).
+		 *  Back-calculated from {@link #sellTotal} for display; not subtracted
+		 *  from {@link #profit} (it already was, server-side, when the user
+		 *  received the net). */
 		public final long tax;
-		/** Net realised profit — {@code sellTotal - tax - buyTotal}. */
+		/** Net realised profit — {@code sellTotal - buyTotal}, where
+		 *  {@code sellTotal} is already net of tax. */
 		public final long profit;
 		/** ROI computed on net profit over buy cost. */
 		public final double roiPct;
@@ -288,10 +340,9 @@ public final class ProfitCalculator
 			this.quantity = quantity;
 			this.buyTotal = buyTotal;
 			this.sellTotal = sellTotal;
-			this.tax = geTaxFor(itemId, sellTotal, quantity);
-			long netSell = sellTotal - this.tax;
-			this.profit = netSell - buyTotal;
-			this.roiPct = buyTotal > 0 ? (100.0 * (netSell - buyTotal) / buyTotal) : 0.0;
+			this.tax = estimateTaxFromNet(itemId, sellTotal, quantity);
+			this.profit = sellTotal - buyTotal;
+			this.roiPct = buyTotal > 0 ? (100.0 * this.profit / buyTotal) : 0.0;
 			this.firstBuyTimestamp = firstBuyTimestamp;
 			this.sellTimestamp = sellTimestamp;
 		}
@@ -351,7 +402,8 @@ public final class ProfitCalculator
 
 		/** Net realised profit summed across matched flips (sellTotal − tax − buyTotal each). */
 		public final long totalProfit;
-		/** Gross gp sold (pre-tax) summed across matched flips. */
+		/** Net gp received from sells, summed across matched flips
+		 *  (post-tax — see {@link CompletedFlip#sellTotal}). */
 		public final long totalGpSold;
 		/** Total GE tax paid across matched flips — the authoritative tax figure shown in the stats panel. */
 		public final long totalTaxPaid;
@@ -410,9 +462,9 @@ public final class ProfitCalculator
 					continue;
 				}
 				matchedCount++;
-				totalProfit += f.profit;     // f.profit is NET (post-tax)
-				totalGpSold += f.sellTotal;  // gross sale value
-				totalTaxPaid += f.tax;
+				totalProfit += f.profit;     // already net (sellTotal − buyTotal)
+				totalGpSold += f.sellTotal;  // net sale value (post-tax)
+				totalTaxPaid += f.tax;       // tax derived from net
 				if (f.profit > 0)
 				{
 					wins++;

@@ -136,6 +136,7 @@ public class MyTradesStatsPanel extends JPanel
 	private final JLabel winRateValue     = valueLabel();
 	private final JLabel avgRoiValue      = valueLabel();
 	private final JLabel taxValue         = valueLabel();
+	private final JLabel investedValue    = valueLabel();
 	private final JLabel bestNameValue    = valueLabel();
 	private final JLabel bestProfitValue  = valueLabel();
 	private final JLabel worstNameValue   = valueLabel();
@@ -182,6 +183,12 @@ public class MyTradesStatsPanel extends JPanel
 		add(row("Win rate",   winRateValue));
 		add(row("Avg ROI",    avgRoiValue));
 		add(row("GE tax paid", taxValue));
+		// Current capital tied up in trading: gp held by the GE for pending
+		// buy offers + cost basis of items bought but not yet sold, with a 2%
+		// haircut on the held items as a conservative estimate of the GE tax
+		// that'll be deducted when they eventually sell. Snapshot — does not
+		// honour the period filter.
+		add(row("Invested",   investedValue));
 		// Membership cost can be very long ("289,128,766 gp · 21 bonds")
 		// so it gets a stacked row — label + toggle on top, value on its
 		// own line below right-aligned.
@@ -224,7 +231,17 @@ public class MyTradesStatsPanel extends JPanel
 	 */
 	public void update(ProfitCalculator.Result result, TrackerStats server, BondLedger bonds, Period period)
 	{
-		update(result, server, bonds, period, false);
+		update(result, server, bonds, period, false, 0L);
+	}
+
+	/**
+	 * Compatibility shim for callers that pass everything except the gp tied
+	 * up in active buy offers.
+	 */
+	public void update(ProfitCalculator.Result result, TrackerStats server, BondLedger bonds,
+		Period period, boolean membershipHidden)
+	{
+		update(result, server, bonds, period, membershipHidden, 0L);
 	}
 
 	/**
@@ -234,9 +251,13 @@ public class MyTradesStatsPanel extends JPanel
 	 * is viewing All time — they cover lifetime and have no per-flip
 	 * timestamps, so they can't answer "last 7 days". Bond ledger is
 	 * always lifetime (membership cost is cumulative by definition).
+	 *
+	 * {@code activeBuyGp} is the sum of gp the GE is currently holding for
+	 * pending buy offers — used together with the open-position cost basis
+	 * to render the "Invested" snapshot.
 	 */
 	public void update(ProfitCalculator.Result result, TrackerStats server, BondLedger bonds,
-		Period period, boolean membershipHidden)
+		Period period, boolean membershipHidden, long activeBuyGp)
 	{
 		if (period == null) period = Period.ALL_TIME;
 		if (bonds  == null) bonds  = BondLedger.EMPTY;
@@ -340,6 +361,30 @@ public class MyTradesStatsPanel extends JPanel
 			taxValue.setText("—");
 		}
 		taxValue.setForeground(Color.LIGHT_GRAY);
+
+		// "Invested" snapshot — independent of the period filter. Cost basis
+		// of open positions is haircut 2% to approximate the GE tax that'll
+		// be skimmed when the user eventually sells. Tax rate is on sell
+		// price, so this is a conservative under-estimate at break-even and
+		// becomes increasingly inaccurate at higher mark-ups — but for a
+		// "money tied up right now" read it's the right floor.
+		long heldCostBasis = 0L;
+		if (result != null && result.openPositions != null)
+		{
+			for (ProfitCalculator.OpenPosition p : result.openPositions.values())
+			{
+				if (p != null) heldCostBasis += p.remainingCostBasis;
+			}
+		}
+		long heldNet = Math.round(heldCostBasis * 0.98);
+		long invested = Math.max(0L, activeBuyGp) + heldNet;
+		investedValue.setText(FlipItemPanel.formatGp(invested) + " gp");
+		investedValue.setForeground(invested > 0 ? Color.WHITE : Color.LIGHT_GRAY);
+		investedValue.setToolTipText(String.format(
+			"<html>%s gp in active buy offers<br>%s gp cost basis on items waiting to sell (−2%% GE tax = %s gp)</html>",
+			FlipItemPanel.formatGp(Math.max(0L, activeBuyGp)),
+			FlipItemPanel.formatGp(heldCostBasis),
+			FlipItemPanel.formatGp(heldNet)));
 
 		applyBestRow(stats, server, preferServer);
 		applyWorstRow(stats);

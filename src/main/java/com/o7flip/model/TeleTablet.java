@@ -24,36 +24,31 @@
  */
 package com.o7flip.model;
 
-public class FlipItem
+import java.util.ArrayList;
+import java.util.List;
+
+/** One row from /api/runelite/tele-tablets. */
+public class TeleTablet
 {
-	public int itemId;
-	public String name;
-	public long buyPrice;
-	public long sellPrice;
-	public long profit;
-	public double roiPct;
-	public long potentialProfit;
-	public int buyLimit;
-	public boolean members;
-
-	// Optional cash-stack annotation (only present when the request used
-	// ?cashStack=…&annotate=affordableQty). Null otherwise.
-	public Integer affordableQty;
-
-	// Composite "07Flip Score" 0–100. Null when the item had < 20 trades
-	// in the last hour (illiquid or fresh items).
-	public Integer flip07Score;
-
-	// Recommended buy / sell prices from the server's last-hour p10/p90 of
-	// fills. Use for the GE auto-fill overlay and the item-detail drawer.
-	// Null together when the item had < 10 snapshots in the last hour.
-	public Long recBuyPrice;
-	public Long recSellPrice;
-	public Long recProfit;
-
-	// Hourly / daily volume. Server doesn't always echo these on /flips rows
-	// — when null, the volume filter is a pass-through. Server agent offered
-	// to add them to /flips response; once that ships these light up.
-	public Integer hourlyVolume;
+	public String  name;
+	public int     tabletId;
+	public String  spellbook;          // "Standard" | "Lunar" | "Ancient" | "Arceuus"
+	public long    materialCost;
+	public long    sellPrice;
+	public long    sellAfterTax;
+	public long    profit;
+	public double  roiPct;
+	/** Daily GE volume — nullable for backwards-compat with older responses
+	 *  that don't ship this field. Drives the "Volume" sort + per-row chip. */
 	public Integer dailyVolume;
+	public List<Ingredient> ingredients = new ArrayList<>();
+
+	public static class Ingredient
+	{
+		public String name;
+		public int    itemId;
+		public int    qty;
+		public long   unitPrice;
+		public long   totalPrice;
+	}
 }

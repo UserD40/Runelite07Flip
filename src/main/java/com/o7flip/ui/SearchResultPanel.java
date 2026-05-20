@@ -30,9 +30,7 @@ import com.o7flip.util.Fonts;
 import net.runelite.client.game.ItemManager;
 import net.runelite.client.ui.ColorScheme;
 import javax.swing.JLabel;
-import javax.swing.JMenuItem;
 import javax.swing.JPanel;
-import javax.swing.JPopupMenu;
 import javax.swing.SwingUtilities;
 import javax.swing.border.EmptyBorder;
 import java.awt.BorderLayout;
@@ -45,24 +43,23 @@ import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 
 /**
- * Card used to render hits from the top-of-panel search box. Visually matches
- * {@link FlipItemPanel} so the user gets the same affordances (icon, name,
- * buy/sell/profit rows, right-click Buy/Sell/Details, click → Item insights)
- * regardless of whether they're browsing the Flips tab or filtering by name.
+ * Search-result card. Visually identical to {@link FlipItemPanel} — same
+ * icon, name+chip row, Buy/Sell/Profit rows, colours, paddings and fonts —
+ * so toggling between the Flips tab and a search filter feels seamless.
  *
- * The right-edge chip is a freshness badge instead of a 07Flip score, since
- * SearchResultItem doesn't carry a score field — but its position in the layout
- * mirrors the FlipItemPanel score chip exactly.
+ * Search results don't carry a 07Flip score, so the score-chip slot renders
+ * as a muted dash with an explanatory tooltip rather than a number. The
+ * tooltip prevents the column from looking broken.
+ *
+ * Right-click anywhere on the row queues a Buy on the GE — same single-
+ * click action as FlipItemPanel, no popup menu. The queued price matches
+ * FlipItemPanel's free-user behaviour (the instant-fill sell-side price).
  */
 public class SearchResultPanel extends JPanel
 {
 	private static final Color ODD_BG    = new Color(0x272727);
 	private static final Color HOVER_BG  = new Color(0x3A3A3A);
 	private static final Color GREEN     = new Color(0x00C27A);
-	private static final Color RED       = new Color(0xFF7070);
-	private static final Color ORANGE    = new Color(0xFF981F);
-	private static final Color GRAY      = new Color(0xAAAAAA);
-	private static final int   STALE_MIN = 30;
 
 	public SearchResultPanel(SearchResultItem item, ItemManager itemManager, boolean odd, O7FlipPlugin plugin)
 	{
@@ -75,52 +72,39 @@ public class SearchResultPanel extends JPanel
 		setAlignmentX(Component.LEFT_ALIGNMENT);
 
 		boolean hasPrice = item.buyPrice != null && item.sellPrice != null;
-		boolean stale    = item.dataAgeMinutes != null && item.dataAgeMinutes > STALE_MIN;
 
 		// ── ICON ──────────────────────────────────────────────────────────────
 		JLabel iconLabel = FlipItemPanel.buildIcon(item.itemId, itemManager);
 
-		// ── NAME + freshness chip (mirrors FlipItemPanel's score chip slot) ──
+		// ── NAME + SCORE chip (mirrors FlipItemPanel's right-edge slot) ──────
 		JLabel nameLabel = new JLabel(item.name);
 		nameLabel.setFont(Fonts.BOLD);
 		nameLabel.setForeground(Color.WHITE);
 
-		JLabel ageChip;
-		if (item.dataAgeMinutes != null)
-		{
-			String ageText = formatAge(item.dataAgeMinutes);
-			String chipColor = stale ? "#FF981F" : "#00C27A";
-			ageChip = new JLabel("<html><font color='" + chipColor + "'>" + ageText + "</font></html>");
-			ageChip.setFont(Fonts.BOLD);
-			ageChip.setToolTipText(stale
-				? "Price data is " + ageText + " old — the market may have moved."
-				: "Price data is " + ageText + " old.");
-		}
-		else
-		{
-			ageChip = new JLabel("—");
-			ageChip.setFont(Fonts.BOLD);
-			ageChip.setForeground(GRAY);
-			ageChip.setToolTipText("No price-freshness data for this item.");
-		}
+		// Search payload doesn't include flip07_score, but we still render a
+		// dash so the row's right edge aligns with FlipItemPanel rows above
+		// and below it. Tooltip explains the gap.
+		JLabel scoreLabel = new JLabel("—");
+		scoreLabel.setFont(Fonts.BOLD);
+		scoreLabel.setForeground(new Color(0xAAAAAA));
+		scoreLabel.setToolTipText("07Flip merch algorithm score — only shown on items that surface in the Flips/Spikes/Alerts feeds.");
 
 		JPanel nameRow = new JPanel(new BorderLayout(6, 0));
 		nameRow.setBackground(bg);
-		nameRow.add(nameLabel, BorderLayout.CENTER);
-		nameRow.add(ageChip,   BorderLayout.EAST);
+		nameRow.add(nameLabel,  BorderLayout.CENTER);
+		nameRow.add(scoreLabel, BorderLayout.EAST);
 
 		// ── BUY (red) ─────────────────────────────────────────────────────────
 		JLabel buyLabel;
 		if (hasPrice)
 		{
-			Color buyColor = stale ? new Color(0x666666) : RED;
 			buyLabel = new JLabel("<html><b>Buy:</b>  " + FlipItemPanel.formatGpCompact(item.buyPrice) + "</html>");
 			buyLabel.setFont(Fonts.SM);
-			buyLabel.setForeground(buyColor);
+			buyLabel.setForeground(new Color(0xFF7070));
 
 			StringBuilder buyTip = new StringBuilder("<html><b>").append(escapeHtml(item.name)).append("</b><br>");
 			buyTip.append("Market buy: <font color='#FF7070'>").append(FlipItemPanel.formatGp(item.buyPrice)).append("</font><br>");
-			buyTip.append("<font color='#666666'>Right-click row for Buy / Sell menu · Click for insights · Shift+click or double-click to open on 07flip.com</font></html>");
+			buyTip.append("<font color='#666666'>Right-click anywhere to queue a Buy on the GE · Click for insights · Shift+click or double-click to open on 07flip.com</font></html>");
 			buyLabel.setToolTipText(buyTip.toString());
 			buyLabel.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
 		}
@@ -135,17 +119,22 @@ public class SearchResultPanel extends JPanel
 		JLabel sellLabel = new JLabel("");
 		if (hasPrice)
 		{
-			Color sellColor = stale ? new Color(0x666666) : GREEN;
 			sellLabel = new JLabel("<html><b>Sell:</b>  " + FlipItemPanel.formatGpCompact(item.sellPrice) + "</html>");
 			sellLabel.setFont(Fonts.SM);
-			sellLabel.setForeground(sellColor);
+			sellLabel.setForeground(GREEN);
 
 			StringBuilder sellTip = new StringBuilder("<html><b>").append(escapeHtml(item.name)).append("</b><br>");
 			sellTip.append("Market sell: <font color='#00C27A'>").append(FlipItemPanel.formatGp(item.sellPrice)).append("</font><br>");
-			sellTip.append("<font color='#666666'>Right-click row for Buy / Sell menu · Click for insights · Shift+click or double-click to open on 07flip.com</font></html>");
+			sellTip.append("<font color='#666666'>Right-click anywhere to queue a Buy on the GE · Click for insights · Shift+click or double-click to open on 07flip.com</font></html>");
 			sellLabel.setToolTipText(sellTip.toString());
 			sellLabel.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
 		}
+
+		// Match FlipItemPanel's free-user buy target: queue at the sell-side
+		// (instant-fill ask). For premium users with a rec_buy_price we'd use
+		// that instead, but the search payload doesn't carry rec prices —
+		// search is the "look anything up" surface, not the curated feed.
+		final long buyTarget = hasPrice ? item.sellPrice : 0L;
 
 		// ── PROFIT + ROI ──────────────────────────────────────────────────────
 		JLabel profitLabel = new JLabel("");
@@ -196,9 +185,32 @@ public class SearchResultPanel extends JPanel
 		ClickRouter.attachClickOnly(buyLabel,    plugin, item.itemId, item.name);
 		ClickRouter.attachClickOnly(sellLabel,   plugin, item.itemId, item.name);
 		ClickRouter.attachClickOnly(profitLabel, plugin, item.itemId, item.name);
-		ClickRouter.attachClickOnly(ageChip,     plugin, item.itemId, item.name);
+		ClickRouter.attachClickOnly(scoreLabel,  plugin, item.itemId, item.name);
 
-		// Hover + right-click menu (Buy on GE / Sell on GE) on the row.
+		// Right-click on any inner label forwards to the same queueGeBuy call
+		// as the row-level handler — Swing doesn't bubble mouse events, so
+		// without these the inner labels would swallow the right-click and
+		// the row's MouseListener would never fire.
+		final JLabel sellLabelF   = sellLabel;
+		final JLabel profitLabelF = profitLabel;
+		MouseAdapter rightClickQueueBuy = new MouseAdapter()
+		{
+			@Override
+			public void mousePressed(MouseEvent e)
+			{
+				if (SwingUtilities.isRightMouseButton(e) && !e.isShiftDown() && plugin != null && hasPrice)
+				{
+					plugin.queueGeBuy(item.itemId, buyTarget, item.name);
+					e.consume();
+				}
+			}
+		};
+		buyLabel.addMouseListener(rightClickQueueBuy);
+		sellLabelF.addMouseListener(rightClickQueueBuy);
+		profitLabelF.addMouseListener(rightClickQueueBuy);
+		nameLabel.addMouseListener(rightClickQueueBuy);
+		scoreLabel.addMouseListener(rightClickQueueBuy);
+
 		addMouseListener(new MouseAdapter()
 		{
 			@Override
@@ -220,32 +232,12 @@ public class SearchResultPanel extends JPanel
 			{
 				if (SwingUtilities.isRightMouseButton(e) && !e.isShiftDown() && plugin != null && hasPrice)
 				{
-					JPopupMenu menu = new JPopupMenu();
-					JMenuItem buyItem = new JMenuItem("Buy on GE — " + FlipItemPanel.formatGp(item.buyPrice));
-					buyItem.addActionListener(ae -> plugin.queueGeBuy(item.itemId, item.buyPrice, item.name));
-					menu.add(buyItem);
-					boolean inInventory = plugin.inventoryItemIds.contains(item.itemId);
-					if (!plugin.getConfig().inventoryCheckOnSell() || inInventory)
-					{
-						JMenuItem sellItem = new JMenuItem("Sell on GE — " + FlipItemPanel.formatGp(item.sellPrice));
-						sellItem.addActionListener(ae -> plugin.queueGeSell(item.itemId, item.sellPrice, item.name));
-						menu.add(sellItem);
-					}
-					menu.show(e.getComponent(), e.getX(), e.getY());
+					plugin.queueGeBuy(item.itemId, buyTarget, item.name);
 				}
 			}
 		});
 
 		setMaximumSize(new Dimension(Integer.MAX_VALUE, getPreferredSize().height));
-	}
-
-	private static String formatAge(int minutes)
-	{
-		if (minutes < 60)
-		{
-			return minutes + "m";
-		}
-		return (minutes / 60) + "h";
 	}
 
 	private static String escapeHtml(String s)

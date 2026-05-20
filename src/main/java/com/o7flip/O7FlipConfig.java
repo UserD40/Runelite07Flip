@@ -63,12 +63,10 @@ public interface O7FlipConfig extends Config
 	)
 	String trackerSection = "tracker";
 
-	@ConfigSection(
-		name = "Tab order",
-		description = "Customise the left-to-right order of the panel tabs.",
-		position = 4
-	)
-	String tabOrderSection = "tabOrder";
+	// (The legacy Tab order section was removed — tabOrder + topRowTabs are
+	//  hidden persistence items that now live under the Panel tabs section
+	//  to avoid an empty header in the config UI. The Customise top row
+	//  tabs button is the user-facing entry point.)
 
 	// ── General ─────────────────────────────────────────────────────────────
 
@@ -125,14 +123,80 @@ public interface O7FlipConfig extends Config
 		return false;
 	}
 
+	/**
+	 * Capital-input mode for the cross-tab affordability filter. Surfaced
+	 * directly on the panel as a toggle; the config entries below are hidden
+	 * persistence only.
+	 *
+	 * <ul>
+	 *   <li>{@code OFF} — no capital filter (default; preserves the legacy
+	 *       behaviour where every tab shows the full list).</li>
+	 *   <li>{@code AUTO} — derive from inventory coins, rounded to 100K.</li>
+	 *   <li>{@code MANUAL} — use {@link #capitalManual()}, the typed value.</li>
+	 * </ul>
+	 */
+	enum CapitalMode
+	{
+		OFF, AUTO, MANUAL
+	}
+
+	@ConfigItem(
+		keyName = "capitalMode",
+		name = "",
+		description = "",
+		hidden = true,
+		section = generalSection,
+		position = 4
+	)
+	default CapitalMode capitalMode()
+	{
+		return CapitalMode.OFF;
+	}
+
+	@ConfigItem(
+		keyName = "capitalManual",
+		name = "",
+		description = "",
+		hidden = true,
+		section = generalSection,
+		position = 5
+	)
+	default long capitalManual()
+	{
+		return 0L;
+	}
+
+	/** True when the manual capital field is locked against accidental edits.
+	 *  Defaults to true — a value the user typed once survives misclicks
+	 *  until they explicitly unlock. */
+	@ConfigItem(
+		keyName = "capitalLocked",
+		name = "",
+		description = "",
+		hidden = true,
+		section = generalSection,
+		position = 6
+	)
+	default boolean capitalLocked()
+	{
+		return true;
+	}
+
 	// ── Panel tabs ──────────────────────────────────────────────────────────
+	//
+	// All per-tab show flags below are HIDDEN in the config UI now — the
+	// "Customise top row tabs" dialog is the primary visibility control.
+	// Each flag still resolves to its default, so power users editing
+	// settings.properties directly can hard-disable a fetch (useful for the
+	// premium-gated features like Screeners / Alerts when free).
 
 	@ConfigItem(
 		keyName = "showFlips",
-		name = "Show Flips tab",
-		description = "Show the Flips tab in the panel.",
+		name = "",
+		description = "",
 		section = tabsSection,
-		position = 0
+		position = 0,
+		hidden = true
 	)
 	default boolean showFlips()
 	{
@@ -141,10 +205,11 @@ public interface O7FlipConfig extends Config
 
 	@ConfigItem(
 		keyName = "showDumps",
-		name = "Show Dumps tab",
-		description = "Show the Dumps tab in the panel.",
+		name = "",
+		description = "",
 		section = tabsSection,
-		position = 1
+		position = 1,
+		hidden = true
 	)
 	default boolean showDumps()
 	{
@@ -166,10 +231,11 @@ public interface O7FlipConfig extends Config
 
 	@ConfigItem(
 		keyName = "showItem",
-		name = "Show Item tab",
-		description = "Show the Item tab in the panel — left-click any item row to populate it with insights.",
+		name = "",
+		description = "",
 		section = tabsSection,
-		position = 3
+		position = 3,
+		hidden = true
 	)
 	default boolean showInsights()
 	{
@@ -178,10 +244,11 @@ public interface O7FlipConfig extends Config
 
 	@ConfigItem(
 		keyName = "showAlerts",
-		name = "Show Alerts tab",
-		description = "Show the Alerts tab in the panel. Requires a premium 07flip.com subscription.",
+		name = "",
+		description = "",
 		section = tabsSection,
-		position = 4
+		position = 4,
+		hidden = true
 	)
 	default boolean showAlerts()
 	{
@@ -190,10 +257,11 @@ public interface O7FlipConfig extends Config
 
 	@ConfigItem(
 		keyName = "showMoon",
-		name = "Show Moons tab",
-		description = "Show the Moons armour tab in the panel. Requires an 07flip.com API key.",
+		name = "",
+		description = "",
 		section = tabsSection,
-		position = 5
+		position = 5,
+		hidden = true
 	)
 	default boolean showMoon()
 	{
@@ -202,10 +270,11 @@ public interface O7FlipConfig extends Config
 
 	@ConfigItem(
 		keyName = "showBarrows",
-		name = "Show Barrows tab",
-		description = "Show the Barrows tab in the panel. Requires an 07flip.com API key.",
+		name = "",
+		description = "",
 		section = tabsSection,
-		position = 6
+		position = 6,
+		hidden = true
 	)
 	default boolean showBarrows()
 	{
@@ -214,10 +283,11 @@ public interface O7FlipConfig extends Config
 
 	@ConfigItem(
 		keyName = "showDecant",
-		name = "Show Decant tab",
-		description = "Show the Decanting tab in the panel.",
+		name = "",
+		description = "",
 		section = tabsSection,
-		position = 7
+		position = 7,
+		hidden = true
 	)
 	default boolean showDecant()
 	{
@@ -225,11 +295,103 @@ public interface O7FlipConfig extends Config
 	}
 
 	@ConfigItem(
-		keyName = "showMyFlips",
-		name = "Show My Trades tab",
-		description = "Show the My Trades tab in the panel. Records completed GE buys and sells locally.",
+		keyName = "showDips",
+		name = "",
+		description = "",
 		section = tabsSection,
-		position = 8
+		position = 8,
+		hidden = true
+	)
+	default boolean showDips()
+	{
+		return true;
+	}
+
+	@ConfigItem(
+		keyName = "showFavourites",
+		name = "",
+		description = "",
+		section = tabsSection,
+		position = 9,
+		hidden = true
+	)
+	default boolean showFavourites()
+	{
+		return true;
+	}
+
+	@ConfigItem(
+		keyName = "showHighAlch",
+		name = "",
+		description = "",
+		section = tabsSection,
+		position = 10,
+		hidden = true
+	)
+	default boolean showHighAlch()
+	{
+		return true;
+	}
+
+	@ConfigItem(
+		keyName = "showTeleTablets",
+		name = "",
+		description = "",
+		section = tabsSection,
+		position = 11,
+		hidden = true
+	)
+	default boolean showTeleTablets()
+	{
+		return true;
+	}
+
+	@ConfigItem(
+		keyName = "showScreeners",
+		name = "",
+		description = "",
+		section = tabsSection,
+		position = 12,
+		hidden = true
+	)
+	default boolean showScreeners()
+	{
+		return true;
+	}
+
+	@ConfigItem(
+		keyName = "highAlchFireStaff",
+		name = "",
+		description = "",
+		hidden = true,
+		section = tabsSection,
+		position = 13
+	)
+	default boolean highAlchFireStaff()
+	{
+		return false;
+	}
+
+	@ConfigItem(
+		keyName = "highAlchBryophyta",
+		name = "",
+		description = "",
+		hidden = true,
+		section = tabsSection,
+		position = 14
+	)
+	default boolean highAlchBryophyta()
+	{
+		return false;
+	}
+
+	@ConfigItem(
+		keyName = "showMyFlips",
+		name = "",
+		description = "",
+		hidden = true,
+		section = tabsSection,
+		position = 15
 	)
 	default boolean showMyFlips()
 	{
@@ -240,11 +402,12 @@ public interface O7FlipConfig extends Config
 
 	@ConfigItem(
 		keyName = "openTabReorderDialog",
-		name = "Open reorder dialog",
-		description = "<html>Tick this box to open the tab reorder dialog. Pick a tab in the popup,<br>"
-			+ "use the ▲ / ▼ buttons to move it, then Save. The tick auto-clears once<br>"
-			+ "the dialog is open, so you can re-tick it any time to re-open.</html>",
-		section = tabOrderSection,
+		name = "Customise top row tabs",
+		description = "<html>Tick this box to open the top-row picker. Pick which 4 tabs<br>"
+			+ "live on the top row of the panel; anything you leave out shows<br>"
+			+ "inside the <b>Other</b> tab on the bottom row. The bottom row<br>"
+			+ "(Flips · Trades · Item · Other) is always fixed.</html>",
+		section = tabsSection,
 		position = 0
 	)
 	default boolean openTabReorderDialog()
@@ -256,13 +419,32 @@ public interface O7FlipConfig extends Config
 		keyName = "tabOrder",
 		name = "",
 		description = "",
-		section = tabOrderSection,
-		position = 1,
+		section = tabsSection,
+		position = 50,
 		hidden = true
 	)
 	default String tabOrder()
 	{
 		return "";
+	}
+
+	/**
+	 * CSV of up to 4 tab names that occupy the customisable top row of the
+	 * panel. Defaults to {@code "Moons,Barrows,Dumps,Alerts"}. Anything from
+	 * the candidate pool that isn't listed here shows up inside the Other
+	 * tab on the bottom row instead.
+	 */
+	@ConfigItem(
+		keyName = "topRowTabs",
+		name = "",
+		description = "",
+		section = tabsSection,
+		position = 51,
+		hidden = true
+	)
+	default String topRowTabs()
+	{
+		return "Moons,Barrows,Dumps,Alerts";
 	}
 
 	// ── Grand Exchange integration ─────────────────────────────────────────
