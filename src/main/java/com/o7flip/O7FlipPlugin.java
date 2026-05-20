@@ -709,6 +709,11 @@ public class O7FlipPlugin extends Plugin
 			this::fetchAuthStatus, 15, 15, TimeUnit.MINUTES);
 		executor.execute(() -> fetchAll(true)); // forced — panel not yet visible at startup
 		executor.execute(this::doSyncTrackerHistory);
+		// Push-direction sync: recovers locally-recorded trades that never
+		// reached the server during the May 14 → zero-delta-fix release
+		// window. Idempotent on the server side, so safe to run every
+		// startup; the cost is one bulk HTTP request per session.
+		executor.execute(this::doBulkSyncToServer);
 		executor.execute(this::doFetchTrackerStats);
 		// Cross-surface optimiser session — pull whatever was last saved on
 		// the website (or from a previous plugin session) so the user sees
@@ -2052,6 +2057,24 @@ public class O7FlipPlugin extends Plugin
 		long deltaGp  = currentGp  - prevGp;
 		if (deltaQty <= 0)
 		{
+			// No new fills since the last observation — but if the offer
+			// has transitioned to a terminal state, the existing local row
+			// needs (a) its partial flag flipped for BOUGHT/SOLD, and (b) a
+			// server POST so the trade syncs upstream. recordTrade's tail
+			// handles both for positive-delta observations, but a fast-
+			// filling offer often maxes quantitySold in its last BUYING /
+			// SELLING tick before the BOUGHT/SOLD event arrives — that
+			// terminal event then carries delta=0 and was silently dropping
+			// the server submission, leaving locally-recorded trades that
+			// never made it to /api/runelite/tracker.
+			GrandExchangeOfferState terminalState = offer.getState();
+			if (terminalState == GrandExchangeOfferState.BOUGHT
+				|| terminalState == GrandExchangeOfferState.SOLD
+				|| terminalState == GrandExchangeOfferState.CANCELLED_BUY
+				|| terminalState == GrandExchangeOfferState.CANCELLED_SELL)
+			{
+				finaliseAndPostExistingRow(offerInstanceId, terminalState);
+			}
 			return;
 		}
 
@@ -2359,6 +2382,70 @@ public class O7FlipPlugin extends Plugin
 		updated.set(idx, cleared);
 		tradeHistory = Collections.unmodifiableList(updated);
 		saveTradeHistory();
+	}
+
+	/**
+	 * Companion to {@link #clearPartialFlag} for the zero-delta terminal-
+	 * observation case: flips the local row's partial flag for BOUGHT/SOLD
+	 * (CANCELLED rows stay partial=true to mark them as partially filled),
+	 * then POSTs the finalised row to the server so the trade actually
+	 * syncs upstream. Gated by {@code shareTradeData} + a non-empty API key
+	 * exactly like {@link #recordTrade}'s server-submit path. The server's
+	 * fingerprint dedup means a duplicate POST (if any) is a safe no-op.
+	 */
+	private void finaliseAndPostExistingRow(long offerInstanceId, GrandExchangeOfferState terminalState)
+	{
+		int idx = findMatchingOfferRow(tradeHistory, offerInstanceId);
+		if (idx < 0)
+		{
+			return;
+		}
+		TradeRecord existing = tradeHistory.get(idx);
+		if (existing.quantity <= 0)
+		{
+			return;
+		}
+
+		TradeRecord toPost = existing;
+		boolean shouldClearPartial = (terminalState == GrandExchangeOfferState.BOUGHT
+			|| terminalState == GrandExchangeOfferState.SOLD) && existing.partial;
+		if (shouldClearPartial)
+		{
+			TradeRecord cleared = new TradeRecord();
+			cleared.itemId          = existing.itemId;
+			cleared.name            = existing.name;
+			cleared.isBuy           = existing.isBuy;
+			cleared.quantity        = existing.quantity;
+			cleared.totalGp         = existing.totalGp;
+			cleared.priceEach       = existing.priceEach;
+			cleared.timestamp       = existing.timestamp;
+			cleared.partial         = false;
+			cleared.tradeId         = existing.tradeId;
+			cleared.offerInstanceId = existing.offerInstanceId;
+			cleared.totalQuantity   = existing.totalQuantity;
+			List<TradeRecord> updated = new ArrayList<>(tradeHistory);
+			updated.set(idx, cleared);
+			tradeHistory = Collections.unmodifiableList(updated);
+			saveTradeHistory();
+			toPost = cleared;
+		}
+
+		if (config.shareTradeData()
+			&& config.apiKey() != null
+			&& !config.apiKey().trim().isEmpty())
+		{
+			TradeRecord rowForServer = new TradeRecord();
+			rowForServer.itemId        = toPost.itemId;
+			rowForServer.name          = toPost.name;
+			rowForServer.isBuy         = toPost.isBuy;
+			rowForServer.quantity      = toPost.quantity;
+			rowForServer.totalGp       = toPost.totalGp;
+			rowForServer.priceEach     = toPost.priceEach;
+			rowForServer.timestamp     = toPost.timestamp;
+			rowForServer.partial       = toPost.partial;
+			rowForServer.totalQuantity = toPost.totalQuantity;
+			apiClient.postTradeRecord(rowForServer, null);
+		}
 	}
 
 	/**
@@ -3041,6 +3128,52 @@ public class O7FlipPlugin extends Plugin
 				currentInsights = insights;
 			}
 			SwingUtilities.invokeLater(() -> panel.showInsights(itemId, insights));
+		});
+	}
+
+	/**
+	 * Push-direction counterpart to {@link #doSyncTrackerHistory}: walks the
+	 * locally-recorded {@link #tradeHistory} and bulk-submits it to
+	 * {@code /api/runelite/tracker/bulk}. The server dedups via
+	 * {@code unique_trade(userId, itemId, tradedAt, isBuy)} so already-known
+	 * trades come back in the duplicate counter, not as inserts.
+	 *
+	 * Run unconditionally at startup (subject to {@code shareTradeData} +
+	 * apiKey gating) to recover any trades the May 14 → zero-delta-fix-
+	 * release plugin builds recorded locally but failed to POST upstream.
+	 * The trade window is bounded at {@link #MAX_TRADE_HISTORY}=200, so the
+	 * payload is comfortably under the server's 500-row request cap and the
+	 * full backlog ships in a single request.
+	 */
+	private void doBulkSyncToServer()
+	{
+		String key = config.apiKey();
+		if (key == null || key.trim().isEmpty())
+		{
+			return;
+		}
+		if (!config.shareTradeData())
+		{
+			return;
+		}
+		List<TradeRecord> snapshot = tradeHistory;
+		if (snapshot == null || snapshot.isEmpty())
+		{
+			return;
+		}
+		apiClient.postTradeRecordsBulk(snapshot, res ->
+		{
+			if (res == null) return;
+			if (res.accepted > 0)
+			{
+				log.info("[07Flip] Bulk sync to server: +{} new, {} duplicates, {} rejected (of {} local)",
+					res.accepted, res.duplicates, res.rejected, snapshot.size());
+			}
+			else
+			{
+				log.debug("[07Flip] Bulk sync to server: server already has all {} local rows",
+					snapshot.size());
+			}
 		});
 	}
 

@@ -193,6 +193,123 @@ public class O7FlipApiClient
 	// Trade Tracker
 	// -------------------------------------------------------------------------
 
+	/**
+	 * Bulk-equivalent of {@link #postTradeRecord} for {@code /tracker/bulk}.
+	 * Idempotent on the server via {@code unique_trade(userId, itemId,
+	 * tradedAt, isBuy)} — duplicates come back in the {@code duplicates}
+	 * counter, not as errors. Server cap is 500 trades per request; the
+	 * local trade window is bounded at MAX_TRADE_HISTORY which is well
+	 * under that, so a single request handles a full backlog.
+	 *
+	 * Used at startup to recover any trades that were recorded locally
+	 * but never reached the server (the May 14-onward zero-delta terminal-
+	 * state regression). Cheap to run unconditionally because the server
+	 * dedup keeps repeat submissions a no-op.
+	 */
+	public void postTradeRecordsBulk(List<TradeRecord> trades, Consumer<BulkSyncResult> callback)
+	{
+		String key = sanitizedApiKey();
+		if (key == null)
+		{
+			if (callback != null) callback.accept(new BulkSyncResult(false, 0, 0, 0));
+			return;
+		}
+		if (trades == null || trades.isEmpty())
+		{
+			if (callback != null) callback.accept(new BulkSyncResult(true, 0, 0, 0));
+			return;
+		}
+
+		JsonObject body = new JsonObject();
+		JsonArray arr = new JsonArray();
+		for (TradeRecord t : trades)
+		{
+			if (t == null || t.quantity <= 0) continue;
+			JsonObject row = new JsonObject();
+			row.addProperty("item_id",   t.itemId);
+			row.addProperty("name",      t.name);
+			row.addProperty("is_buy",    t.isBuy);
+			row.addProperty("quantity",  t.quantity);
+			row.addProperty("price_each", t.priceEach);
+			row.addProperty("total_gp",  t.totalGp);
+			row.addProperty("timestamp", t.timestamp);
+			row.addProperty("partial",   t.partial);
+			arr.add(row);
+		}
+		if (arr.size() == 0)
+		{
+			if (callback != null) callback.accept(new BulkSyncResult(true, 0, 0, 0));
+			return;
+		}
+		body.add("trades", arr);
+
+		RequestBody requestBody = RequestBody.create(MEDIA_TYPE_JSON, gson.toJson(body));
+		Request request = new Request.Builder()
+			.url(BASE_URL + "/tracker/bulk")
+			.post(requestBody)
+			.header("User-Agent", USER_AGENT)
+			.header("Authorization", "Bearer " + key)
+			.build();
+
+		okHttpClient.newCall(request).enqueue(new Callback()
+		{
+			@Override
+			public void onFailure(Call call, IOException e)
+			{
+				log.warn("[07Flip] postTradeRecordsBulk failed: {}", e.getMessage());
+				if (callback != null) callback.accept(new BulkSyncResult(false, 0, 0, 0));
+			}
+
+			@Override
+			public void onResponse(Call call, Response response) throws IOException
+			{
+				try
+				{
+					if (!response.isSuccessful() || response.body() == null)
+					{
+						log.warn("[07Flip] postTradeRecordsBulk HTTP {}", response.code());
+						if (callback != null) callback.accept(new BulkSyncResult(false, 0, 0, 0));
+						return;
+					}
+					JsonObject root = gson.fromJson(response.body().string(), JsonObject.class);
+					boolean ok      = getBool(root, "ok", false);
+					int accepted    = getInt(root,  "accepted",   0);
+					int duplicates  = getInt(root,  "duplicates", 0);
+					int rejected    = root.has("rejected") && root.get("rejected").isJsonArray()
+						? root.getAsJsonArray("rejected").size() : 0;
+					if (callback != null) callback.accept(new BulkSyncResult(ok, accepted, duplicates, rejected));
+				}
+				catch (Exception e)
+				{
+					log.warn("[07Flip] postTradeRecordsBulk parse error: {}", e.getMessage());
+					if (callback != null) callback.accept(new BulkSyncResult(false, 0, 0, 0));
+				}
+				finally
+				{
+					response.close();
+				}
+			}
+		});
+	}
+
+	/** Result of a {@code /tracker/bulk} call. {@code ok} false means the
+	 *  whole batch failed (network, 5xx, parse error); caller may retry. */
+	public static final class BulkSyncResult
+	{
+		public final boolean ok;
+		public final int accepted;
+		public final int duplicates;
+		public final int rejected;
+
+		BulkSyncResult(boolean ok, int accepted, int duplicates, int rejected)
+		{
+			this.ok         = ok;
+			this.accepted   = accepted;
+			this.duplicates = duplicates;
+			this.rejected   = rejected;
+		}
+	}
+
 	public void postTradeRecord(TradeRecord trade, Runnable onSuccess)
 	{
 		JsonObject body = new JsonObject();
