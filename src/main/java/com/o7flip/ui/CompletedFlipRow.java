@@ -95,13 +95,15 @@ public class CompletedFlipRow extends JPanel
 			"<html><b>%s%s gp</b> net  <font color='#888888'>(ROI %+.1f%%)</font><br>"
 				+ "Bought: %s gp<br>"
 				+ "Sold (gross): %s gp<br>"
-				+ "<font color='#E85050'>GE tax: −%s gp</font></html>",
+				+ "<font color='#E85050'>GE tax: −%s gp</font><br>"
+				+ "Received (net): %s gp</html>",
 			prefix,
 			FlipItemPanel.formatGp(flip.profit),
 			flip.roiPct,
 			FlipItemPanel.formatGp(flip.buyTotal),
-			FlipItemPanel.formatGp(flip.sellTotal),
-			FlipItemPanel.formatGp(flip.tax)));
+			FlipItemPanel.formatGp(flip.sellTotal + flip.tax),
+			FlipItemPanel.formatGp(flip.tax),
+			FlipItemPanel.formatGp(flip.sellTotal)));
 
 		add(iconLabel,   BorderLayout.WEST);
 		add(textPanel,   BorderLayout.CENTER);

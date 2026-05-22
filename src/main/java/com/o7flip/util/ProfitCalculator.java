@@ -217,8 +217,13 @@ public final class ProfitCalculator
 
 	private static void consumeSell(TradeRecord sell, Deque<OpenLot> queue, List<CompletedFlip> out)
 	{
+		// sell.totalGp is the raw value from offer.getSpent(), which for sells
+		// is GROSS (pre-tax) — the listed price × qty. The CompletedFlip
+		// constructor splits it into net + tax via geTaxFor; this method just
+		// allocates gross proportionally when a sell is FIFO-split across
+		// multiple buy lots.
 		int sellRemainingQty = sell.quantity;
-		long sellRemainingGp = sell.totalGp;
+		long sellRemainingGross = sell.totalGp;
 
 		while (sellRemainingQty > 0 && queue != null && !queue.isEmpty())
 		{
@@ -238,14 +243,14 @@ public final class ProfitCalculator
 				head.gp -= consumedBuyGp;
 			}
 
-			long consumedSellGp;
+			long consumedSellGross;
 			if (consumed == sellRemainingQty)
 			{
-				consumedSellGp = sellRemainingGp;
+				consumedSellGross = sellRemainingGross;
 			}
 			else
 			{
-				consumedSellGp = Math.round((double) sell.totalGp * consumed / sell.quantity);
+				consumedSellGross = Math.round((double) sell.totalGp * consumed / sell.quantity);
 			}
 
 			out.add(new CompletedFlip(
@@ -253,13 +258,13 @@ public final class ProfitCalculator
 				sell.name,
 				consumed,
 				consumedBuyGp,
-				consumedSellGp,
+				consumedSellGross,
 				head.firstTimestamp,
 				sell.timestamp
 			));
 
 			sellRemainingQty -= consumed;
-			sellRemainingGp -= consumedSellGp;
+			sellRemainingGross -= consumedSellGross;
 		}
 
 		if (sellRemainingQty > 0)
@@ -269,7 +274,7 @@ public final class ProfitCalculator
 				sell.name,
 				sellRemainingQty,
 				0L,
-				sellRemainingGp,
+				sellRemainingGross,
 				sell.timestamp,
 				sell.timestamp
 			));
@@ -310,38 +315,40 @@ public final class ProfitCalculator
 		public final long buyTotal;
 		/**
 		 * <b>Net</b> sale value — what the seller actually received after the
-		 * GE took its 2% tax. This is what {@code GrandExchangeOffer.getSpent()}
-		 * reports for a completed sell in current RuneLite, so the value
-		 * flowing in from {@code TradeRecord.totalGp} is already net.
-		 *
-		 * Historical naming: this field was originally documented as gross,
-		 * which led to a double-tax bug. The field name is kept for binary
-		 * stability with any serialised callers.
+		 * GE took its 2% tax. Computed in this constructor as {@code gross −
+		 * tax}; the constructor accepts gross as input because that's what
+		 * {@code GrandExchangeOffer.getSpent()} reports for sells in current
+		 * RuneLite (a long-standing comment in {@link TradeRecord} previously
+		 * documented this field as net, which it never actually was).
 		 */
 		public final long sellTotal;
 		/** GE sales tax deducted from this sell (always {@code >= 0}).
-		 *  Back-calculated from {@link #sellTotal} for display; not subtracted
-		 *  from {@link #profit} (it already was, server-side, when the user
-		 *  received the net). */
+		 *  Computed from the gross sale via {@link #geTaxFor} and already
+		 *  subtracted from {@link #profit}. */
 		public final long tax;
 		/** Net realised profit — {@code sellTotal - buyTotal}, where
-		 *  {@code sellTotal} is already net of tax. */
+		 *  {@code sellTotal} is the net (post-tax) amount the user received. */
 		public final long profit;
 		/** ROI computed on net profit over buy cost. */
 		public final double roiPct;
 		public final long firstBuyTimestamp;
 		public final long sellTimestamp;
 
-		CompletedFlip(int itemId, String name, int quantity, long buyTotal, long sellTotal,
+		/**
+		 * @param sellGross gross sale value (pre-tax). The constructor derives
+		 *                  {@link #tax} from this via {@link #geTaxFor} and
+		 *                  stores {@link #sellTotal} as {@code sellGross − tax}.
+		 */
+		CompletedFlip(int itemId, String name, int quantity, long buyTotal, long sellGross,
 			long firstBuyTimestamp, long sellTimestamp)
 		{
 			this.itemId = itemId;
 			this.name = name;
 			this.quantity = quantity;
 			this.buyTotal = buyTotal;
-			this.sellTotal = sellTotal;
-			this.tax = estimateTaxFromNet(itemId, sellTotal, quantity);
-			this.profit = sellTotal - buyTotal;
+			this.tax = geTaxFor(itemId, sellGross, quantity);
+			this.sellTotal = sellGross - this.tax;
+			this.profit = this.sellTotal - buyTotal;
 			this.roiPct = buyTotal > 0 ? (100.0 * this.profit / buyTotal) : 0.0;
 			this.firstBuyTimestamp = firstBuyTimestamp;
 			this.sellTimestamp = sellTimestamp;
@@ -400,7 +407,7 @@ public final class ProfitCalculator
 	{
 		static final Stats EMPTY = new Stats(0L, 0L, 0L, 0, 0, 0, 0, 0.0, 0.0, null, null);
 
-		/** Net realised profit summed across matched flips (sellTotal − tax − buyTotal each). */
+		/** Net realised profit summed across matched flips (sellTotal − buyTotal each, where sellTotal is already net of GE tax). */
 		public final long totalProfit;
 		/** Net gp received from sells, summed across matched flips
 		 *  (post-tax — see {@link CompletedFlip#sellTotal}). */
@@ -462,9 +469,9 @@ public final class ProfitCalculator
 					continue;
 				}
 				matchedCount++;
-				totalProfit += f.profit;     // already net (sellTotal − buyTotal)
+				totalProfit += f.profit;     // net (sellTotal − buyTotal, post-tax)
 				totalGpSold += f.sellTotal;  // net sale value (post-tax)
-				totalTaxPaid += f.tax;       // tax derived from net
+				totalTaxPaid += f.tax;       // GE tax deducted from this flip
 				if (f.profit > 0)
 				{
 					wins++;

@@ -31,9 +31,16 @@ public class TradeRecord
 	public boolean isBuy;
 	public int    quantity;
 	public long   priceEach;  // effective fill price = totalGp / quantity
-	public long   totalGp;    // buy: gross gp spent. sell: NET gp received
-	                          //   (post-tax — what GrandExchangeOffer.getSpent()
-	                          //   reports in current RuneLite, NOT pre-tax gross)
+	public long   totalGp;    // raw value of GrandExchangeOffer.getSpent() at
+	                          // the moment of the fill. For BUYS this is the
+	                          // gp the player paid; for SELLS it is the GROSS
+	                          // (listed price × qty) before the 2% GE tax.
+	                          // ProfitCalculator subtracts the tax when it
+	                          // builds CompletedFlips, so anywhere downstream
+	                          // that reads CompletedFlip.sellTotal sees a NET
+	                          // value — but the raw row stored here remains
+	                          // gross so the dedup fingerprint and POST body
+	                          // stay byte-stable with what the server stores.
 	public long   timestamp;  // System.currentTimeMillis() when recorded
 	public boolean partial;   // true when CANCELLED with a non-zero partial fill
 

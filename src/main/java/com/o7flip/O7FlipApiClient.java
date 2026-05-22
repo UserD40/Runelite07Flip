@@ -211,17 +211,23 @@ public class O7FlipApiClient
 		String key = sanitizedApiKey();
 		if (key == null)
 		{
-			if (callback != null) callback.accept(new BulkSyncResult(false, 0, 0, 0));
+			if (callback != null) callback.accept(BulkSyncResult.empty(false));
 			return;
 		}
 		if (trades == null || trades.isEmpty())
 		{
-			if (callback != null) callback.accept(new BulkSyncResult(true, 0, 0, 0));
+			if (callback != null) callback.accept(BulkSyncResult.empty(true));
 			return;
 		}
 
 		JsonObject body = new JsonObject();
 		JsonArray arr = new JsonArray();
+		// Parallel list of the TradeRecords that actually made it into the
+		// request, in request-array order. The server's response trades[]
+		// uses {@code index} into this array, so we use it to map each
+		// returned {@code trade_id} back to the local row's
+		// {@link TradeRecord#offerInstanceId}.
+		final List<TradeRecord> sentTrades = new ArrayList<>();
 		for (TradeRecord t : trades)
 		{
 			if (t == null || t.quantity <= 0) continue;
@@ -235,10 +241,11 @@ public class O7FlipApiClient
 			row.addProperty("timestamp", t.timestamp);
 			row.addProperty("partial",   t.partial);
 			arr.add(row);
+			sentTrades.add(t);
 		}
 		if (arr.size() == 0)
 		{
-			if (callback != null) callback.accept(new BulkSyncResult(true, 0, 0, 0));
+			if (callback != null) callback.accept(BulkSyncResult.empty(true));
 			return;
 		}
 		body.add("trades", arr);
@@ -257,7 +264,7 @@ public class O7FlipApiClient
 			public void onFailure(Call call, IOException e)
 			{
 				log.warn("[07Flip] postTradeRecordsBulk failed: {}", e.getMessage());
-				if (callback != null) callback.accept(new BulkSyncResult(false, 0, 0, 0));
+				if (callback != null) callback.accept(BulkSyncResult.empty(false));
 			}
 
 			@Override
@@ -268,7 +275,7 @@ public class O7FlipApiClient
 					if (!response.isSuccessful() || response.body() == null)
 					{
 						log.warn("[07Flip] postTradeRecordsBulk HTTP {}", response.code());
-						if (callback != null) callback.accept(new BulkSyncResult(false, 0, 0, 0));
+						if (callback != null) callback.accept(BulkSyncResult.empty(false));
 						return;
 					}
 					JsonObject root = gson.fromJson(response.body().string(), JsonObject.class);
@@ -277,12 +284,13 @@ public class O7FlipApiClient
 					int duplicates  = getInt(root,  "duplicates", 0);
 					int rejected    = root.has("rejected") && root.get("rejected").isJsonArray()
 						? root.getAsJsonArray("rejected").size() : 0;
-					if (callback != null) callback.accept(new BulkSyncResult(ok, accepted, duplicates, rejected));
+					java.util.Map<Long, Long> ids = parseBulkTradeIds(root, sentTrades);
+					if (callback != null) callback.accept(new BulkSyncResult(ok, accepted, duplicates, rejected, ids));
 				}
 				catch (Exception e)
 				{
 					log.warn("[07Flip] postTradeRecordsBulk parse error: {}", e.getMessage());
-					if (callback != null) callback.accept(new BulkSyncResult(false, 0, 0, 0));
+					if (callback != null) callback.accept(BulkSyncResult.empty(false));
 				}
 				finally
 				{
@@ -292,25 +300,92 @@ public class O7FlipApiClient
 		});
 	}
 
+	/**
+	 * Reads the {@code trades[]} array on a /tracker/bulk response and builds
+	 * a map from local {@code offerInstanceId} → server {@code trade_id} for
+	 * every row that has both. Returns an empty map when the server response
+	 * pre-dates the {@code trades[]} field, so a stale server is a no-op
+	 * (the plugin falls back to fingerprint dedup on next history sync).
+	 */
+	private java.util.Map<Long, Long> parseBulkTradeIds(JsonObject root, List<TradeRecord> sentTrades)
+	{
+		java.util.Map<Long, Long> out = new java.util.HashMap<>();
+		if (root == null || !root.has("trades") || !root.get("trades").isJsonArray())
+		{
+			return out;
+		}
+		JsonArray arr = root.getAsJsonArray("trades");
+		for (int i = 0; i < arr.size(); i++)
+		{
+			try
+			{
+				JsonObject t = arr.get(i).getAsJsonObject();
+				int idx = getInt(t, "index", -1);
+				Long tradeId = getLongOrNull(t, "trade_id");
+				if (idx < 0 || idx >= sentTrades.size() || tradeId == null)
+				{
+					continue;
+				}
+				TradeRecord sent = sentTrades.get(idx);
+				if (sent != null && sent.offerInstanceId != null)
+				{
+					out.put(sent.offerInstanceId, tradeId);
+				}
+			}
+			catch (Exception ignored)
+			{
+				// Malformed row — skip it. The other rows still map cleanly.
+			}
+		}
+		return out;
+	}
+
 	/** Result of a {@code /tracker/bulk} call. {@code ok} false means the
-	 *  whole batch failed (network, 5xx, parse error); caller may retry. */
+	 *  whole batch failed (network, 5xx, parse error); caller may retry.
+	 *  {@link #tradeIdsByOfferInstanceId} is the per-row mapping the plugin
+	 *  uses to stamp newly-synced rows with their canonical server id. */
 	public static final class BulkSyncResult
 	{
 		public final boolean ok;
 		public final int accepted;
 		public final int duplicates;
 		public final int rejected;
+		public final java.util.Map<Long, Long> tradeIdsByOfferInstanceId;
 
-		BulkSyncResult(boolean ok, int accepted, int duplicates, int rejected)
+		BulkSyncResult(boolean ok, int accepted, int duplicates, int rejected,
+			java.util.Map<Long, Long> tradeIdsByOfferInstanceId)
 		{
-			this.ok         = ok;
-			this.accepted   = accepted;
-			this.duplicates = duplicates;
-			this.rejected   = rejected;
+			this.ok                        = ok;
+			this.accepted                  = accepted;
+			this.duplicates                = duplicates;
+			this.rejected                  = rejected;
+			this.tradeIdsByOfferInstanceId = tradeIdsByOfferInstanceId != null
+				? tradeIdsByOfferInstanceId
+				: java.util.Collections.emptyMap();
+		}
+
+		static BulkSyncResult empty(boolean ok)
+		{
+			return new BulkSyncResult(ok, 0, 0, 0, java.util.Collections.emptyMap());
 		}
 	}
 
-	public void postTradeRecord(TradeRecord trade, Runnable onSuccess)
+	/**
+	 * POSTs a single trade to {@code /tracker}. The callback fires with the
+	 * server-issued {@code trade_id} (nullable) so the caller can stamp the
+	 * local {@link TradeRecord} and avoid relying on fingerprint dedup on the
+	 * next /tracker/history sync. The callback receives null on:
+	 * <ul>
+	 *   <li>HTTP failure (network, 4xx, 5xx)</li>
+	 *   <li>response body that parses but omits {@code trade_id} (e.g.,
+	 *       duplicate where the server's secondary lookup failed)</li>
+	 *   <li>parse error</li>
+	 * </ul>
+	 * A null id is not a failure — the row will reconcile on the next history
+	 * sync via fingerprint dedup as before. Callers may pass {@code null} for
+	 * {@code onTradeId} when they don't care to stamp.
+	 */
+	public void postTradeRecord(TradeRecord trade, Consumer<Long> onTradeId)
 	{
 		JsonObject body = new JsonObject();
 		body.addProperty("item_id",   trade.itemId);
@@ -338,22 +413,32 @@ public class O7FlipApiClient
 			public void onFailure(Call call, IOException e)
 			{
 				log.warn("[07Flip] postTradeRecord failed: {}", e.getMessage());
+				if (onTradeId != null) onTradeId.accept(null);
 			}
 
 			@Override
 			public void onResponse(Call call, Response response) throws IOException
 			{
-				response.close();
-				if (response.isSuccessful())
+				try
 				{
-					if (onSuccess != null)
+					if (!response.isSuccessful() || response.body() == null)
 					{
-						onSuccess.run();
+						log.warn("[07Flip] postTradeRecord HTTP {}", response.code());
+						if (onTradeId != null) onTradeId.accept(null);
+						return;
 					}
+					JsonObject root = gson.fromJson(response.body().string(), JsonObject.class);
+					Long tradeId = getLongOrNull(root, "trade_id");
+					if (onTradeId != null) onTradeId.accept(tradeId);
 				}
-				else
+				catch (Exception e)
 				{
-					log.warn("[07Flip] postTradeRecord HTTP {}", response.code());
+					log.warn("[07Flip] postTradeRecord parse error: {}", e.getMessage());
+					if (onTradeId != null) onTradeId.accept(null);
+				}
+				finally
+				{
+					response.close();
 				}
 			}
 		});

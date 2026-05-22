@@ -2312,7 +2312,14 @@ public class O7FlipPlugin extends Plugin
 			rowForServer.timestamp     = posted.timestamp;
 			rowForServer.partial       = posted.partial;
 			rowForServer.totalQuantity = posted.totalQuantity;
-			apiClient.postTradeRecord(rowForServer, null);
+			final Long postedOid = posted.offerInstanceId;
+			apiClient.postTradeRecord(rowForServer, tradeId ->
+			{
+				if (tradeId != null && postedOid != null)
+				{
+					clientThread.invoke(() -> stampTradeIdOnLocalRow(postedOid, tradeId));
+				}
+			});
 		}
 
 		// Close out the freeze when a sell fully consumes the buys for this
@@ -2385,6 +2392,49 @@ public class O7FlipPlugin extends Plugin
 	}
 
 	/**
+	 * Stamps the server-issued {@code trade_id} onto the local TradeRecord
+	 * identified by {@code offerInstanceId}. Called from the POST /tracker
+	 * response handler so newly-synced rows carry the canonical id
+	 * immediately, without waiting for the next /tracker/history sync to
+	 * reconcile by fingerprint.
+	 *
+	 * No-op if the row has fallen out of the rolling window, already has a
+	 * tradeId stamped, or the offerInstanceId never matched (which can
+	 * happen if a later merge built a new row before the POST returned).
+	 * Must be invoked on the client thread because tradeHistory is mutated
+	 * by reassignment from a single thread.
+	 */
+	private void stampTradeIdOnLocalRow(long offerInstanceId, long tradeId)
+	{
+		int idx = findMatchingOfferRow(tradeHistory, offerInstanceId);
+		if (idx < 0)
+		{
+			return;
+		}
+		TradeRecord existing = tradeHistory.get(idx);
+		if (existing.tradeId != null)
+		{
+			return;
+		}
+		TradeRecord stamped = new TradeRecord();
+		stamped.itemId          = existing.itemId;
+		stamped.name            = existing.name;
+		stamped.isBuy           = existing.isBuy;
+		stamped.quantity        = existing.quantity;
+		stamped.totalGp         = existing.totalGp;
+		stamped.priceEach       = existing.priceEach;
+		stamped.timestamp       = existing.timestamp;
+		stamped.partial         = existing.partial;
+		stamped.tradeId         = tradeId;
+		stamped.offerInstanceId = existing.offerInstanceId;
+		stamped.totalQuantity   = existing.totalQuantity;
+		List<TradeRecord> updated = new ArrayList<>(tradeHistory);
+		updated.set(idx, stamped);
+		tradeHistory = Collections.unmodifiableList(updated);
+		saveTradeHistory();
+	}
+
+	/**
 	 * Companion to {@link #clearPartialFlag} for the zero-delta terminal-
 	 * observation case: flips the local row's partial flag for BOUGHT/SOLD
 	 * (CANCELLED rows stay partial=true to mark them as partially filled),
@@ -2444,7 +2494,14 @@ public class O7FlipPlugin extends Plugin
 			rowForServer.timestamp     = toPost.timestamp;
 			rowForServer.partial       = toPost.partial;
 			rowForServer.totalQuantity = toPost.totalQuantity;
-			apiClient.postTradeRecord(rowForServer, null);
+			final Long postedOid = toPost.offerInstanceId;
+			apiClient.postTradeRecord(rowForServer, tradeId ->
+			{
+				if (tradeId != null && postedOid != null)
+				{
+					clientThread.invoke(() -> stampTradeIdOnLocalRow(postedOid, tradeId));
+				}
+			});
 		}
 	}
 
@@ -3173,6 +3230,16 @@ public class O7FlipPlugin extends Plugin
 			{
 				log.debug("[07Flip] Bulk sync to server: server already has all {} local rows",
 					snapshot.size());
+			}
+			if (!res.tradeIdsByOfferInstanceId.isEmpty())
+			{
+				clientThread.invoke(() ->
+				{
+					for (Map.Entry<Long, Long> e : res.tradeIdsByOfferInstanceId.entrySet())
+					{
+						stampTradeIdOnLocalRow(e.getKey(), e.getValue());
+					}
+				});
 			}
 		});
 	}
