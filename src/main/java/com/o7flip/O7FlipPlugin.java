@@ -2041,11 +2041,30 @@ public class O7FlipPlugin extends Plugin
 			? prev[2]
 			: System.currentTimeMillis() * 10 + slot;
 
-		// Slot reused for a new offer — cumulative dropped below recorded
-		// state. Reset to zero so the new offer starts fresh, with a fresh
-		// offerInstanceId so the new offer's fills don't merge into the
-		// previous offer's TradeRecord row.
-		if (currentQty < prevQty)
+		// Detect a reused GE slot and discard the stale per-slot baseline so
+		// the new offer is recorded fresh rather than diffed against the
+		// previous offer's cumulative counters. Two independent signals:
+		//   1. Cumulative qty dropped below what we recorded — the obvious
+		//      case, hit when we DO observe the re-list while the slot is
+		//      empty or only lightly filled.
+		//   2. The baseline points at a tradeHistory row for a different item
+		//      or order size — catches a re-list whose intervening EMPTY
+		//      transition we never saw (offer collected + re-listed across a
+		//      logout, or while the plugin was unloaded). Without this, a slot
+		//      re-listed to an offer that has already filled to >= the old
+		//      count has its fills mis-merged into the previous offer's row,
+		//      or dropped entirely when the counts coincide — making a
+		//      completed trade vanish from the log, never POSTed upstream, and
+		//      leaving the later sell to FIFO-match a stale lot.
+		boolean cumulativeDropped = currentQty < prevQty;
+		boolean identityChanged = false;
+		if (!firstObservation && !cumulativeDropped)
+		{
+			int baselineIdx = findMatchingOfferRow(tradeHistory, offerInstanceId);
+			TradeRecord baselineRow = baselineIdx >= 0 ? tradeHistory.get(baselineIdx) : null;
+			identityChanged = slotBaselineIsStale(baselineRow, offer.getItemId(), offer.getTotalQuantity());
+		}
+		if (cumulativeDropped || identityChanged)
 		{
 			prevQty = 0L;
 			prevGp  = 0L;
@@ -2347,6 +2366,48 @@ public class O7FlipPlugin extends Plugin
 			}
 		}
 		return -1;
+	}
+
+	/**
+	 * True when the per-slot fill baseline points at a DIFFERENT offer than
+	 * the one currently occupying the slot — i.e. the slot was collected and
+	 * re-listed without us observing the intervening EMPTY transition (a
+	 * logout/relog, or the plugin being unloaded across the swap). Used by
+	 * {@link #recordIfNewFills} to discard the stale baseline so the freshly
+	 * re-listed offer is treated as a first observation, instead of having its
+	 * cumulative fills diffed against the previous offer's counters (which
+	 * under-records the new offer, or drops it entirely when the two fill
+	 * counts coincide).
+	 *
+	 * Compares the offer's STABLE identity — item id and order size, both
+	 * constant for an offer's lifetime — against the {@code tradeHistory} row
+	 * the baseline's offerInstanceId points at:
+	 * <ul>
+	 *   <li>A {@code null} baseline row (the referenced row has already rolled
+	 *       out of the 200-row window) is NOT treated as stale — we can't
+	 *       prove reuse, so we preserve existing behaviour rather than risk
+	 *       re-recording an in-flight offer.</li>
+	 *   <li>{@code totalQuantity} is only compared when the baseline row
+	 *       carries it; legacy rows predate the field and fall back to the
+	 *       item-id check alone.</li>
+	 * </ul>
+	 * During a single offer's lifetime the baseline row always shares the
+	 * offer's item id and order size, so this never fires a false reset
+	 * mid-fill.
+	 */
+	static boolean slotBaselineIsStale(TradeRecord baselineRow, int currentItemId, int currentTotalQuantity)
+	{
+		if (baselineRow == null)
+		{
+			return false;
+		}
+		if (baselineRow.itemId != currentItemId)
+		{
+			return true;
+		}
+		return baselineRow.totalQuantity != null
+			&& currentTotalQuantity > 0
+			&& baselineRow.totalQuantity != currentTotalQuantity;
 	}
 
 	/**

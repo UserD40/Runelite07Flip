@@ -79,7 +79,8 @@ public class ProfitCalculatorTest
 		assertEquals(1, r.completedFlips.size());
 		ProfitCalculator.CompletedFlip flip = r.completedFlips.get(0);
 		assertEquals(0L, flip.buyTotal);
-		assertEquals(100_000L, flip.sellTotal);
+		// sellTotal is net of GE tax: 100_000 gross − 2_000 tax = 98_000.
+		assertEquals(98_000L, flip.sellTotal);
 		assertEquals(2_000L, flip.tax);
 		assertEquals(98_000L, flip.profit);
 		assertEquals(0.0, flip.roiPct, 0.001);
@@ -96,7 +97,8 @@ public class ProfitCalculatorTest
 		assertEquals(1, flip.itemId);
 		assertEquals(100, flip.quantity);
 		assertEquals(100_000L, flip.buyTotal);
-		assertEquals(120_000L, flip.sellTotal);
+		// sellTotal is net of GE tax: 120_000 gross − 2_400 tax = 117_600.
+		assertEquals(117_600L, flip.sellTotal);
 		// 2% GE tax on 1200 gp/item = 24 gp/item × 100 = 2400 gp.
 		// Profit is reported NET of tax: 120_000 - 2400 - 100_000 = 17_600.
 		assertEquals(2_400L,  flip.tax);
@@ -117,7 +119,8 @@ public class ProfitCalculatorTest
 		ProfitCalculator.CompletedFlip flip = r.completedFlips.get(0);
 		assertEquals(40, flip.quantity);
 		assertEquals(40_000L, flip.buyTotal);  // 100_000 * 40 / 100
-		assertEquals(48_000L, flip.sellTotal);
+		// sellTotal is net of GE tax: 48_000 gross − 960 tax = 47_040.
+		assertEquals(47_040L, flip.sellTotal);
 		// 2% tax on 1200 gp/item = 24 gp/item × 40 = 960 gp.
 		// Net profit: 48_000 - 960 - 40_000 = 7_040.
 		assertEquals(960L,   flip.tax);
@@ -147,7 +150,8 @@ public class ProfitCalculatorTest
 		ProfitCalculator.CompletedFlip f1 = r.completedFlips.get(0);
 		assertEquals(50, f1.quantity);
 		assertEquals(50_000L, f1.buyTotal);
-		assertEquals(75_000L, f1.sellTotal);
+		// sellTotal is net of GE tax: 75_000 gross − 1_500 tax = 73_500.
+		assertEquals(73_500L, f1.sellTotal);
 		assertEquals(1_500L,  f1.tax);
 		assertEquals(23_500L, f1.profit);
 		assertEquals(1000L, f1.firstBuyTimestamp);
@@ -157,7 +161,8 @@ public class ProfitCalculatorTest
 		ProfitCalculator.CompletedFlip f2 = r.completedFlips.get(1);
 		assertEquals(30, f2.quantity);
 		assertEquals(36_000L, f2.buyTotal);
-		assertEquals(45_000L, f2.sellTotal);
+		// sellTotal is net of GE tax: 45_000 gross − 900 tax = 44_100.
+		assertEquals(44_100L, f2.sellTotal);
 		assertEquals(900L,    f2.tax);
 		assertEquals(8_100L,  f2.profit);
 		assertEquals(2000L, f2.firstBuyTimestamp);
@@ -215,8 +220,9 @@ public class ProfitCalculatorTest
 		assertEquals(33.33, r.stats.winRatePct, 0.1);
 		// 1760 - 2160 - 200 = -600 (net of GE tax)
 		assertEquals(-600L, r.stats.totalProfit);
-		// gross gp sold (pre-tax) still adds the way it always did
-		assertEquals(30_000L, r.stats.totalGpSold);
+		// net gp received (post-tax): (12_000−240)+(8_000−160)+(10_000−200)
+		// = 11_760 + 7_840 + 9_800 = 29_400.
+		assertEquals(29_400L, r.stats.totalGpSold);
 		// total tax = 240 + 160 + 200 = 600
 		assertEquals(600L, r.stats.totalTaxPaid);
 	}
@@ -295,8 +301,9 @@ public class ProfitCalculatorTest
 		ProfitCalculator.CompletedFlip f1 = r.completedFlips.get(0);
 		assertEquals(1, f1.quantity);
 		assertEquals(21_602_010L, f1.buyTotal);
-		// sellTotal slice: round(199_285_929 * 1/9) = 22_142_881
-		assertEquals(22_142_881L, f1.sellTotal);
+		// sellTotal slice net of GE tax: round(199_285_929 * 1/9) = 22_142_881
+		// gross, − 442_857 tax = 21_700_024.
+		assertEquals(21_700_024L, f1.sellTotal);
 		// 2% per-item tax on 22_142_881 → 442_857
 		assertEquals(442_857L, f1.tax);
 		assertEquals(22_142_881L - 442_857L - 21_602_010L, f1.profit);
@@ -305,9 +312,12 @@ public class ProfitCalculatorTest
 		ProfitCalculator.CompletedFlip f2 = r.completedFlips.get(1);
 		assertEquals(8, f2.quantity);
 		assertEquals(171_006_976L, f2.buyTotal);
-		assertEquals(199_285_929L - 22_142_881L, f2.sellTotal); // 177_143_048
+		// sellTotal net of GE tax: (199_285_929 − 22_142_881) gross 177_143_048
+		// − (442_857 × 8) tax 3_542_856 = 173_600_192.
+		assertEquals(199_285_929L - 22_142_881L - 442_857L * 8, f2.sellTotal); // 173_600_192
 		assertEquals(442_857L * 8, f2.tax);
-		assertEquals(f2.sellTotal - f2.tax - f2.buyTotal, f2.profit);
+		// profit = net sellTotal − buyTotal (tax already removed from sellTotal).
+		assertEquals(f2.sellTotal - f2.buyTotal, f2.profit);
 
 		// Combined profit + matched count exposed via stats.
 		assertEquals(2, r.stats.completedFlipCount);
@@ -327,7 +337,9 @@ public class ProfitCalculatorTest
 		ProfitCalculator.CompletedFlip flip = r.completedFlips.get(0);
 		// Math.round(1000 * 3 / 7.0) = Math.round(428.571) = 429
 		assertEquals(429L, flip.buyTotal);
-		assertEquals(900L, flip.sellTotal);
+		// sellTotal net of GE tax: sell 3 @ 300/item = 900 gross; per-item tax
+		// floor(300 * 0.02) = 6 → 18 total; net = 882.
+		assertEquals(882L, flip.sellTotal);
 
 		// Remaining lot must hold exactly 1000 - 429 = 571 gp for 4 items.
 		ProfitCalculator.OpenPosition pos = r.openPositions.get(1);
