@@ -360,6 +360,12 @@ public class O7FlipPanel extends PluginPanel
 	private String  optRisk          = "medium";
 	private int     optMaxFillHours  = 4;
 	private Boolean optMembers       = null;  // null = both, true = members, false = F2P
+	/** Optional per-slot wealth floor as a whole-percent 0..10. 0 = auto/omit
+	 *  (server default). Threaded into the optimize request as min_profit_pct. */
+	private int     optMinProfitPct  = 0;
+	/** True while the completed-positions history view is showing instead of
+	 *  the live allocation list (Task D). */
+	private boolean optShowingHistory;
 	private boolean optInFlight;
 	/** True after a successful build — collapses the input form to a compact
 	 *  summary pill so the allocations get the panel's full vertical space.
@@ -1188,7 +1194,7 @@ public class O7FlipPanel extends PluginPanel
 	 */
 	private long capitalCeiling()
 	{
-		return plugin != null ? plugin.effectiveCapital() : 0L;
+		return plugin != null ? plugin.capitalFilterCeiling() : 0L;
 	}
 
 	/** Convenience: true when {@code price} fits within the active capital. */
@@ -2621,13 +2627,9 @@ public class O7FlipPanel extends PluginPanel
 			public void mousePressed(MouseEvent e)
 			{
 				capitalExpanded = !capitalExpanded;
-				// Opening the editor from a freshly-installed state should
-				// land the user in MANUAL mode so typing works immediately.
-				if (capitalExpanded && plugin != null
-					&& currentCapitalMode() != O7FlipConfig.CapitalMode.MANUAL)
-				{
-					plugin.persistCapitalMode(O7FlipConfig.CapitalMode.MANUAL);
-				}
+				// Expanding only opens the editor — it no longer force-enables
+				// the filter. The explicit On/Off toggle inside the section is
+				// the single source of truth for whether capital filtering runs.
 				renderCapitalRow();
 				if (capitalExpanded) focusCapitalFieldIfEditable();
 			}
@@ -2847,6 +2849,32 @@ public class O7FlipPanel extends PluginPanel
 		label.setFont(Fonts.SM);
 		label.setForeground(new Color(0xAAAAAA));
 
+		// Persistent On/Off switch for the capital filter. This is the single
+		// source of truth for whether item lists are gated by capital — the
+		// preference survives restarts (stored as capitalMode). When OFF the
+		// filter is truly off and never silently re-enables.
+		final boolean filterOn = currentCapitalMode() != O7FlipConfig.CapitalMode.OFF;
+		JButton capitalToggle = pillButton(filterOn ? "On" : "Off");
+		capitalToggle.setBackground(filterOn ? new Color(0x00C27A) : new Color(0x3A3A3A));
+		capitalToggle.setForeground(filterOn ? Color.BLACK : new Color(0xCCCCCC));
+		capitalToggle.setToolTipText(filterOn
+			? "Capital filter ON — flips show items priced at or below your capital. Click to turn off."
+			: "Capital filter OFF — every flip is shown. Click to filter by your capital.");
+		capitalToggle.addActionListener(e ->
+		{
+			if (plugin != null)
+			{
+				// Commit any pending edit first so enabling the filter uses the
+				// value currently in the field, not the last saved one.
+				if (!filterOn)
+				{
+					commitManualCapital();
+				}
+				plugin.setCapitalFilterEnabled(!filterOn);
+			}
+			renderCapitalRow();
+		});
+
 		// Editable field — always typeable in this state. Pressing Enter or
 		// blurring saves; the save button does the same, just as an explicit
 		// affordance.
@@ -2887,12 +2915,15 @@ public class O7FlipPanel extends PluginPanel
 		capitalReadout.setAlignmentX(Component.LEFT_ALIGNMENT);
 		updateCapitalReadout();
 
-		// Top row: just the label (left). The field + save sit on row 2
-		// to give the input the full width it deserves at panel sizes.
-		JPanel top = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 4, 0));
+		// Top row: the "Capital" label (left) and the On/Off filter toggle
+		// (right). The field + save sit on row 2 to give the input the full
+		// width it deserves at panel sizes.
+		JPanel top = new JPanel(new BorderLayout());
 		top.setBackground(ColorScheme.DARKER_GRAY_COLOR);
-		top.add(label);
+		top.add(label, BorderLayout.WEST);
+		top.add(capitalToggle, BorderLayout.EAST);
 		top.setAlignmentX(Component.LEFT_ALIGNMENT);
+		top.setMaximumSize(new Dimension(Integer.MAX_VALUE, capitalToggle.getPreferredSize().height + 4));
 
 		JPanel fieldRow = new JPanel(new BorderLayout(6, 0));
 		fieldRow.setBackground(ColorScheme.DARKER_GRAY_COLOR);
@@ -5286,6 +5317,20 @@ public class O7FlipPanel extends PluginPanel
 		}
 		inputs.add(memRow);
 
+		// Row: optional per-slot wealth floor (Task B). 0 = auto (omitted from
+		// the request). Whole-percent stepper 0..10 keeps the UI simple while
+		// the wire value is a number the server clamps to 0..10.
+		JPanel minProfitRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 2));
+		minProfitRow.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+		minProfitRow.add(buildStepper("Min profit %", () -> optMinProfitPct,
+			v -> optMinProfitPct = Math.max(0, Math.min(10, v)), 0, 10));
+		JLabel minProfitHint = new JLabel("0 = auto");
+		minProfitHint.setFont(Fonts.SM);
+		minProfitHint.setForeground(new Color(0x777777));
+		minProfitHint.setToolTipText("Per-slot wealth floor: suppress slots whose cycle profit is below this % of bank. 0 lets the server pick.");
+		minProfitRow.add(minProfitHint);
+		inputs.add(minProfitRow);
+
 		// Row: capital readout + Build button
 		JLabel capitalLabel = new JLabel(buildOptimizerCapitalLabel());
 		capitalLabel.setFont(Fonts.SM);
@@ -5309,8 +5354,10 @@ public class O7FlipPanel extends PluginPanel
 				return;
 			}
 			optInFlight = true;
+			optShowingHistory = false;
 			renderOptimizerLoading();
-			plugin.runOptimizer(capital, optSlots, optRisk, optMaxFillHours, optMembers);
+			Double minProfit = optMinProfitPct > 0 ? (double) optMinProfitPct : null;
+			plugin.runOptimizer(capital, optSlots, optRisk, optMaxFillHours, optMembers, minProfit);
 		});
 		// ✕ Clear button — wipes both the local plan and the server-side
 		// session via DELETE /optimize/active. Discreet circular button so
@@ -5533,6 +5580,8 @@ public class O7FlipPanel extends PluginPanel
 		optRisk         = session.inputs.risk != null && !session.inputs.risk.isEmpty() ? session.inputs.risk : optRisk;
 		optMaxFillHours = session.inputs.maxFillHours != null ? session.inputs.maxFillHours : optMaxFillHours;
 		optMembers      = session.inputs.members;
+		optMinProfitPct = session.inputs.minProfitPct != null
+			? (int) Math.round(Math.max(0, Math.min(10, session.inputs.minProfitPct))) : optMinProfitPct;
 
 		com.o7flip.model.OptimizeResult result = new com.o7flip.model.OptimizeResult();
 		result.updatedAt   = session.generatedAt;
@@ -5559,7 +5608,12 @@ public class O7FlipPanel extends PluginPanel
 		lastOptimize = result;
 		optFormCollapsed = true;
 		applyOptimizerFormVisibility();
-		renderOptimizerResult(result);
+		// Don't yank the user out of the history view on a background poll —
+		// just keep lastOptimize fresh so "Back to plan" shows current data.
+		if (!optShowingHistory)
+		{
+			renderOptimizerResult(result);
+		}
 	}
 
 	/** Called by the plugin after a successful DELETE /optimize/active. */
@@ -5567,6 +5621,7 @@ public class O7FlipPanel extends PluginPanel
 	{
 		lastOptimize = null;
 		optFormCollapsed = false;
+		optShowingHistory = false;
 		applyOptimizerFormVisibility();
 		renderOptimizerEmpty();
 	}
@@ -5637,15 +5692,18 @@ public class O7FlipPanel extends PluginPanel
 
 		if (r.allocations == null || r.allocations.isEmpty())
 		{
-			optimizerListPanel.add(emptyLabel("No allocations possible",
-				"Try widening the risk to 'High', or lengthening the fill window."));
-			optimizerListPanel.revalidate();
-			optimizerListPanel.repaint();
+			renderOptimizerEmptyFromSummary(r.summary);
 			return;
 		}
 
 		// Summary block first — most important info up top.
 		optimizerListPanel.add(buildOptimizerSummary(r.summary));
+		// A3 — "you left slots on the table" suggestion banner.
+		JComponent slotSuggestion = buildSlotSuggestionBanner(r.summary);
+		if (slotSuggestion != null)
+		{
+			optimizerListPanel.add(slotSuggestion);
+		}
 		optimizerListPanel.add(sep());
 
 		for (int i = 0; i < r.allocations.size(); i++)
@@ -5659,10 +5717,38 @@ public class O7FlipPanel extends PluginPanel
 				}
 			};
 			optimizerListPanel.add(new com.o7flip.ui.OptimizerAllocationCard(
-				r.allocations.get(i), itemManager, i % 2 != 0, plugin, swap));
+				r.allocations.get(i), itemManager, i % 2 != 0, plugin, swap, i));
 			optimizerListPanel.add(sep());
 		}
 
+		// Footer: quiet link into the completed-positions history (Task D).
+		optimizerListPanel.add(buildHistoryFooter());
+
+		optimizerListPanel.revalidate();
+		optimizerListPanel.repaint();
+	}
+
+	/**
+	 * Empty-plan state driven by the server's {@code empty_reason} /
+	 * {@code degraded_trend_data} (Task A5) rather than a generic message.
+	 */
+	private void renderOptimizerEmptyFromSummary(com.o7flip.model.OptimizeResult.Summary s)
+	{
+		String title = "No allocations possible";
+		String sub;
+		if (s != null && s.emptyReason != null && !s.emptyReason.isEmpty())
+		{
+			sub = s.emptyReason;
+		}
+		else
+		{
+			sub = "Try widening the risk to 'High', or lengthening the fill window.";
+		}
+		if (s != null && s.degradedTrendData)
+		{
+			sub += " (Trend data was limited this run — results may be conservative.)";
+		}
+		optimizerListPanel.add(emptyLabel(title, sub));
 		optimizerListPanel.revalidate();
 		optimizerListPanel.repaint();
 	}
@@ -5717,6 +5803,26 @@ public class O7FlipPanel extends PluginPanel
 		mixLbl.setFont(Fonts.SM);
 		mixLbl.setAlignmentX(Component.LEFT_ALIGNMENT);
 		p.add(mixLbl);
+
+		// Applied per-slot wealth floor (echoed by the server) + degraded-data caveat.
+		if (s.minProfitPctApplied != null && s.minProfitPctApplied > 0)
+		{
+			JLabel floor = new JLabel("<html><font color='#888888'>Min profit floor: </font>"
+				+ "<font color='#FFFFFF'>" + trimZeros(String.format("%.2f", s.minProfitPctApplied)) + "%</font>"
+				+ "<font color='#888888'> of bank per slot</font></html>");
+			floor.setFont(Fonts.SM);
+			floor.setAlignmentX(Component.LEFT_ALIGNMENT);
+			p.add(floor);
+		}
+		if (s.degradedTrendData)
+		{
+			JLabel degraded = new JLabel("<html><font color='#FFB454'>⚠ </font>"
+				+ "<font color='#888888'>Trend data was limited this run — ranking leaned on fallbacks.</font></html>");
+			degraded.setFont(Fonts.SM);
+			degraded.setAlignmentX(Component.LEFT_ALIGNMENT);
+			degraded.setBorder(new EmptyBorder(2, 0, 0, 0));
+			p.add(degraded);
+		}
 
 		// Contextual hints. The optimizer returning fewer slots / leftover
 		// capital isn't always a problem — sometimes (small capital → ≤2
@@ -5819,7 +5925,9 @@ public class O7FlipPanel extends PluginPanel
 						+ "<font color='#FFFFFF'>" + s.maxFillHours + "h</font>"
 					: "")
 				+ "<font color='#888888'>.</font><br>"
-				+ "<font color='#888888'>Try a longer Window or higher Risk to absorb more capital.</font></html>";
+				+ "<font color='#888888'>Buy limits cap how much each item absorbs per 4h. Try a longer Window"
+				+ (s.slotsRequested < 8 ? ", more slots," : "")
+				+ " or higher Risk to deploy more.</font></html>";
 			JLabel l = new JLabel(html);
 			l.setFont(Fonts.SM);
 			l.setAlignmentX(Component.LEFT_ALIGNMENT);
@@ -5827,6 +5935,270 @@ public class O7FlipPanel extends PluginPanel
 		}
 
 		return null;
+	}
+
+	/**
+	 * A3 — banner shown when the server says deploying more slots would help
+	 * and the user requested fewer than 8. One click re-runs the optimiser at
+	 * the suggested slot count. Returns null when there's nothing to suggest.
+	 */
+	private JComponent buildSlotSuggestionBanner(com.o7flip.model.OptimizeResult.Summary s)
+	{
+		if (s == null || s.slotSuggestion == null) return null;
+		final int suggested = s.slotSuggestion.suggestedSlots;
+		// Never suggest "more slots" at the 8-slot ceiling, and only when the
+		// suggestion is actually larger than what was requested.
+		if (suggested <= s.slotsRequested || s.slotsRequested >= 8 || suggested > 8) return null;
+
+		JPanel p = new JPanel(new BorderLayout(8, 0));
+		p.setBackground(new Color(0x1E2E22));
+		p.setBorder(new EmptyBorder(8, 12, 8, 12));
+		p.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+		String body = "<html><font color='#00C27A'>● </font>"
+			+ "<font color='#FFFFFF'>Using " + suggested + " slots</font>"
+			+ "<font color='#888888'> would deploy ~</font>"
+			+ "<font color='#FFE07A'>" + FlipItemPanel.formatGpCompact(s.slotSuggestion.additionalCapitalDeployed) + "</font>"
+			+ "<font color='#888888'> more</font>"
+			+ (s.slotSuggestion.additionalExpectedProfit > 0
+				? " <font color='#888888'>(≈</font><font color='#00C27A'>+"
+					+ FlipItemPanel.formatGpCompact(s.slotSuggestion.additionalExpectedProfit)
+					+ "</font><font color='#888888'> profit)</font>"
+				: "")
+			+ "</html>";
+		JLabel label = new JLabel(body);
+		label.setFont(Fonts.SM);
+
+		JButton apply = pillButton("Use " + suggested);
+		apply.setBackground(ORANGE);
+		apply.setForeground(Color.BLACK);
+		apply.setToolTipText("Re-run the optimiser with " + suggested + " slots");
+		apply.addActionListener(e ->
+		{
+			if (plugin == null || optInFlight) return;
+			optSlots = suggested;
+			optInFlight = true;
+			optShowingHistory = false;
+			renderOptimizerLoading();
+			plugin.rerunWithSlots(suggested);
+		});
+
+		p.add(label, BorderLayout.CENTER);
+		p.add(apply, BorderLayout.EAST);
+		return p;
+	}
+
+	// -------------------------------------------------------------------------
+	// Completed-positions history (Task D)
+	// -------------------------------------------------------------------------
+
+	/** History sort modes for the completed-positions view. */
+	private enum HistorySort { RECENT, QUICKEST, MOST_PROFIT }
+	private HistorySort optHistorySort = HistorySort.RECENT;
+
+	/** Quiet footer link under the allocations that opens the history view. */
+	private JComponent buildHistoryFooter()
+	{
+		int count = plugin != null ? plugin.getCompletedPositions().size() : 0;
+		JButton link = pillButton(count > 0 ? "Completed positions (" + count + ")" : "Completed positions");
+		link.setBackground(new Color(0x2A2A2A));
+		link.setForeground(new Color(0xAAAAAA));
+		link.setBorder(new EmptyBorder(6, 12, 6, 12));
+		link.addActionListener(e ->
+		{
+			optShowingHistory = true;
+			renderCompletedPositionsHistory();
+			// Pull the latest shared list so web-side closes show; the GET
+			// callback re-renders via onCompletedPositionsChanged when it lands.
+			if (plugin != null) plugin.refreshCompletedPositions();
+		});
+		JPanel wrap = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 6));
+		wrap.setBackground(ColorScheme.DARK_GRAY_COLOR);
+		wrap.setAlignmentX(Component.LEFT_ALIGNMENT);
+		wrap.add(link);
+		return wrap;
+	}
+
+	/** Re-render the active view if the history changed underneath us. */
+	public void onCompletedPositionsChanged()
+	{
+		if (optShowingHistory)
+		{
+			renderCompletedPositionsHistory();
+		}
+		else if (lastOptimize != null)
+		{
+			// Refresh so the footer count stays accurate.
+			renderOptimizerResult(lastOptimize);
+		}
+	}
+
+	private void renderCompletedPositionsHistory()
+	{
+		if (optimizerListPanel == null) return;
+		optimizerListPanel.removeAll();
+
+		java.util.List<com.o7flip.model.CompletedPosition> positions =
+			plugin != null ? plugin.getCompletedPositions() : new java.util.ArrayList<>();
+		sortHistory(positions);
+
+		// Header: back link + total realised profit.
+		JPanel header = new JPanel(new BorderLayout(8, 0));
+		header.setBackground(new Color(0x1F1F1F));
+		header.setBorder(new EmptyBorder(10, 12, 10, 12));
+		header.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+		JButton back = pillButton("← Back to plan");
+		back.setBackground(new Color(0x2A2A2A));
+		back.setForeground(new Color(0xAAAAAA));
+		back.addActionListener(e ->
+		{
+			optShowingHistory = false;
+			if (lastOptimize != null) renderOptimizerResult(lastOptimize);
+			else renderOptimizerEmpty();
+		});
+		header.add(back, BorderLayout.WEST);
+
+		long total = plugin != null ? plugin.getCompletedProfitTotal() : 0L;
+		String totColor = total >= 0 ? "#00C27A" : "#E85050";
+		JLabel totLbl = new JLabel("<html><font color='#888888'>Realised: </font>"
+			+ "<font color='" + totColor + "'><b>" + (total >= 0 ? "+" : "")
+			+ FlipItemPanel.formatGpCompact(total) + "</b></font></html>");
+		totLbl.setFont(Fonts.BOLD);
+		header.add(totLbl, BorderLayout.EAST);
+		optimizerListPanel.add(header);
+
+		// Sort pills.
+		JPanel sortRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 4));
+		sortRow.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+		sortRow.setAlignmentX(Component.LEFT_ALIGNMENT);
+		sortRow.add(buildHistorySortPill("Recent",  HistorySort.RECENT));
+		sortRow.add(buildHistorySortPill("Quickest", HistorySort.QUICKEST));
+		sortRow.add(buildHistorySortPill("Profit",   HistorySort.MOST_PROFIT));
+		optimizerListPanel.add(sortRow);
+		optimizerListPanel.add(sep());
+
+		if (positions.isEmpty())
+		{
+			optimizerListPanel.add(emptyLabel("No completed positions yet",
+				"When an Optimiser slot fully buys and sells, it lands here with its realised profit."));
+		}
+		else
+		{
+			boolean odd = false;
+			for (com.o7flip.model.CompletedPosition cp : positions)
+			{
+				optimizerListPanel.add(buildCompletedPositionRow(cp, odd));
+				optimizerListPanel.add(sep());
+				odd = !odd;
+			}
+		}
+
+		optimizerListPanel.revalidate();
+		optimizerListPanel.repaint();
+	}
+
+	private JButton buildHistorySortPill(String label, HistorySort mode)
+	{
+		JButton b = pillButton(label);
+		applySortStyle(b, optHistorySort == mode);
+		b.addActionListener(e ->
+		{
+			optHistorySort = mode;
+			renderCompletedPositionsHistory();
+		});
+		return b;
+	}
+
+	private void sortHistory(java.util.List<com.o7flip.model.CompletedPosition> list)
+	{
+		switch (optHistorySort)
+		{
+			case QUICKEST:
+				// Fastest fills first; unknown (null) fill times sink to the bottom.
+				list.sort((a, b) ->
+				{
+					double da = a.fillHours != null ? a.fillHours : Double.MAX_VALUE;
+					double db = b.fillHours != null ? b.fillHours : Double.MAX_VALUE;
+					return Double.compare(da, db);
+				});
+				break;
+			case MOST_PROFIT:
+				list.sort((a, b) -> Long.compare(b.profit, a.profit));
+				break;
+			case RECENT:
+			default:
+				// Already newest-first from the store; keep it stable.
+				break;
+		}
+	}
+
+	private JComponent buildCompletedPositionRow(com.o7flip.model.CompletedPosition cp, boolean odd)
+	{
+		JPanel row = new JPanel(new BorderLayout(8, 0));
+		row.setBackground(odd ? new Color(0x272727) : ColorScheme.DARK_GRAY_COLOR);
+		row.setBorder(new EmptyBorder(8, 10, 8, 10));
+		row.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+		JLabel icon = FlipItemPanel.buildIcon(cp.itemId, itemManager);
+
+		JPanel text = new JPanel();
+		text.setLayout(new BoxLayout(text, BoxLayout.Y_AXIS));
+		text.setOpaque(false);
+
+		StringBuilder name = new StringBuilder("<html><font color='#FFFFFF'><b>")
+			.append(escapeHtml(cp.name)).append("</b></font>");
+		if (cp.partial)
+		{
+			name.append(" <font color='#FFC077'>· partial</font>");
+		}
+		name.append("</html>");
+		JLabel nameLbl = new JLabel(name.toString());
+		nameLbl.setFont(Fonts.SM);
+		nameLbl.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+		String profitColor = cp.profit >= 0 ? "#00C27A" : "#E85050";
+		StringBuilder sub = new StringBuilder("<html>")
+			.append("<font color='").append(profitColor).append("'><b>")
+			.append(cp.profit >= 0 ? "+" : "").append(FlipItemPanel.formatGpCompact(cp.profit))
+			.append("</b></font><font color='#888888'> · ")
+			.append(formatNumberLocal(cp.qty)).append(" @ ")
+			.append(FlipItemPanel.formatGpCompact(cp.qty > 0 ? cp.buyGp / cp.qty : 0))
+			.append("</font>");
+		if (cp.fillHours != null)
+		{
+			sub.append("<font color='#888888'> · ").append(formatHoursLocal(cp.fillHours)).append("</font>");
+		}
+		sub.append("</html>");
+		JLabel subLbl = new JLabel(sub.toString());
+		subLbl.setFont(Fonts.SM);
+		subLbl.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+		text.add(nameLbl);
+		text.add(Box.createVerticalStrut(2));
+		text.add(subLbl);
+
+		row.add(icon, BorderLayout.WEST);
+		row.add(text, BorderLayout.CENTER);
+		row.setMaximumSize(new Dimension(Integer.MAX_VALUE, row.getPreferredSize().height));
+		return row;
+	}
+
+	private static String formatNumberLocal(long n)
+	{
+		return String.format("%,d", n);
+	}
+
+	private static String formatHoursLocal(double h)
+	{
+		if (h < 1.0)
+		{
+			long mins = Math.round(h * 60);
+			return Math.max(1, mins) + "m fill";
+		}
+		String s = String.format("%.1f", h);
+		if (s.endsWith(".0")) s = s.substring(0, s.length() - 2);
+		return s + "h fill";
 	}
 
 	private JPanel buildScreenersTab()

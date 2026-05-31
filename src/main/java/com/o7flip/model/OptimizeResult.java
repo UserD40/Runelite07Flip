@@ -65,6 +65,36 @@ public class OptimizeResult
 		public String  pricingNote;
 		public String  compositionNote;
 		public String  realismNote;
+
+		// ── Redesigned-engine additions (additive; absent on older responses) ──
+		/** Set only when {@link #slotsUsed} == 0. Server's reason for an empty
+		 *  plan — drives the empty-state copy instead of a generic message. */
+		public String  emptyReason;
+		/** True when the server's trend DB query was degraded/partial, so the
+		 *  ranking leaned on fallbacks. Surface as a soft caveat. */
+		public boolean degradedTrendData;
+		/** The per-slot wealth floor the server actually applied (the request's
+		 *  {@code min_profit_pct}, or the server's auto value). Null = none. */
+		public Double  minProfitPctApplied;
+		/** Present when deploying more slots would help AND the user asked for
+		 *  fewer than 8. Null otherwise. */
+		public SlotSuggestion slotSuggestion;
+		/** Per-reason counts of why candidate items were rejected. Optional —
+		 *  surfaced in the empty-state / hint tooltips. Keys are the server's
+		 *  reason codes (low_confidence, low_volume, low_roi, …). */
+		public java.util.Map<String, Integer> eligibilityRejections = new java.util.LinkedHashMap<>();
+	}
+
+	/**
+	 * Server hint that the user left slots on the table. Only present when the
+	 * request used fewer than 8 slots and the engine could profitably deploy
+	 * more. The UI offers a one-click re-run at {@link #suggestedSlots}.
+	 */
+	public static class SlotSuggestion
+	{
+		public int  suggestedSlots;
+		public long additionalCapitalDeployed;
+		public long additionalExpectedProfit;
 	}
 
 	public static class Allocation
@@ -92,6 +122,12 @@ public class OptimizeResult
 		/** Last-24h avg_low buy prices for sparkline. Null if the DB query
 		 *  failed server-side. Length matches the server's bucket count. */
 		public int[]   hourlyTrend;
+		/** This slot's expected cycle profit as a percent of total bank, e.g.
+		 *  0.49 → "+0.49% of bank". Null on older responses. */
+		public Double  profitPctOfBank;
+		/** True when the slot sits below the applied per-slot wealth floor —
+		 *  the server kept it but flags it as a thin contributor. */
+		public Boolean belowWealthThreshold;
 
 		// ── Live-tracking fields ─────────────────────────────────────────────
 		// Empty / null on /optimize responses; populated on /optimize/active
@@ -99,5 +135,13 @@ public class OptimizeResult
 		public java.util.List<SlotFill> buys  = new java.util.ArrayList<>();
 		public java.util.List<SlotFill> sells = new java.util.ArrayList<>();
 		public SlotState state                = SlotState.PENDING;
+		/** True once the user hit "Stop buying" — the slot's target was capped
+		 *  to whatever had already been bought. Round-trips through the shared
+		 *  session ({@code partial}); the website tolerates + renders it. */
+		public boolean partial;
+		/** When {@link #partial}, the slot's ORIGINAL gp budget before the cap
+		 *  (so freed capital can be redeployed after the partial sells). 0 when
+		 *  not partial. Wire key {@code reserved_gp}. */
+		public long reservedGp;
 	}
 }

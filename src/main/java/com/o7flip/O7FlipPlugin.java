@@ -719,6 +719,8 @@ public class O7FlipPlugin extends Plugin
 		// the website (or from a previous plugin session) so the user sees
 		// their plan immediately, without having to click Build again.
 		executor.execute(this::doHydrateOptimizerSession);
+		// Pull the shared completed-positions history (web ↔ plugin synced store).
+		executor.execute(this::refreshCompletedPositions);
 		refreshTask = executor.scheduleAtFixedRate(
 			() -> fetchAll(false),
 			config.refreshIntervalSeconds(),
@@ -3456,12 +3458,13 @@ public class O7FlipPlugin extends Plugin
 	 * the player has no coins. The bucketed value (never the exact wealth)
 	 * is what we send to the server as ?cashStack=…
 	 *
-	 * Delegates to {@link #effectiveCapital()} so the legacy toggle and the
-	 * new explicit Capital input share one source of truth.
+	 * Delegates to {@link #capitalFilterCeiling()} so the Flips feed and the
+	 * client-side affordable tabs filter against the same ceiling — the user's
+	 * total capital, not the momentary free balance.
 	 */
 	private long cashStackBucketGp()
 	{
-		return effectiveCapital();
+		return capitalFilterCeiling();
 	}
 
 	/**
@@ -3481,6 +3484,28 @@ public class O7FlipPlugin extends Plugin
 			return 0L;
 		}
 		return (free / CASH_BUCKET) * CASH_BUCKET;
+	}
+
+	/**
+	 * The ceiling used to filter item lists (Flips + the client-side affordable
+	 * tabs) to what the user's capital can buy. This is the user's <em>total</em>
+	 * capital — the same figure shown in the Capital input — bucketed to 100K
+	 * for privacy, NOT {@link #freeCapital()}.
+	 *
+	 * Using total (rather than free) is deliberate: placing a buy offer ties up
+	 * GP but should not shrink the list of flip ideas the user is browsing. The
+	 * user wants "show me everything priced at or below my capital", and the
+	 * capital figure they see is {@link #totalCapital()}. Returns 0 when capital
+	 * tracking is OFF (callers treat 0 as "no filter").
+	 */
+	public long capitalFilterCeiling()
+	{
+		long total = totalCapital();
+		if (total <= 0)
+		{
+			return 0L;
+		}
+		return (total / CASH_BUCKET) * CASH_BUCKET;
 	}
 
 	/**
@@ -3578,6 +3603,31 @@ public class O7FlipPlugin extends Plugin
 	public void persistCapitalMode(O7FlipConfig.CapitalMode mode)
 	{
 		configManager.setConfiguration("o7flip", "capitalMode", mode);
+	}
+
+	/**
+	 * Explicit, persisted on/off switch for the capital filter, driven by the
+	 * toggle in the panel's Capital section. ON resolves to MANUAL (use the
+	 * typed value); OFF is a true off — it also clears the legacy
+	 * {@code usePersonalisedFlips} flag so {@link #resolveCapitalMode()} can't
+	 * silently re-enable AUTO behind the user's back. Refreshes every
+	 * capital-gated tab so the change applies immediately.
+	 */
+	public void setCapitalFilterEnabled(boolean enabled)
+	{
+		if (enabled)
+		{
+			configManager.setConfiguration("o7flip", "capitalMode", O7FlipConfig.CapitalMode.MANUAL);
+		}
+		else
+		{
+			configManager.setConfiguration("o7flip", "capitalMode", O7FlipConfig.CapitalMode.OFF);
+			if (config.usePersonalisedFlips())
+			{
+				configManager.setConfiguration("o7flip", "usePersonalisedFlips", false);
+			}
+		}
+		onCapitalChanged();
 	}
 
 	/** Panel helper for persisting the manual capital value. */
@@ -3953,20 +4003,37 @@ public class O7FlipPlugin extends Plugin
 	 * schedules a debounced POST so the website sees the same plan).
 	 */
 	public void runOptimizer(long capital, int slots, String risk,
-	                         int maxFillHours, Boolean members)
+	                         int maxFillHours, Boolean members, Double minProfitPct)
 	{
 		if (executor == null || executor.isShutdown()) return;
 		executor.execute(() -> apiClient.fetchOptimize(
 			capital, slots, risk, maxFillHours, members,
-			null,
+			null, minProfitPct,
 			result -> SwingUtilities.invokeLater(() ->
 			{
 				panel.onOptimizeResult(result);
-				seedActiveSessionFrom(result, capital, slots, risk, maxFillHours, members);
+				seedActiveSessionFrom(result, capital, slots, risk, maxFillHours, members, minProfitPct);
 				scheduleSessionPost();
 			}),
 			upgradeUrl -> SwingUtilities.invokeLater(() -> panel.onOptimizePremiumRequired(upgradeUrl)),
 			reason -> SwingUtilities.invokeLater(() -> panel.onOptimizeError(reason))));
+	}
+
+	/**
+	 * Re-runs the optimiser with the same inputs as the active session but a
+	 * new slot count — backs the "Using N slots would deploy ~X more" button
+	 * (Task A3). No-op without an active session to read inputs from.
+	 */
+	public void rerunWithSlots(int slots)
+	{
+		com.o7flip.model.OptimizerSession s = activeSession;
+		long capital = s != null ? s.inputs.capital : effectiveCapital();
+		if (capital <= 0 || slots < 1) return;
+		String risk        = s != null && s.inputs.risk != null ? s.inputs.risk : "medium";
+		int maxFillHours   = s != null && s.inputs.maxFillHours != null ? s.inputs.maxFillHours : 4;
+		Boolean members    = s != null ? s.inputs.members : null;
+		Double minProfit   = s != null ? s.inputs.minProfitPct : null;
+		runOptimizer(capital, Math.min(8, slots), risk, maxFillHours, members, minProfit);
 	}
 
 	/**
@@ -3999,9 +4066,10 @@ public class O7FlipPlugin extends Plugin
 		int maxFillHours = current.summary != null && current.summary.maxFillHours != null
 			? current.summary.maxFillHours : 4;
 		Boolean members = current.summary != null ? current.summary.members : null;
+		Double minProfit = activeSession != null ? activeSession.inputs.minProfitPct : null;
 
 		executor.execute(() -> apiClient.fetchOptimize(
-			slotCapital, 1, risk, maxFillHours, members, excludes,
+			slotCapital, 1, risk, maxFillHours, members, excludes, minProfit,
 			result -> SwingUtilities.invokeLater(() ->
 			{
 				if (result == null || result.allocations == null || result.allocations.isEmpty())
@@ -4030,6 +4098,10 @@ public class O7FlipPlugin extends Plugin
 	private volatile com.o7flip.model.OptimizerSession activeSession;
 	private ScheduledFuture<?> pendingSessionPost;
 	private ScheduledFuture<?> sessionPollTask;
+	/** In-memory cache of the shared completed-positions history (Task D),
+	 *  hydrated from GET /optimize/completed and kept authoritative by POST
+	 *  responses. Newest-first. Guard all access on the list's monitor. */
+	private final java.util.List<com.o7flip.model.CompletedPosition> completedPositions = new java.util.ArrayList<>();
 	private static final long SESSION_POST_DEBOUNCE_MS = 1000L;
 	/** Poll cadence WHILE the Plan tab is open. Server cap is 60/min/IP so a
 	 *  15s loop is comfortably under it (4 GET/min) while still feeling live. */
@@ -4063,6 +4135,8 @@ public class O7FlipPlugin extends Plugin
 	{
 		if (executor == null || executor.isShutdown()) return;
 		executor.execute(this::doPollActiveSession);
+		// Also pull the shared history so web-side closes show on tab open.
+		refreshCompletedPositions();
 		if (sessionPollTask == null || sessionPollTask.isCancelled() || sessionPollTask.isDone())
 		{
 			sessionPollTask = executor.scheduleAtFixedRate(
@@ -4151,7 +4225,7 @@ public class O7FlipPlugin extends Plugin
 
 	/** Builds an OptimizerSession from a fresh /optimize response. */
 	private void seedActiveSessionFrom(com.o7flip.model.OptimizeResult result, long capital, int slots,
-	                                   String risk, int maxFillHours, Boolean members)
+	                                   String risk, int maxFillHours, Boolean members, Double minProfitPct)
 	{
 		if (result == null || result.allocations == null) return;
 		com.o7flip.model.OptimizerSession s = new com.o7flip.model.OptimizerSession();
@@ -4160,6 +4234,7 @@ public class O7FlipPlugin extends Plugin
 		s.inputs.risk         = risk;
 		s.inputs.maxFillHours = maxFillHours;
 		s.inputs.members      = members;
+		s.inputs.minProfitPct = minProfitPct;
 		s.slots               = new java.util.ArrayList<>(result.allocations);
 		s.generatedAt         = result.updatedAt;
 		activeSession         = s;
@@ -4249,11 +4324,13 @@ public class O7FlipPlugin extends Plugin
 			armSellAutoFill(slot.itemId, slot.sellPrice, slot.name);
 		}
 
-		// CLOSED transition — recycle the slot. Capture realised profit and
-		// roll it into a new allocation for the same slot index.
+		// CLOSED transition — record the finished position in local history,
+		// then recycle the slot (capture realised profit + roll a fresh
+		// allocation into the same slot index).
 		if (prevState != com.o7flip.model.SlotState.CLOSED
 			&& slot.state == com.o7flip.model.SlotState.CLOSED)
 		{
+			appendCompletedPosition(slot);
 			recycleClosedSlot(slotIdx, slot);
 		}
 
@@ -4293,7 +4370,12 @@ public class O7FlipPlugin extends Plugin
 		long boughtGp = sumGp(closed.buys);
 		long soldGp   = sumGp(closed.sells);
 		long realisedProfit = Math.max(0L, soldGp - boughtGp);
-		long newCapital = closed.gpAllocated + realisedProfit;
+		// For a partial slot, gpAllocated was capped to the actual spend when
+		// the user hit "Stop buying" — the original budget lives in reservedGp.
+		// Redeploy the FULL original budget plus realised profit so the unspent
+		// remainder isn't stranded (Task C: "redeploys realised + unspent").
+		long base = closed.partial && closed.reservedGp > 0 ? closed.reservedGp : closed.gpAllocated;
+		long newCapital = base + realisedProfit;
 
 		// Exclude the just-closed item + every other currently-active item.
 		java.util.List<Integer> excludes = new java.util.ArrayList<>();
@@ -4305,12 +4387,13 @@ public class O7FlipPlugin extends Plugin
 		String risk = s.inputs.risk != null ? s.inputs.risk : "medium";
 		int maxFillHours = s.inputs.maxFillHours != null ? s.inputs.maxFillHours : 4;
 		Boolean members = s.inputs.members;
+		Double minProfit = s.inputs.minProfitPct;
 
 		log.debug("[07Flip] Plan: recycling closed slot {} ({}). gp budget {} -> {} (+{} profit)",
 			slotIdx, closed.name, closed.gpAllocated, newCapital, realisedProfit);
 
 		executor.execute(() -> apiClient.fetchOptimize(
-			newCapital, 1, risk, maxFillHours, members, excludes,
+			newCapital, 1, risk, maxFillHours, members, excludes, minProfit,
 			result -> SwingUtilities.invokeLater(() ->
 			{
 				if (result == null || result.allocations == null || result.allocations.isEmpty())
@@ -4335,6 +4418,205 @@ public class O7FlipPlugin extends Plugin
 			if (f != null) total += (long) f.qty * f.priceEach;
 		}
 		return total;
+	}
+
+	private static int sumQty(java.util.List<com.o7flip.model.SlotFill> fills)
+	{
+		if (fills == null) return 0;
+		int total = 0;
+		for (com.o7flip.model.SlotFill f : fills)
+		{
+			if (f != null) total += f.qty;
+		}
+		return total;
+	}
+
+	/**
+	 * "Stop buying" — caps a still-buying slot to whatever has been bought so
+	 * far, freeing the rest of its budget. Mirrors the website's
+	 * {@code markPartial}: the slot advances to FILLED/SELLING and sits there
+	 * (no redeploy) until its bought units sell, at which point
+	 * {@link #recycleClosedSlot} redeploys the realised proceeds plus the
+	 * unspent {@code reservedGp}. Backs the Stop-buying button on BUYING cards.
+	 */
+	public void markPartial(int slotIdx)
+	{
+		com.o7flip.model.OptimizerSession s = activeSession;
+		if (s == null || s.slots == null || slotIdx < 0 || slotIdx >= s.slots.size()) return;
+		com.o7flip.model.OptimizeResult.Allocation slot = s.slots.get(slotIdx);
+		if (slot == null) return;
+		int bought = sumQty(slot.buys);
+		if (bought <= 0 || slot.partial) return;   // nothing bought yet, or already partial
+
+		slot.reservedGp     = slot.gpAllocated;                 // remember original budget
+		slot.qty            = bought;                           // cap target → advances state
+		slot.gpAllocated    = sumGp(slot.buys);                 // actual spend
+		slot.expectedProfit = (long) bought * slot.profitPerUnit;
+		slot.partial        = true;
+		slot.state          = com.o7flip.model.SlotState.derive(slot.qty, slot.buys, slot.sells);
+
+		// Capping usually pushes the slot to FILLED — arm sell-side auto-fill so
+		// listing the bought units reads the recommended ask, same as a natural fill.
+		if (slot.state == com.o7flip.model.SlotState.FILLED && slot.sellPrice > 0)
+		{
+			armSellAutoFill(slot.itemId, slot.sellPrice, slot.name);
+		}
+
+		scheduleSessionPost();
+		final com.o7flip.model.OptimizerSession snap = s;
+		SwingUtilities.invokeLater(() -> panel.hydrateOptimizerSession(snap));
+	}
+
+	// -------------------------------------------------------------------------
+	// Completed-positions history (Task D) — shared web ↔ plugin store
+	// -------------------------------------------------------------------------
+
+	/**
+	 * Records a just-closed slot as a {@link com.o7flip.model.CompletedPosition}.
+	 * Profit is realised + after-tax ({@code sellGp − GE tax − buyGp}).
+	 * De-duped on item + last-sell time so a replay (e.g. a session merge that
+	 * re-derives CLOSED) doesn't double-count. The shared server store is
+	 * authoritative: we add optimistically for instant UI, then POST and adopt
+	 * the server's returned list (idempotent on item_id + closed_at).
+	 */
+	private void appendCompletedPosition(com.o7flip.model.OptimizeResult.Allocation closed)
+	{
+		if (closed == null) return;
+		int soldQty = sumQty(closed.sells);
+		if (soldQty <= 0) return;
+
+		com.o7flip.model.CompletedPosition cp = new com.o7flip.model.CompletedPosition();
+		cp.itemId   = closed.itemId;
+		cp.name     = closed.name;
+		cp.qty      = soldQty;
+		cp.buyGp    = sumGp(closed.buys);
+		cp.sellGp   = sumGp(closed.sells);
+		long tax    = com.o7flip.util.ProfitCalculator.geTaxFor(closed.itemId, cp.sellGp, soldQty);
+		cp.profit   = cp.sellGp - tax - cp.buyGp;
+		cp.partial  = closed.partial;
+		cp.closedAt = lastTradeIso(closed.sells);
+		cp.fillHours = computeFillHours(closed);
+
+		// Optimistic local insert (deduped) so the close shows immediately,
+		// then push to the shared store and reconcile with the authoritative
+		// list it returns.
+		boolean added;
+		synchronized (completedPositions)
+		{
+			String key = cp.dedupeKey();
+			added = true;
+			for (com.o7flip.model.CompletedPosition existing : completedPositions)
+			{
+				if (existing != null && existing.dedupeKey().equals(key)) { added = false; break; }
+			}
+			if (added) completedPositions.add(0, cp);   // newest-first
+		}
+		if (added && panel != null) SwingUtilities.invokeLater(panel::onCompletedPositionsChanged);
+
+		if (executor == null || executor.isShutdown()) return;
+		executor.execute(() -> apiClient.postCompletedPosition(cp, list ->
+		{
+			if (list != null) setCompletedPositions(list);
+		}));
+	}
+
+	/** Wall-clock span first-buy → last-sell in hours; null if &lt; 2 timestamped trades. */
+	private static Double computeFillHours(com.o7flip.model.OptimizeResult.Allocation a)
+	{
+		long min = Long.MAX_VALUE, max = Long.MIN_VALUE;
+		int seen = 0;
+		for (java.util.List<com.o7flip.model.SlotFill> list :
+			java.util.Arrays.asList(a.buys, a.sells))
+		{
+			if (list == null) continue;
+			for (com.o7flip.model.SlotFill f : list)
+			{
+				if (f == null || f.tradedAt == null) continue;
+				try
+				{
+					long t = java.time.Instant.parse(f.tradedAt).toEpochMilli();
+					min = Math.min(min, t);
+					max = Math.max(max, t);
+					seen++;
+				}
+				catch (Exception ignored) {}
+			}
+		}
+		if (seen < 2 || max <= min) return null;
+		return (max - min) / 3_600_000.0;
+	}
+
+	private static String lastTradeIso(java.util.List<com.o7flip.model.SlotFill> sells)
+	{
+		String last = null;
+		long lastMs = Long.MIN_VALUE;
+		if (sells != null)
+		{
+			for (com.o7flip.model.SlotFill f : sells)
+			{
+				if (f == null || f.tradedAt == null) continue;
+				try
+				{
+					long t = java.time.Instant.parse(f.tradedAt).toEpochMilli();
+					if (t > lastMs) { lastMs = t; last = f.tradedAt; }
+				}
+				catch (Exception ignored) {}
+			}
+		}
+		return last != null ? last : java.time.Instant.now().toString();
+	}
+
+	/** Snapshot of the completed-positions history for the panel (newest-first). */
+	public java.util.List<com.o7flip.model.CompletedPosition> getCompletedPositions()
+	{
+		synchronized (completedPositions)
+		{
+			return new java.util.ArrayList<>(completedPositions);
+		}
+	}
+
+	/** Total realised after-tax profit across all recorded positions. */
+	public long getCompletedProfitTotal()
+	{
+		long total = 0L;
+		synchronized (completedPositions)
+		{
+			for (com.o7flip.model.CompletedPosition cp : completedPositions)
+			{
+				if (cp != null) total += cp.profit;
+			}
+		}
+		return total;
+	}
+
+	/** Adopt an authoritative list from the shared store and notify the panel. */
+	private void setCompletedPositions(java.util.List<com.o7flip.model.CompletedPosition> list)
+	{
+		if (list == null) return;
+		synchronized (completedPositions)
+		{
+			completedPositions.clear();
+			for (com.o7flip.model.CompletedPosition cp : list)
+			{
+				if (cp != null) completedPositions.add(cp);
+			}
+		}
+		if (panel != null) SwingUtilities.invokeLater(panel::onCompletedPositionsChanged);
+	}
+
+	/**
+	 * Pulls the shared completed-positions list (web ↔ plugin synced store).
+	 * Called on startup, when the Plan tab opens, and when the history view is
+	 * shown — so closes made on the website surface in the plugin. Keeps the
+	 * current cache on any failure (the callback returns null then).
+	 */
+	public void refreshCompletedPositions()
+	{
+		if (executor == null || executor.isShutdown()) return;
+		executor.execute(() -> apiClient.fetchCompletedPositions(list ->
+		{
+			if (list != null) setCompletedPositions(list);
+		}));
 	}
 
 	void onScreenersTabSelected()

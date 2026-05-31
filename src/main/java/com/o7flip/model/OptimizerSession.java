@@ -66,5 +66,8 @@ public class OptimizerSession
 		public String        risk;
 		public List<Integer> excludeItemIds = new ArrayList<>();
 		public Boolean       members;
+		/** Optional per-slot wealth floor (0..10), echoed so the plugin can
+		 *  re-hydrate the Min profit input. Null = server default/auto. */
+		public Double        minProfitPct;
 	}
 }

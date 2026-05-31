@@ -39,11 +39,17 @@ import javax.swing.JPanel;
 import javax.swing.SwingUtilities;
 import javax.swing.border.EmptyBorder;
 import javax.swing.border.LineBorder;
+import javax.swing.JButton;
 import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Component;
 import java.awt.Cursor;
 import java.awt.Dimension;
+import java.awt.FlowLayout;
+import java.awt.Graphics;
+import java.awt.Graphics2D;
+import java.awt.RenderingHints;
+import java.awt.FontMetrics;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 
@@ -83,11 +89,17 @@ public class OptimizerAllocationCard extends JPanel
 	public OptimizerAllocationCard(OptimizeResult.Allocation a, ItemManager itemManager,
 		boolean odd, O7FlipPlugin plugin)
 	{
-		this(a, itemManager, odd, plugin, null);
+		this(a, itemManager, odd, plugin, null, -1);
 	}
 
 	public OptimizerAllocationCard(OptimizeResult.Allocation a, ItemManager itemManager,
 		boolean odd, O7FlipPlugin plugin, Runnable onSwapClicked)
+	{
+		this(a, itemManager, odd, plugin, onSwapClicked, -1);
+	}
+
+	public OptimizerAllocationCard(OptimizeResult.Allocation a, ItemManager itemManager,
+		boolean odd, O7FlipPlugin plugin, Runnable onSwapClicked, int slotIndex)
 	{
 		Color bg = odd ? ODD_BG : ColorScheme.DARK_GRAY_COLOR;
 
@@ -106,15 +118,27 @@ public class OptimizerAllocationCard extends JPanel
 
 		// State pill (Buying/Filled/Selling/Closed) replaces the old
 		// price-source + fill-confidence dots — clearer signal of progress,
-		// less visual noise.
+		// less visual noise. A "partial" badge sits alongside it when the slot
+		// was capped via "Stop buying".
 		JComponent stateChipForName = buildStateChip(a);
+
+		JPanel chipCluster = new JPanel(new FlowLayout(FlowLayout.RIGHT, 4, 0));
+		chipCluster.setBackground(bg);
+		if (a.partial)
+		{
+			chipCluster.add(buildPartialBadge());
+		}
+		if (stateChipForName != null)
+		{
+			chipCluster.add(stateChipForName);
+		}
 
 		JPanel nameRow = new JPanel(new BorderLayout(6, 0));
 		nameRow.setBackground(bg);
 		nameRow.add(nameLabel, BorderLayout.CENTER);
-		if (stateChipForName != null)
+		if (chipCluster.getComponentCount() > 0)
 		{
-			nameRow.add(stateChipForName, BorderLayout.EAST);
+			nameRow.add(chipCluster, BorderLayout.EAST);
 		}
 
 		// ── Row 2: two chips — Buy at / Sell at, exact gp ────────────────────
@@ -163,6 +187,13 @@ public class OptimizerAllocationCard extends JPanel
 			.append("  <font color='#555555'>·</font>  ")
 			.append("<font color='#00C27A'>+").append(FlipItemPanel.formatGpCompact(a.expectedProfit))
 			.append("</font><font color='#888888'> total profit</font>");
+		// A1 — per-slot share of bank, e.g. "+0.49% of bank".
+		if (a.profitPctOfBank != null)
+		{
+			line4.append("  <font color='#555555'>·</font>  ")
+				.append("<font color='#6FC3FF'>+").append(formatPct(a.profitPctOfBank))
+				.append("%</font><font color='#888888'> of bank</font>");
+		}
 		line4.append("</html>");
 		JLabel allocLine = new JLabel(line4.toString());
 		allocLine.setFont(Fonts.SM);
@@ -171,6 +202,40 @@ public class OptimizerAllocationCard extends JPanel
 		JPanel bottomRow = new JPanel(new BorderLayout(6, 0));
 		bottomRow.setBackground(bg);
 		bottomRow.add(allocLine, BorderLayout.CENTER);
+
+		// ── Meta line: bought/qty progress + honest server fill ETA ──────────
+		int boughtSoFar = sumQty(a.buys);
+		StringBuilder meta = new StringBuilder("<html><font color='#888888'>");
+		boolean hasMeta = false;
+		if (boughtSoFar > 0)
+		{
+			meta.append("Bought ").append(formatNumber(boughtSoFar))
+				.append(" / ").append(formatNumber(a.qty));
+			hasMeta = true;
+		}
+		if (a.estimatedFillHours != null && a.estimatedFillHours > 0)
+		{
+			if (hasMeta) meta.append("  ·  ");
+			// Verbatim server estimate — already buy-limit-paced server-side.
+			meta.append("~").append(formatHours(a.estimatedFillHours)).append(" to fill");
+			hasMeta = true;
+		}
+		meta.append("</font></html>");
+		JLabel metaLine = hasMeta ? new JLabel(meta.toString()) : null;
+		if (metaLine != null)
+		{
+			metaLine.setFont(Fonts.SM);
+			metaLine.setToolTipText("Estimated fill time accounts for the 4-hour buy-limit reset pacing.");
+		}
+
+		// ── C — "Stop buying" on still-buying, not-yet-partial slots ─────────
+		JButton stopBuyingBtn = null;
+		if (a.state == SlotState.BUYING && !a.partial && boughtSoFar > 0 && plugin != null && slotIndex >= 0)
+		{
+			stopBuyingBtn = buildStopBuyingButton(boughtSoFar);
+			final int idx = slotIndex;
+			stopBuyingBtn.addActionListener(e -> plugin.markPartial(idx));
+		}
 
 		// ── Stack rows ───────────────────────────────────────────────────────
 		JPanel textPanel = new JPanel();
@@ -189,21 +254,42 @@ public class OptimizerAllocationCard extends JPanel
 		textPanel.add(profitPerUnit);
 		textPanel.add(Box.createVerticalStrut(2));
 		textPanel.add(bottomRow);
+		if (metaLine != null)
+		{
+			metaLine.setAlignmentX(Component.LEFT_ALIGNMENT);
+			textPanel.add(Box.createVerticalStrut(2));
+			textPanel.add(metaLine);
+		}
+		if (stopBuyingBtn != null)
+		{
+			JPanel stopRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
+			stopRow.setBackground(bg);
+			stopRow.setAlignmentX(Component.LEFT_ALIGNMENT);
+			stopRow.add(stopBuyingBtn);
+			textPanel.add(Box.createVerticalStrut(4));
+			textPanel.add(stopRow);
+		}
 
 		add(iconLabel, BorderLayout.WEST);
 		add(textPanel, BorderLayout.CENTER);
 
-		// Hover-shown swap button — only when a swap handler was supplied.
-		final JLabel[] swapHolder = new JLabel[1];
-		if (onSwapClicked != null)
+		// Hover-shown swap button — only on PENDING slots (the auto-picked
+		// recommendation hasn't been acted on yet). Swapping a slot you're
+		// already buying/holding would silently drop a tracked position and its
+		// fill ledger from the plan, so it's intentionally unavailable there —
+		// matching the website's "reload" affordance, which is pending-only.
+		final boolean swappable = a.state == null || a.state == SlotState.PENDING;
+		if (onSwapClicked != null && swappable)
 		{
 			JLabel swap = new JLabel("⟳");
 			swap.setFont(swap.getFont().deriveFont(16f));
 			swap.setForeground(new Color(0x666666));
 			swap.setBorder(new EmptyBorder(0, 4, 0, 4));
 			swap.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
-			swap.setToolTipText("Swap this slot for a different item");
-			swap.setVisible(false);
+			swap.setToolTipText("Replace this auto-picked item with the next best one");
+			// Persistent (not hover-gated): a panel is far less hover-discoverable
+			// than a web card, so the swap affordance stays visible on pending slots.
+			swap.setVisible(true);
 			swap.addMouseListener(new MouseAdapter()
 			{
 				@Override
@@ -216,7 +302,6 @@ public class OptimizerAllocationCard extends JPanel
 					if (!SwingUtilities.isRightMouseButton(e)) onSwapClicked.run();
 				}
 			});
-			swapHolder[0] = swap;
 			add(swap, BorderLayout.EAST);
 		}
 
@@ -254,7 +339,6 @@ public class OptimizerAllocationCard extends JPanel
 				textPanel.setBackground(HOVER_BG);
 				nameRow.setBackground(HOVER_BG);
 				bottomRow.setBackground(HOVER_BG);
-				if (swapHolder[0] != null) swapHolder[0].setVisible(true);
 			}
 			@Override
 			public void mouseExited(MouseEvent e)
@@ -265,7 +349,6 @@ public class OptimizerAllocationCard extends JPanel
 				textPanel.setBackground(bg);
 				nameRow.setBackground(bg);
 				bottomRow.setBackground(bg);
-				if (swapHolder[0] != null) swapHolder[0].setVisible(false);
 			}
 			@Override
 			public void mousePressed(MouseEvent e)
@@ -322,6 +405,84 @@ public class OptimizerAllocationCard extends JPanel
 			if (f != null) total += f.qty;
 		}
 		return total;
+	}
+
+	/** Amber "partial" badge shown alongside the state chip on capped slots. */
+	private static JComponent buildPartialBadge()
+	{
+		JLabel chip = new JLabel("partial");
+		chip.setFont(Fonts.SM);
+		chip.setOpaque(true);
+		chip.setBackground(new Color(0x4A3B17));
+		chip.setForeground(new Color(0xFFC077));
+		chip.setBorder(BorderFactory.createCompoundBorder(
+			new LineBorder(new Color(0, 0, 0, 60), 1, true),
+			new EmptyBorder(2, 6, 2, 6)));
+		chip.setToolTipText("<html>You stopped buying this slot early.<br>"
+			+ "<font color='#888888'>It holds at Filled until the bought units sell, "
+			+ "then the freed capital redeploys.</font></html>");
+		return chip;
+	}
+
+	/** Pill button: "Stop buying · sell N & recycle". */
+	private static JButton buildStopBuyingButton(int bought)
+	{
+		JButton btn = new JButton("Stop buying · sell " + formatNumber(bought) + " & recycle")
+		{
+			@Override
+			protected void paintComponent(Graphics g)
+			{
+				Graphics2D g2 = (Graphics2D) g.create();
+				g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+				int arc = getHeight();
+				g2.setColor(getBackground());
+				g2.fillRoundRect(0, 0, getWidth(), getHeight(), arc, arc);
+				g2.setColor(getForeground());
+				g2.setFont(getFont());
+				FontMetrics fm = g2.getFontMetrics();
+				g2.drawString(getText(), (getWidth() - fm.stringWidth(getText())) / 2,
+					(getHeight() + fm.getAscent() - fm.getDescent()) / 2);
+				g2.dispose();
+			}
+
+			@Override
+			protected void paintBorder(Graphics g) { }
+
+			@Override
+			public boolean isOpaque() { return false; }
+		};
+		btn.setFont(Fonts.SM);
+		btn.setBackground(new Color(0x4A3B17));
+		btn.setForeground(new Color(0xFFC077));
+		btn.setFocusPainted(false);
+		btn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+		btn.setBorder(new EmptyBorder(3, 10, 3, 10));
+		btn.setToolTipText("<html>Cap this slot to the units you've already bought.<br>"
+			+ "<font color='#888888'>The rest of its budget is freed and redeploys once these sell.</font></html>");
+		return btn;
+	}
+
+	private static String formatPct(double v)
+	{
+		// Two decimals, trailing zeros trimmed: 0.49, 1.2, 3
+		String s = String.format("%.2f", v);
+		if (s.contains("."))
+		{
+			s = s.replaceAll("0+$", "").replaceAll("\\.$", "");
+		}
+		return s;
+	}
+
+	private static String formatHours(double h)
+	{
+		if (h < 1.0)
+		{
+			long mins = Math.round(h * 60);
+			return Math.max(1, mins) + "m";
+		}
+		String s = String.format("%.1f", h);
+		if (s.endsWith(".0")) s = s.substring(0, s.length() - 2);
+		return s + "h";
 	}
 
 	private static String priceSourceLabel(OptimizeResult.Allocation a)
