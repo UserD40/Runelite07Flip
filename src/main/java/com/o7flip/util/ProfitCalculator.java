@@ -35,10 +35,16 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Pure FIFO cost-basis calculator over a list of {@link TradeRecord}.
+ * Pure LIFO cost-basis calculator over a list of {@link TradeRecord}.
  * Returns completed flips (buy/sell pairs), remaining open positions,
  * and aggregate stats — used by the My Trades stats panel, the GP drop
  * overlay, and any future profit charting.
+ *
+ * LIFO (newest open buy consumed first) is used so a fresh, cheaper batch of
+ * an item is paired with the sells that flip it, instead of an older, pricier
+ * bag of the same item bleeding a phantom loss into today's sells. This MUST
+ * match the server's LIFO P&L recompute so the plugin and website agree (same
+ * tax rules, same rounding, same equal-timestamp tiebreak — newest first).
  *
  * Stateless and side-effect-free. Safe to call from any thread.
  */
@@ -149,8 +155,10 @@ public final class ProfitCalculator
 	 * Compute completed flips, open positions, and lifetime stats.
 	 *
 	 * Trades are sorted by timestamp ascending before processing — the input
-	 * list is not modified. FIFO matching: each sell consumes the oldest open
-	 * buy(s) of the same item.
+	 * list is not modified (a stable sort, so equal-timestamp trades keep their
+	 * existing list order). LIFO matching: each sell consumes the newest open
+	 * buy(s) of the same item; among equal-timestamp lots the most recently
+	 * added (latest in list order) is consumed first.
 	 *
 	 * Defensive: a sell with no prior buy emits a "phantom" completed flip
 	 * with {@code buyTotal=0}. This shouldn't happen in normal OSRS GE use
@@ -220,27 +228,37 @@ public final class ProfitCalculator
 		// sell.totalGp is the raw value from offer.getSpent(), which for sells
 		// is GROSS (pre-tax) — the listed price × qty. The CompletedFlip
 		// constructor splits it into net + tax via geTaxFor; this method just
-		// allocates gross proportionally when a sell is FIFO-split across
+		// allocates gross proportionally when a sell is LIFO-split across
 		// multiple buy lots.
+		//
+		// LIFO: a sell consumes the NEWEST open buy lot first (the tail of the
+		// deque, where buys are appended in timestamp order). This keeps a
+		// freshly-bought cheaper batch paired with the sells that flip it,
+		// rather than charging an older, more expensive bag of the same item
+		// against today's sells (which FIFO did, producing a phantom loss while
+		// the cheap stock was still being sold). Total realised profit is
+		// invariant to lot order; only per-flip / per-day attribution changes.
+		// MUST stay identical to the server's LIFO recompute, including the
+		// equal-timestamp tiebreak (newest-ingested lot consumed first).
 		int sellRemainingQty = sell.quantity;
 		long sellRemainingGross = sell.totalGp;
 
 		while (sellRemainingQty > 0 && queue != null && !queue.isEmpty())
 		{
-			OpenLot head = queue.peekFirst();
-			int consumed = Math.min(sellRemainingQty, head.qty);
+			OpenLot lot = queue.peekLast();
+			int consumed = Math.min(sellRemainingQty, lot.qty);
 
 			long consumedBuyGp;
-			if (consumed == head.qty)
+			if (consumed == lot.qty)
 			{
-				consumedBuyGp = head.gp;
-				queue.pollFirst();
+				consumedBuyGp = lot.gp;
+				queue.pollLast();
 			}
 			else
 			{
-				consumedBuyGp = Math.round((double) head.gp * consumed / head.qty);
-				head.qty -= consumed;
-				head.gp -= consumedBuyGp;
+				consumedBuyGp = Math.round((double) lot.gp * consumed / lot.qty);
+				lot.qty -= consumed;
+				lot.gp -= consumedBuyGp;
 			}
 
 			long consumedSellGross;
@@ -259,7 +277,7 @@ public final class ProfitCalculator
 				consumed,
 				consumedBuyGp,
 				consumedSellGross,
-				head.firstTimestamp,
+				lot.firstTimestamp,
 				sell.timestamp
 			));
 

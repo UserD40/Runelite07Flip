@@ -133,11 +133,11 @@ public class ProfitCalculatorTest
 	}
 
 	@Test
-	public void sellExceedsFirstBuy_consumesMultipleBuysFifo()
+	public void sellExceedsNewestBuy_consumesMultipleBuysLifo()
 	{
-		// Buy 50 @ 1000gp each = 50,000
+		// Buy 50 @ 1000gp each = 50,000 (older)
 		TradeRecord buy1 = trade(1, "Cannonball", true,  50,  50_000L, 1000L);
-		// Buy 50 @ 1200gp each = 60,000
+		// Buy 50 @ 1200gp each = 60,000 (newer)
 		TradeRecord buy2 = trade(1, "Cannonball", true,  50,  60_000L, 2000L);
 		// Sell 80 @ 1500gp each = 120,000
 		TradeRecord sell = trade(1, "Cannonball", false, 80, 120_000L, 3000L);
@@ -145,33 +145,32 @@ public class ProfitCalculatorTest
 		ProfitCalculator.Result r = ProfitCalculator.compute(Arrays.asList(buy1, buy2, sell));
 		assertEquals(2, r.completedFlips.size());
 
-		// First flip: 50 from buy1. Sell price 1500 gp/item → tax 30 gp × 50 = 1500.
-		// Net profit: 75_000 - 1500 - 50_000 = 23_500.
+		// LIFO: first flip consumes the NEWEST lot (buy2, 50 @ 1200). Gross slice
+		// round(120_000 * 50/80) = 75_000; tax 30 gp/item × 50 = 1_500.
+		// Net profit: 75_000 - 1_500 - 60_000 = 13_500.
 		ProfitCalculator.CompletedFlip f1 = r.completedFlips.get(0);
 		assertEquals(50, f1.quantity);
-		assertEquals(50_000L, f1.buyTotal);
-		// sellTotal is net of GE tax: 75_000 gross − 1_500 tax = 73_500.
+		assertEquals(60_000L, f1.buyTotal);
 		assertEquals(73_500L, f1.sellTotal);
 		assertEquals(1_500L,  f1.tax);
-		assertEquals(23_500L, f1.profit);
-		assertEquals(1000L, f1.firstBuyTimestamp);
+		assertEquals(13_500L, f1.profit);
+		assertEquals(2000L, f1.firstBuyTimestamp);
 
-		// Second flip: 30 from buy2 (remainder of sell). Tax 30 gp × 30 = 900.
-		// Net profit: 45_000 - 900 - 36_000 = 8_100.
+		// Second flip: 30 from buy1 (older). Remainder gross 45_000; tax 30 × 30 = 900.
+		// buyTotal round(50_000 * 30/50) = 30_000. Net profit: 45_000 - 900 - 30_000 = 14_100.
 		ProfitCalculator.CompletedFlip f2 = r.completedFlips.get(1);
 		assertEquals(30, f2.quantity);
-		assertEquals(36_000L, f2.buyTotal);
-		// sellTotal is net of GE tax: 45_000 gross − 900 tax = 44_100.
+		assertEquals(30_000L, f2.buyTotal);
 		assertEquals(44_100L, f2.sellTotal);
 		assertEquals(900L,    f2.tax);
-		assertEquals(8_100L,  f2.profit);
-		assertEquals(2000L, f2.firstBuyTimestamp);
+		assertEquals(14_100L, f2.profit);
+		assertEquals(1000L, f2.firstBuyTimestamp);
 
-		// Open position: 20 from buy2 remaining
+		// Open position: 20 from buy1 remaining (older lot stays open under LIFO).
 		ProfitCalculator.OpenPosition pos = r.openPositions.get(1);
 		assertNotNull(pos);
 		assertEquals(20, pos.remainingQty);
-		assertEquals(24_000L, pos.remainingCostBasis); // 60_000 - 36_000
+		assertEquals(20_000L, pos.remainingCostBasis); // 50_000 - 30_000
 	}
 
 	@Test
@@ -279,14 +278,15 @@ public class ProfitCalculatorTest
 	/**
 	 * Combined-stock flip with two cost bases. User had 1 leftover from a
 	 * 5-11 buy (cost basis 21.6M ea) plus a freshly-bought 8 at 21.38M ea,
-	 * then sold all 9 together at 22.14M ea. FIFO must split into TWO
-	 * matched flips — the old leftover priced against its 21.6M basis and
-	 * the new 8 priced against their 21.38M basis — instead of a blended
-	 * average. Each slice reports its own profit and contributes
-	 * separately to win/loss counts.
+	 * then sold all 9 together at 22.14M ea. LIFO must split into TWO matched
+	 * flips, consuming the NEWEST lot first — the freshly-bought 8 priced
+	 * against their 21.38M basis, then the 1 old leftover against its 21.6M
+	 * basis — instead of a blended average. The per-slice gross/tax values are
+	 * the same as a FIFO split (fully matched → order-independent total); only
+	 * the order of the two slices flips.
 	 */
 	@Test
-	public void mixedCostBasis_sellAcrossTwoBuyLots_splitsIntoTwoFlips()
+	public void mixedCostBasis_sellAcrossTwoBuyLots_splitsNewestFirstLifo()
 	{
 		TradeRecord oldBuy = trade(13239, "Primordial boots", true, 1, 21_602_010L, 1000L);
 		TradeRecord newBuy = trade(13239, "Primordial boots", true, 8, 171_006_976L, 2000L);
@@ -297,31 +297,56 @@ public class ProfitCalculatorTest
 		// Two matched flips — one per buy lot.
 		assertEquals(2, r.completedFlips.size());
 
-		// First slice: 1 item from the old lot.
+		// First slice (LIFO): 8 items from the NEW lot. Gross round(199_285_929
+		// * 8/9) = 177_143_048; tax 442_857 × 8 = 3_542_856; net 173_600_192.
 		ProfitCalculator.CompletedFlip f1 = r.completedFlips.get(0);
-		assertEquals(1, f1.quantity);
-		assertEquals(21_602_010L, f1.buyTotal);
-		// sellTotal slice net of GE tax: round(199_285_929 * 1/9) = 22_142_881
-		// gross, − 442_857 tax = 21_700_024.
-		assertEquals(21_700_024L, f1.sellTotal);
-		// 2% per-item tax on 22_142_881 → 442_857
-		assertEquals(442_857L, f1.tax);
-		assertEquals(22_142_881L - 442_857L - 21_602_010L, f1.profit);
+		assertEquals(8, f1.quantity);
+		assertEquals(171_006_976L, f1.buyTotal);
+		assertEquals(173_600_192L, f1.sellTotal);
+		assertEquals(442_857L * 8, f1.tax);
+		assertEquals(173_600_192L - 171_006_976L, f1.profit);
+		assertEquals(2000L, f1.firstBuyTimestamp);
 
-		// Second slice: 8 items from the new lot, taking the remainder.
+		// Second slice: 1 item from the old lot, taking the remainder gross
+		// 22_142_881; tax 442_857; net 21_700_024.
 		ProfitCalculator.CompletedFlip f2 = r.completedFlips.get(1);
-		assertEquals(8, f2.quantity);
-		assertEquals(171_006_976L, f2.buyTotal);
-		// sellTotal net of GE tax: (199_285_929 − 22_142_881) gross 177_143_048
-		// − (442_857 × 8) tax 3_542_856 = 173_600_192.
-		assertEquals(199_285_929L - 22_142_881L - 442_857L * 8, f2.sellTotal); // 173_600_192
-		assertEquals(442_857L * 8, f2.tax);
-		// profit = net sellTotal − buyTotal (tax already removed from sellTotal).
-		assertEquals(f2.sellTotal - f2.buyTotal, f2.profit);
+		assertEquals(1, f2.quantity);
+		assertEquals(21_602_010L, f2.buyTotal);
+		assertEquals(21_700_024L, f2.sellTotal);
+		assertEquals(442_857L, f2.tax);
+		assertEquals(21_700_024L - 21_602_010L, f2.profit);
+		assertEquals(1000L, f2.firstBuyTimestamp);
 
-		// Combined profit + matched count exposed via stats.
+		// Combined profit + matched count exposed via stats (order-independent
+		// total — same as a FIFO split would give for this fully-matched sell).
 		assertEquals(2, r.stats.completedFlipCount);
 		assertEquals(f1.profit + f2.profit, r.stats.totalProfit);
+	}
+
+	/**
+	 * Equal-timestamp tiebreak: two buys of the same item share a timestamp.
+	 * LIFO consumes the one that appears LATER in ingest/list order first
+	 * (the stable sort preserves list order for equal timestamps), mirroring
+	 * the server's "highest ingest id first" tiebreak. The older-in-list lot
+	 * stays open.
+	 */
+	@Test
+	public void equalTimestamp_consumesLaterListEntryFirst_lifo()
+	{
+		TradeRecord buyA = trade(1, "X", true, 10, 10_000L, 1000L); // 1000/item, earlier in list
+		TradeRecord buyB = trade(1, "X", true, 10, 20_000L, 1000L); // 2000/item, same ts, later in list
+		TradeRecord sell = trade(1, "X", false, 10, 30_000L, 2000L);
+
+		ProfitCalculator.Result r = ProfitCalculator.compute(Arrays.asList(buyA, buyB, sell));
+		assertEquals(1, r.completedFlips.size());
+		ProfitCalculator.CompletedFlip f = r.completedFlips.get(0);
+		assertEquals(10, f.quantity);
+		assertEquals(20_000L, f.buyTotal); // buyB (later in list) consumed first
+
+		ProfitCalculator.OpenPosition pos = r.openPositions.get(1);
+		assertNotNull(pos);
+		assertEquals(10, pos.remainingQty);
+		assertEquals(10_000L, pos.remainingCostBasis); // buyA stays open
 	}
 
 	@Test
