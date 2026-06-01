@@ -152,16 +152,29 @@ public class GePriceOverlay extends Overlay
 			}
 		}
 
-		// Frozen sell takes precedence over live rec_sell — but only for
-		// premium users. The freeze is a paid feature (it pins 07Flip's
-		// rec_sell at buy time so projected margin survives market drift),
-		// so free users continue to see the live market sell price.
+		// Frozen sell pins 07Flip's rec_sell at buy time so the projected margin
+		// survives a market DROP — but it acts only as a FLOOR. If the live
+		// market has risen above the lock, show the higher live price instead so
+		// the user doesn't leave gp on the table (matches the sell-box auto-fill,
+		// which uses max(frozen, live)). Premium-only: the freeze is a paid
+		// feature, so free users always see the live market sell price.
 		boolean isPremium = plugin.panel != null && plugin.panel.isPremium();
 		Long frozenSell = isPremium ? plugin.getFrozenSell(currentItemId) : null;
-		boolean sellIsFrozen = frozenSell != null;
-		if (sellIsFrozen)
+		Long liveSell   = sellPrice;
+		boolean sellIsFrozen = false;
+		if (frozenSell != null)
 		{
-			sellPrice = frozenSell;
+			if (liveSell != null && liveSell > frozenSell)
+			{
+				// Market rose above the lock — take the higher live price and
+				// drop the "locked" framing (we're intentionally above the lock).
+				sellPrice = liveSell;
+			}
+			else
+			{
+				sellPrice = frozenSell;
+				sellIsFrozen = true;
+			}
 		}
 
 		if (buyPrice == null && sellPrice == null)
@@ -219,22 +232,26 @@ public class GePriceOverlay extends Overlay
 				.build());
 
 			// When the sell price is the locked-from-buy price, surface the
-			// reasoning + the projected margin against the user's actual cost
-			// basis. Helpful when the user comes back to the GE hours / days
-			// later and needs to remember why this sell number is being
-			// recommended (and what they make per item if they accept it).
+			// reasoning + the per-item margin. The margin reconciles with the
+			// two rows shown above it: (locked sell) − (recommended buy) − GE
+			// tax, so the number is self-consistent with what's on screen rather
+			// than diverging against a blended open-position cost basis.
 			if (sellIsFrozen)
 			{
-				Long unitCostBasis = openPositionUnitCost(currentItemId);
 				panel.getChildren().add(LineComponent.builder()
 					.left("Locked at your buy")
 					.leftColor(INFO_GRAY)
 					.right("")
 					.build());
 
-				if (unitCostBasis != null && unitCostBasis > 0)
+				if (buyPrice != null && buyPrice > 0)
 				{
-					long marginPerItem = sellPrice - unitCostBasis;
+					// After-tax margin: subtract the GE sell tax (2%, capped at
+					// 5M/item, exempt under 100 gp) so the figure reflects what
+					// actually lands in the coffer, not the gross spread. Without
+					// this the overlay overstated the per-item profit by the tax.
+					long sellTax = com.o7flip.util.ProfitCalculator.geTaxFor(currentItemId, sellPrice, 1);
+					long marginPerItem = sellPrice - buyPrice - sellTax;
 					String sign = marginPerItem >= 0 ? "+" : "";
 					panel.getChildren().add(LineComponent.builder()
 						.left("Margin / item")
@@ -357,26 +374,6 @@ public class GePriceOverlay extends Overlay
 			cachedChartDataHash = dataHash;
 		}
 		panel.getChildren().add(new ImageComponent(cachedChartImage));
-	}
-
-	/**
-	 * FIFO-derived unit cost basis for the user's still-open position on
-	 * {@code itemId}. Used to show "Margin / item" in the locked-sell view
-	 * so the user can see what each unit will clear if they accept the
-	 * recommended price. Returns null when there's no open position
-	 * (defensive — frozen prices are usually only set while a buy is open,
-	 * but the freeze could lag the position close by a tick or two).
-	 */
-	private Long openPositionUnitCost(int itemId)
-	{
-		com.o7flip.util.ProfitCalculator.Result r =
-			com.o7flip.util.ProfitCalculator.compute(plugin.tradeHistory);
-		com.o7flip.util.ProfitCalculator.OpenPosition pos = r.openPositions.get(itemId);
-		if (pos == null || pos.remainingQty <= 0)
-		{
-			return null;
-		}
-		return pos.remainingCostBasis / pos.remainingQty;
 	}
 
 	/**
