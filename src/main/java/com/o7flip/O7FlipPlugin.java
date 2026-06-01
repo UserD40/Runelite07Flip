@@ -719,6 +719,12 @@ public class O7FlipPlugin extends Plugin
 		// the website (or from a previous plugin session) so the user sees
 		// their plan immediately, without having to click Build again.
 		executor.execute(this::doHydrateOptimizerSession);
+		// Keep that hydration alive in the background regardless of tab, so a
+		// plan built on the website mid-session is picked up and in-client fills
+		// start syncing to it without the user having to open the Plan tab.
+		sessionBackgroundPollTask = executor.scheduleAtFixedRate(
+			this::doBackgroundPollActiveSession,
+			SESSION_BACKGROUND_POLL_INTERVAL_S, SESSION_BACKGROUND_POLL_INTERVAL_S, TimeUnit.SECONDS);
 		// Pull the shared completed-positions history (web ↔ plugin synced store).
 		executor.execute(this::refreshCompletedPositions);
 		refreshTask = executor.scheduleAtFixedRate(
@@ -740,6 +746,10 @@ public class O7FlipPlugin extends Plugin
 		if (authRefreshTask != null)
 		{
 			authRefreshTask.cancel(true);
+		}
+		if (sessionBackgroundPollTask != null)
+		{
+			sessionBackgroundPollTask.cancel(true);
 		}
 		if (executor != null)
 		{
@@ -4098,6 +4108,14 @@ public class O7FlipPlugin extends Plugin
 	private volatile com.o7flip.model.OptimizerSession activeSession;
 	private ScheduledFuture<?> pendingSessionPost;
 	private ScheduledFuture<?> sessionPollTask;
+	/** Always-on, low-frequency GET of the synced session, independent of which
+	 *  tab is open. The operator's primary flow is building the plan on the
+	 *  WEBSITE; without this, activeSession stays null until the Plan tab is
+	 *  first opened, so in-client fills are never attributed or POSTed back —
+	 *  the website then shows 0/N forever. The merge it runs is local-
+	 *  authoritative ({@link #mergeRemoteFills}), so it never clobbers in-flight
+	 *  local fills. Lifecycle-bound: started in startUp, cancelled in shutDown. */
+	private ScheduledFuture<?> sessionBackgroundPollTask;
 	/** In-memory cache of the shared completed-positions history (Task D),
 	 *  hydrated from GET /optimize/completed and kept authoritative by POST
 	 *  responses. Newest-first. Guard all access on the list's monitor. */
@@ -4106,6 +4124,10 @@ public class O7FlipPlugin extends Plugin
 	/** Poll cadence WHILE the Plan tab is open. Server cap is 60/min/IP so a
 	 *  15s loop is comfortably under it (4 GET/min) while still feeling live. */
 	private static final long SESSION_POLL_INTERVAL_S  = 15L;
+	/** Background poll cadence regardless of tab — ~1.3 GET/min/user, trivial
+	 *  against the 60/min cap. Just enough to discover a web-built plan and keep
+	 *  attributing in-client fills to it. */
+	private static final long SESSION_BACKGROUND_POLL_INTERVAL_S = 45L;
 
 	/** Startup GET — pulls whatever was last saved on either surface. */
 	private void doHydrateOptimizerSession()
@@ -4151,6 +4173,22 @@ public class O7FlipPlugin extends Plugin
 		if (sessionPollTask != null) sessionPollTask.cancel(false);
 	}
 
+	/**
+	 * Background tick — defers to the Plan-tab fast poll when it's running (that
+	 * already covers updates at 15s while the tab is open) and otherwise runs
+	 * the same merge-safe GET so a web-built plan is discovered and in-client
+	 * fills keep attributing even with the tab closed.
+	 */
+	private void doBackgroundPollActiveSession()
+	{
+		ScheduledFuture<?> fast = sessionPollTask;
+		if (fast != null && !fast.isCancelled() && !fast.isDone())
+		{
+			return;
+		}
+		doPollActiveSession();
+	}
+
 	private void doPollActiveSession()
 	{
 		apiClient.fetchActiveSession(remote ->
@@ -4192,8 +4230,15 @@ public class O7FlipPlugin extends Plugin
 			if (l == null) continue;
 			com.o7flip.model.OptimizeResult.Allocation r = byId.get(l.itemId);
 			if (r == null) continue;
-			if (mergeFillList(l.buys, r.buys))  anyChange = true;
-			if (mergeFillList(l.sells, r.sells)) anyChange = true;
+			// The plugin owns the fill ledger for slots it is trading (§5/§5a):
+			// buys/sells are single consolidated entries it overwrites in place.
+			// Only adopt remote fills when WE have none yet — e.g. a plan built
+			// on the website that the plugin is hydrating for the first time.
+			// Never union remote into a leg we already track, or a stale poll
+			// snapshot of our own consolidated entry (different qty/traded_at as
+			// it fills) would be re-added as a duplicate and double-count.
+			if (l.buys.isEmpty()  && mergeFillList(l.buys,  r.buys))  anyChange = true;
+			if (l.sells.isEmpty() && mergeFillList(l.sells, r.sells)) anyChange = true;
 			com.o7flip.model.SlotState derived =
 				com.o7flip.model.SlotState.derive(l.qty, l.buys, l.sells);
 			if (l.state != derived) { l.state = derived; anyChange = true; }
@@ -4305,11 +4350,19 @@ public class O7FlipPlugin extends Plugin
 		if (slot == null) return;
 		com.o7flip.model.SlotState prevState = slot.state;
 
-		com.o7flip.model.SlotFill fill = new com.o7flip.model.SlotFill();
-		fill.qty       = qty;
-		fill.priceEach = pricePer;
-		fill.tradedAt  = java.time.Instant.ofEpochMilli(timestampMs).toString();
-		if (isBuy) slot.buys.add(fill); else slot.sells.add(fill);
+		// §5a — sync LIVE (in-progress) fill progress, not just on completion.
+		// Fold each fill delta into ONE consolidated synthetic entry per leg
+		// (running qty + weighted-average price) instead of appending an entry
+		// per tick. The website renders bought/qty straight from sum(buys.qty),
+		// so a partially-filled offer (e.g. 906/3760) shows live within one poll
+		// — and because the terminal BOUGHT/SOLD delta just folds into the same
+		// entry, the count never double-jumps on completion. Consolidating also
+		// bounds the payload: a large multi-tranche fill stays a single entry,
+		// not dozens, well under the ~32KB synced-row cap. The buy entry keeps
+		// the earliest traded_at (flip start) while the sell entry advances to
+		// the latest (honest closed_at / fill_hours).
+		String tradedAt = java.time.Instant.ofEpochMilli(timestampMs).toString();
+		foldFill(isBuy ? slot.buys : slot.sells, qty, pricePer, tradedAt, !isBuy);
 		slot.state = com.o7flip.model.SlotState.derive(slot.qty, slot.buys, slot.sells);
 		scheduleSessionPost();
 
@@ -4407,6 +4460,50 @@ public class O7FlipPlugin extends Plugin
 			}),
 			upgradeUrl -> SwingUtilities.invokeLater(() -> panel.onOptimizePremiumRequired(upgradeUrl)),
 			reason -> log.debug("[07Flip] Plan: recycle failed: {}", reason)));
+	}
+
+	/**
+	 * Folds one fill delta into a leg's single consolidated {@link com.o7flip.model.SlotFill}
+	 * (§5a). The leg holds at most one entry whose {@code qty} is the running
+	 * total transacted on this slot and whose {@code priceEach} is the
+	 * quantity-weighted average. Any extra entries already present (e.g. adopted
+	 * from a remote poll before the plugin started trading the slot) are
+	 * collapsed into the first so the invariant "one entry per leg" holds.
+	 *
+	 * <p>Fills arrive in chronological order, so {@code preferLatestTime} simply
+	 * overwrites {@code traded_at} with the incoming time (used for the sell leg
+	 * → honest last-sell / closed_at) while {@code false} keeps the earliest
+	 * (used for the buy leg → flip start, so fill_hours spans the whole flip).
+	 */
+	private static void foldFill(java.util.List<com.o7flip.model.SlotFill> leg,
+		int qty, long pricePer, String tradedAt, boolean preferLatestTime)
+	{
+		if (leg == null || qty <= 0) return;
+		com.o7flip.model.SlotFill entry;
+		if (leg.isEmpty())
+		{
+			entry = new com.o7flip.model.SlotFill();
+			entry.qty       = 0;
+			entry.priceEach = pricePer;
+			entry.tradedAt  = tradedAt;
+			leg.add(entry);
+		}
+		else
+		{
+			entry = leg.get(0);
+			while (leg.size() > 1)
+			{
+				com.o7flip.model.SlotFill extra = leg.remove(1);
+				if (extra == null) continue;
+				long gp = (long) entry.qty * entry.priceEach + (long) extra.qty * extra.priceEach;
+				entry.qty += extra.qty;
+				if (entry.qty > 0) entry.priceEach = gp / entry.qty;
+			}
+		}
+		long newGp = (long) entry.qty * entry.priceEach + (long) qty * pricePer;
+		entry.qty += qty;
+		if (entry.qty > 0) entry.priceEach = newGp / entry.qty;
+		if (entry.tradedAt == null || preferLatestTime) entry.tradedAt = tradedAt;
 	}
 
 	private static long sumGp(java.util.List<com.o7flip.model.SlotFill> fills)
