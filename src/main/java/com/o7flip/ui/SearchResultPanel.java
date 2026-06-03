@@ -52,8 +52,8 @@ import java.awt.event.MouseEvent;
  * tooltip prevents the column from looking broken.
  *
  * Right-click anywhere on the row queues a Buy on the GE — same single-
- * click action as FlipItemPanel, no popup menu. The queued price matches
- * FlipItemPanel's free-user behaviour (the instant-fill sell-side price).
+ * click action as FlipItemPanel, no popup menu. The queued price is the
+ * market buy-side (low) price, i.e. what a flipper sets their buy offer to.
  */
 public class SearchResultPanel extends JPanel
 {
@@ -130,11 +130,11 @@ public class SearchResultPanel extends JPanel
 			sellLabel.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
 		}
 
-		// Match FlipItemPanel's free-user buy target: queue at the sell-side
-		// (instant-fill ask). For premium users with a rec_buy_price we'd use
-		// that instead, but the search payload doesn't carry rec prices —
-		// search is the "look anything up" surface, not the curated feed.
-		final long buyTarget = hasPrice ? item.sellPrice : 0L;
+		// Queue the Buy at the low buy-side price (market bid) — what a flipper
+		// actually wants their buy offer set to. The search payload doesn't
+		// carry rec prices (search is the "look anything up" surface, not the
+		// curated feed), so we use the market buy price directly.
+		final long buyTarget = hasPrice ? item.buyPrice : 0L;
 
 		// ── PROFIT + ROI ──────────────────────────────────────────────────────
 		JLabel profitLabel = new JLabel("");

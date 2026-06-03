@@ -450,6 +450,21 @@ public interface O7FlipConfig extends Config
 	// ── Grand Exchange integration ─────────────────────────────────────────
 
 	@ConfigItem(
+		keyName = "autoFillGePrice",
+		name = "Auto-fill GE price",
+		description = "<html>Automatically type the recommended price into the GE custom price input "
+			+ "when you set up a buy or sell, and when you pick a price from the overlay.<br>"
+			+ "Turn this off to enter every price yourself — the plugin will not write to the GE "
+			+ "price field. The overlay still shows the recommended buy/sell prices for reference.</html>",
+		section = geSection,
+		position = 0
+	)
+	default boolean autoFillGePrice()
+	{
+		return true;
+	}
+
+	@ConfigItem(
 		keyName = "showGeOfferOverlay",
 		name = "Show price overlay on GE setup",
 		description = "Show a movable 07Flip overlay on the GE setup screen with recommended buy/sell prices for the current item. Right-click the overlay and pick a price to auto-fill the custom price input.",

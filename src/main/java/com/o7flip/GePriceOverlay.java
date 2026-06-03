@@ -182,7 +182,11 @@ public class GePriceOverlay extends Overlay
 			return null;
 		}
 
-		// Refresh menu entries — at most one Buy and one Sell entry.
+		// Refresh menu entries — at most one Buy and one Sell entry. When auto-
+		// fill is disabled the overlay stays purely informational: we still show
+		// the Buy/Sell price rows but add no "Set price" menu options, since the
+		// fill they'd trigger is a no-op (autoFillPriceInput early-returns).
+		boolean allowFill = config.autoFillGePrice();
 		menuPrices.clear();
 		getMenuEntries().clear();
 
@@ -204,9 +208,12 @@ public class GePriceOverlay extends Overlay
 
 		if (buyPrice != null)
 		{
-			String optionText = "Set buy price (" + formatGp(buyPrice) + " gp)";
-			getMenuEntries().add(new OverlayMenuEntry(MenuAction.RUNELITE_OVERLAY, optionText, TARGET));
-			menuPrices.put(optionText, buyPrice);
+			if (allowFill)
+			{
+				String optionText = "Set buy price (" + formatGp(buyPrice) + " gp)";
+				getMenuEntries().add(new OverlayMenuEntry(MenuAction.RUNELITE_OVERLAY, optionText, TARGET));
+				menuPrices.put(optionText, buyPrice);
+			}
 
 			panel.getChildren().add(LineComponent.builder()
 				.left("Buy")
@@ -219,10 +226,13 @@ public class GePriceOverlay extends Overlay
 		if (sellPrice != null)
 		{
 			String label = sellIsFrozen ? "Sell (locked)" : "Sell";
-			String optionText = (sellIsFrozen ? "Set locked sell price (" : "Set sell price (")
-				+ formatGp(sellPrice) + " gp)";
-			getMenuEntries().add(new OverlayMenuEntry(MenuAction.RUNELITE_OVERLAY, optionText, TARGET));
-			menuPrices.put(optionText, sellPrice);
+			if (allowFill)
+			{
+				String optionText = (sellIsFrozen ? "Set locked sell price (" : "Set sell price (")
+					+ formatGp(sellPrice) + " gp)";
+				getMenuEntries().add(new OverlayMenuEntry(MenuAction.RUNELITE_OVERLAY, optionText, TARGET));
+				menuPrices.put(optionText, sellPrice);
+			}
 
 			panel.getChildren().add(LineComponent.builder()
 				.left(label)

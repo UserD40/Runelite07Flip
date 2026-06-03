@@ -72,7 +72,10 @@ public class O7FlipOverlay extends Overlay
 
 		// Pass 2 — yellow highlight on the "Enter price" / custom-price button
 		// when an auto-fill is armed (covers both buy and sell setup screens).
-		if (plugin.pendingGeInputPrice != -1 && plugin.getConfig().showGePriceHint())
+		// Suppressed when auto-fill is disabled: the price won't be typed, so
+		// pointing the user at the button as if it will is misleading.
+		if (plugin.pendingGeInputPrice != -1 && plugin.getConfig().showGePriceHint()
+			&& plugin.getConfig().autoFillGePrice())
 		{
 			renderEnterPriceHighlight(graphics);
 		}

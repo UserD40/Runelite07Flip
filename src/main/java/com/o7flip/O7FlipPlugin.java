@@ -1147,6 +1147,14 @@ public class O7FlipPlugin extends Plugin
 
 	private void autoFillPriceInput(long price)
 	{
+		// User opt-out: when auto-fill is disabled the plugin never writes to the
+		// GE custom price input — neither the queued buy/sell auto-fill nor the
+		// overlay "Set price" menu. The overlay still shows recommended prices for
+		// reference; the user types them in themselves.
+		if (!config.autoFillGePrice())
+		{
+			return;
+		}
 		Widget input = client.getWidget(ComponentID.CHATBOX_FULL_INPUT);
 		if (input == null)
 		{

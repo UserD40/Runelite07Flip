@@ -38,6 +38,7 @@ import javax.swing.JButton;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.SwingConstants;
+import javax.swing.SwingUtilities;
 import javax.swing.border.EmptyBorder;
 import java.awt.BorderLayout;
 import java.awt.Color;
@@ -301,7 +302,9 @@ public class InsightsPanel extends JPanel
 	{
 		removeAll();
 		inEmptyState = false;
-		add(buildHeader(itemId, fallbackName != null ? fallbackName : "Item " + itemId, false, 0, null, null));
+		// No price data during loading — pass 0 so the header skips the
+		// right-click "queue GE buy" wire-up until the real insights land.
+		add(buildHeader(itemId, fallbackName != null ? fallbackName : "Item " + itemId, false, 0, null, null, 0L));
 		add(Box.createVerticalStrut(8));
 		add(centeredLabel("Loading…", ColorScheme.LIGHT_GRAY_COLOR, Fonts.SM));
 		revalidate();
@@ -326,7 +329,16 @@ public class InsightsPanel extends JPanel
 		// Always-visible sections (header → live prices → chart → volume → alerts).
 		// Free users see only these plus a single upsell card; premium users see
 		// the locked sections inline before Volume.
-		add(buildHeader(ins.itemId, ins.name, ins.members, ins.buyLimit, ins.highAlch, ins.lowAlch));
+		// Buy target for the header's right-click "queue GE buy": prefer the
+		// premium recommended-buy when present, otherwise the low market buy —
+		// matching FlipItemPanel's curated-feed behaviour. Never the sell side.
+		long headerBuyTarget = 0L;
+		if (ins.current != null)
+		{
+			headerBuyTarget = (ins.current.recBuy != null && ins.current.recBuy > 0)
+				? ins.current.recBuy : ins.current.buyPrice;
+		}
+		add(buildHeader(ins.itemId, ins.name, ins.members, ins.buyLimit, ins.highAlch, ins.lowAlch, headerBuyTarget));
 		add(Box.createVerticalStrut(8));
 
 		add(buildLivePrices(ins));
@@ -387,7 +399,7 @@ public class InsightsPanel extends JPanel
 
 	// ── Sections ────────────────────────────────────────────────────────────
 
-	private JPanel buildHeader(int itemId, String name, boolean members, int buyLimit, Integer highAlch, Integer lowAlch)
+	private JPanel buildHeader(int itemId, String name, boolean members, int buyLimit, Integer highAlch, Integer lowAlch, long buyTarget)
 	{
 		// Remember what we're rendering so refreshFavouriteState() can find
 		// the right item when the plugin pings us.
@@ -445,6 +457,32 @@ public class InsightsPanel extends JPanel
 		panel.add(icon,      BorderLayout.WEST);
 		panel.add(text,      BorderLayout.CENTER);
 		panel.add(starLabel, BorderLayout.EAST);
+
+		// Right-click the header → queue a GE buy at the low buy-side price,
+		// same gesture as the Flips/search rows. Swing doesn't bubble mouse
+		// events, so the handler is attached to the header panel and each of
+		// its non-star children (the star keeps its own click-to-favourite).
+		if (plugin != null && buyTarget > 0)
+		{
+			MouseAdapter rightClickQueueBuy = new MouseAdapter()
+			{
+				@Override
+				public void mousePressed(MouseEvent e)
+				{
+					if (SwingUtilities.isRightMouseButton(e) && !e.isShiftDown())
+					{
+						plugin.queueGeBuy(itemId, buyTarget, name);
+						e.consume();
+					}
+				}
+			};
+			panel.addMouseListener(rightClickQueueBuy);
+			icon.addMouseListener(rightClickQueueBuy);
+			text.addMouseListener(rightClickQueueBuy);
+			nameLabel.addMouseListener(rightClickQueueBuy);
+			subLabel.addMouseListener(rightClickQueueBuy);
+		}
+
 		return panel;
 	}
 
