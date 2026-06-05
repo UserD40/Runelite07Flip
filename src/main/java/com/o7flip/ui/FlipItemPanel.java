@@ -129,11 +129,15 @@ public class FlipItemPanel extends JPanel
 		// is now exclusively the row-level menu, single source of truth.
 		//
 		// Premium users get the 07Flip rec_buy price (the patient-flipper
-		// target). Free users get the market sell price (the instant-fill
+		// target). Free users get the live market buy price (the low/bid
 		// target) — same queue UX, just at the live market price instead of
 		// the gated rec target.
+		// Rec prices are premium-gated, so free users fall back to the live
+		// market BUY price (the low/bid) — what a flipper sets their buy offer
+		// to. Previously this fell back to the sell-side price, which wrongly
+		// queued the buy at the high/ask.
 		final long buyTarget = (showRecPrices && flip.recBuyPrice != null && flip.recBuyPrice > 0)
-			? flip.recBuyPrice : flip.sellPrice;
+			? flip.recBuyPrice : flip.buyPrice;
 
 		// ── SELL (green) ──────────────────────────────────────────────────────
 		String sellHtml = "<html><b>Sell:</b>  " + formatGpCompact(flip.sellPrice);

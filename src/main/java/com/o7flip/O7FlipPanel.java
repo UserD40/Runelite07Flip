@@ -114,6 +114,12 @@ public class O7FlipPanel extends PluginPanel
 	private static final String DISCORD_URL  = "https://discord.gg/xQaYM9TaMr";
 	private static final String RUNELITE_URL  = "https://07flip.com/runelite";
 	private static final String SUBSCRIBE_URL = "https://07flip.com/subscribe";
+	/** Account page that shows the user's API key — the link the no-key banner pushes. */
+	private static final String ACCOUNT_URL   = "https://07flip.com/account";
+
+	// ── Upsell-card palette (mirrors InsightsPanel's "Unlock the full picture") ──
+	private static final Color CARD_GOLD    = new Color(0xC4A052);
+	private static final Color CARD_GOLD_BG = new Color(0x2A2418);
 	private static final Color  ORANGE       = new Color(0xFF981F);
 	private static final Color  GREEN        = new Color(0x00C27A);
 	private static final int    PAGE_SIZE    = 10;
@@ -278,7 +284,6 @@ public class O7FlipPanel extends PluginPanel
 	public boolean isSignedIn() { return isSignedIn; }
 	public boolean isPremium()  { return isPremium;  }
 	private boolean authChecked = false;
-	private boolean noKeyBannerExpanded = true;
 
 	// -------------------------------------------------------------------------
 	// Stored data
@@ -569,32 +574,18 @@ public class O7FlipPanel extends PluginPanel
 		if (isSignedIn)
 		{
 			// ── Free account — upgrade prompt ─────────────────────────────────
-			JPanel inner = new JPanel();
-			inner.setLayout(new BoxLayout(inner, BoxLayout.Y_AXIS));
-			inner.setOpaque(false);
-
-			authBanner.setBackground(new Color(0x0D1A0D));
-			authBanner.setBorder(BorderFactory.createCompoundBorder(
-				new MatteBorder(1, 0, 1, 0, new Color(0x1E4A1E)),
-				new EmptyBorder(9, 10, 9, 10)));
-
-			bannerRow(inner, "\u2713 Free Account Connected",                        Fonts.BOLD, GREEN,               0);
-			bannerRow(inner, "Unlock with Premium:",                                 Fonts.SM,   new Color(0x777777), 5);
-			bannerRow(inner, "\u2022  Merch Alerts & live prices",                   Fonts.SM,   new Color(0xAAAAAA), 2);
-			bannerRow(inner, "\u2022  High Volume, Price Dip & Stable flip presets", Fonts.SM,   new Color(0xAAAAAA), 1);
-			bannerRow(inner, "\u2022  Full pagination & Moon / Barrows calculators", Fonts.SM,   new Color(0xAAAAAA), 1);
-
-			inner.add(Box.createRigidArea(new Dimension(0, 9)));
-
-			JButton upgradeBtn = pillButton("Upgrade to Premium");
-			upgradeBtn.setBackground(ORANGE);
-			upgradeBtn.setForeground(Color.BLACK);
-			upgradeBtn.setAlignmentX(Component.LEFT_ALIGNMENT);
-			upgradeBtn.setMaximumSize(new Dimension(Integer.MAX_VALUE, 24));
-			upgradeBtn.addActionListener(e -> openUrl(SUBSCRIBE_URL));
-			inner.add(upgradeBtn);
-
-			authBanner.add(inner, BorderLayout.CENTER);
+			// Same visual language as the Insights tab's "Unlock the full
+			// picture" box: gold-bordered card, one short wrapped pitch, one
+			// CTA. Replaces the old bullet list, which truncated at panel
+			// width and read as spam.
+			authBanner.setBackground(ColorScheme.DARK_GRAY_COLOR);
+			authBanner.setBorder(new EmptyBorder(6, 8, 6, 8));
+			authBanner.add(buildGoldCard(
+				"Unlock everything with Premium",
+				"Your free account is connected. Upgrade to get 07Flip's "
+					+ "<b>recommended buy/sell prices</b> and access to "
+					+ "<b>every section</b> of the panel.",
+				"Get Premium", SUBSCRIBE_URL), BorderLayout.CENTER);
 			authBanner.setVisible(true);
 			authBanner.revalidate();
 			authBanner.repaint();
@@ -654,114 +645,17 @@ public class O7FlipPanel extends PluginPanel
 			return;
 		}
 
-		// State A — no API key configured
-		authBanner.setBackground(new Color(0x0D0D1E));
-		authBanner.setBorder(BorderFactory.createCompoundBorder(
-			new MatteBorder(1, 0, 1, 0, new Color(0x2A2A55)),
-			new EmptyBorder(0, 0, 0, 0)));
-
-		if (!noKeyBannerExpanded)
-		{
-			// ── Collapsed pill ────────────────────────────────────────────────
-			JPanel pill = new JPanel(new BorderLayout());
-			pill.setOpaque(false);
-			pill.setBorder(new EmptyBorder(4, 10, 4, 10));
-			pill.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
-
-			JLabel pillLabel = new JLabel(
-				"\uD83D\uDD11  Connect account to unlock features  \u25BC");
-			pillLabel.setFont(net.runelite.client.ui.FontManager.getRunescapeSmallFont());
-			pillLabel.setForeground(new Color(0xBBBBBB));
-			pill.add(pillLabel, BorderLayout.CENTER);
-
-			pill.addMouseListener(new MouseAdapter()
-			{
-				@Override
-				public void mouseClicked(MouseEvent e)
-				{
-					noKeyBannerExpanded = true;
-					updateAuthBanner();
-				}
-			});
-
-			authBanner.add(pill, BorderLayout.CENTER);
-			authBanner.setVisible(true);
-			authBanner.revalidate();
-			authBanner.repaint();
-			northArea.revalidate();
-			northArea.repaint();
-			return;
-		}
-
-		// ── Expanded guide ────────────────────────────────────────────────────
-		authBanner.setBorder(BorderFactory.createCompoundBorder(
-			new MatteBorder(1, 0, 1, 0, new Color(0x2A2A55)),
-			new EmptyBorder(9, 10, 9, 10)));
-
-		JPanel inner = new JPanel();
-		inner.setLayout(new BoxLayout(inner, BoxLayout.Y_AXIS));
-		inner.setOpaque(false);
-
-		// Header row: title left, collapse chevron right
-		JPanel headerRow = new JPanel(new BorderLayout());
-		headerRow.setOpaque(false);
-		headerRow.setMaximumSize(new Dimension(Integer.MAX_VALUE, 20));
-		headerRow.setAlignmentX(Component.LEFT_ALIGNMENT);
-
-		JLabel titleLbl = new JLabel("\uD83D\uDD11 Connect Your Account");
-		titleLbl.setFont(Fonts.BOLD);
-		titleLbl.setForeground(ORANGE);
-		headerRow.add(titleLbl, BorderLayout.CENTER);
-
-		JButton chevron = new JButton("\u25B2");
-		chevron.setFont(net.runelite.client.ui.FontManager.getRunescapeSmallFont());
-		chevron.setForeground(new Color(0x777777));
-		chevron.setBackground(null);
-		chevron.setBorderPainted(false);
-		chevron.setContentAreaFilled(false);
-		chevron.setFocusPainted(false);
-		chevron.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
-		chevron.setMargin(new Insets(0, 4, 0, 0));
-		chevron.addActionListener(e ->
-		{
-			noKeyBannerExpanded = false;
-			updateAuthBanner();
-		});
-		headerRow.add(chevron, BorderLayout.EAST);
-
-		inner.add(headerRow);
-
-		bannerRow(inner, "An API key unlocks more flip presets.", Fonts.SM, new Color(0x777777), 4);
-		bannerRow(inner, "Premium subscription required for full access.", Fonts.SM, new Color(0x777777), 0);
-
-		inner.add(Box.createRigidArea(new Dimension(0, 10)));
-
-		bannerRow(inner, "GET YOUR KEY:", Fonts.SM_BOLD, new Color(0x999999), 0);
-		bannerRow(inner, "1.  Visit 07flip.com/runelite and sign up",         Fonts.SM, new Color(0xDDDDDD), 3);
-		bannerRow(inner, "2.  Log in with Discord",                           Fonts.SM, new Color(0xDDDDDD), 1);
-		bannerRow(inner, "3.  Click your Discord user icon (top-right)",      Fonts.SM, new Color(0xDDDDDD), 1);
-		bannerRow(inner, "     \u2192  Select \u201CView API Key\u201D",      Fonts.SM, new Color(0xFF981F), 0);
-		bannerRow(inner, "4.  Copy the key shown on screen",                  Fonts.SM, new Color(0xDDDDDD), 1);
-
-		inner.add(Box.createRigidArea(new Dimension(0, 9)));
-
-		bannerRow(inner, "ADD KEY IN RUNELITE:", Fonts.SM_BOLD, new Color(0x999999), 0);
-		bannerRow(inner, "1.  Open RuneLite plugin settings",                 Fonts.SM, new Color(0xDDDDDD), 3);
-		bannerRow(inner, "2.  Find 07Flip and click the spanner icon",        Fonts.SM, new Color(0xDDDDDD), 1);
-		bannerRow(inner, "3.  Paste key into the API Key field",              Fonts.SM, new Color(0xDDDDDD), 1);
-		bannerRow(inner, "4.  Press Enter \u2014 done!",                      Fonts.SM, new Color(0xDDDDDD), 1);
-
-		inner.add(Box.createRigidArea(new Dimension(0, 10)));
-
-		JButton visitBtn = pillButton("Visit 07flip.com/runelite");
-		visitBtn.setBackground(ORANGE);
-		visitBtn.setForeground(Color.BLACK);
-		visitBtn.setAlignmentX(Component.LEFT_ALIGNMENT);
-		visitBtn.setMaximumSize(new Dimension(Integer.MAX_VALUE, 24));
-		visitBtn.addActionListener(e -> openUrl(RUNELITE_URL));
-		inner.add(visitBtn);
-
-		authBanner.add(inner, BorderLayout.CENTER);
+		// State A — no API key configured. Make the missing-key step impossible
+		// to miss: the same gold card language as the premium upsell, pointing
+		// straight at the account page where the key lives. (Replaces the old
+		// collapsible 8-step guide, which hid the single action that matters.)
+		authBanner.setBackground(ColorScheme.DARK_GRAY_COLOR);
+		authBanner.setBorder(new EmptyBorder(6, 8, 6, 8));
+		authBanner.add(buildGoldCard(
+			"Link your API key",
+			"Get your key at <b>07flip.com/account</b>, then paste it into the "
+				+ "07Flip plugin settings (wrench icon) to connect your account.",
+			"Get my API key", ACCOUNT_URL), BorderLayout.CENTER);
 		authBanner.setVisible(true);
 		authBanner.revalidate();
 		authBanner.repaint();
@@ -798,6 +692,48 @@ public class O7FlipPanel extends PluginPanel
 		invalidKeyBar.setVisible(true);
 		invalidKeyBar.revalidate();
 		invalidKeyBar.repaint();
+	}
+
+	/**
+	 * Compact gold upsell card — the same visual language as the Insights
+	 * tab's "Unlock the full picture" box: gold-bordered dark card, bold gold
+	 * headline, one short html-wrapped pitch (wraps instead of truncating at
+	 * panel width) and a single gold CTA button.
+	 */
+	private JPanel buildGoldCard(String headline, String pitchHtml, String buttonText, String url)
+	{
+		JPanel card = new JPanel();
+		card.setLayout(new BoxLayout(card, BoxLayout.Y_AXIS));
+		card.setBackground(CARD_GOLD_BG);
+		card.setBorder(BorderFactory.createCompoundBorder(
+			BorderFactory.createLineBorder(CARD_GOLD, 1),
+			new EmptyBorder(10, 12, 10, 12)));
+
+		JLabel head = new JLabel(headline);
+		head.setFont(Fonts.BOLD);
+		head.setForeground(CARD_GOLD);
+		head.setAlignmentX(Component.LEFT_ALIGNMENT);
+		card.add(head);
+		card.add(Box.createVerticalStrut(4));
+
+		JLabel pitch = new JLabel("<html><div style='width:210px'>" + pitchHtml + "</div></html>");
+		pitch.setFont(Fonts.SM);
+		pitch.setForeground(Color.WHITE);
+		pitch.setAlignmentX(Component.LEFT_ALIGNMENT);
+		card.add(pitch);
+		card.add(Box.createVerticalStrut(8));
+
+		JButton btn = new JButton(buttonText);
+		btn.setFont(Fonts.SM_BOLD);
+		btn.setForeground(Color.BLACK);
+		btn.setBackground(CARD_GOLD);
+		btn.setFocusPainted(false);
+		btn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+		btn.setBorder(new EmptyBorder(6, 14, 6, 14));
+		btn.setAlignmentX(Component.LEFT_ALIGNMENT);
+		btn.addActionListener(e -> openUrl(url));
+		card.add(btn);
+		return card;
 	}
 
 	private static void bannerRow(JPanel panel, String text, java.awt.Font font, Color color, int topPad)
@@ -1265,8 +1201,12 @@ public class O7FlipPanel extends PluginPanel
 
 	private List<FlipItem> fFavourites(String q)
 	{
+		// Deliberately NOT subject to the capital filter: favourites are a
+		// watchlist the user starred on purpose, and hiding starred items
+		// because they sit above the current cash stack reads as data loss
+		// (the panel showed "No favourites yet" to an account with favourites
+		// and got diagnosed as a server bug). Search still applies.
 		return allFavourites.stream()
-			.filter(i -> affordable(i.buyPrice))
 			.filter(i -> q.isEmpty() || matches(i.name, q))
 			.collect(Collectors.toList());
 	}
@@ -1585,7 +1525,16 @@ public class O7FlipPanel extends PluginPanel
 		else
 		{
 			List<FlipItem> shown = fFavourites(q);
-			if (shown.isEmpty())
+			if (shown.isEmpty() && !allFavourites.isEmpty())
+			{
+				// Favourites DID load but the search box filtered them all out
+				// (favourites are exempt from the capital filter by design). A
+				// blanket "No favourites yet" here once misdiagnosed a real
+				// incident as a server bug — be precise about why it's empty.
+				favouritesListPanel.add(emptyLabel(allFavourites.size() + " favourites hidden by search",
+					"Clear the search box to see your full favourites list."));
+			}
+			else if (shown.isEmpty())
 			{
 				favouritesListPanel.add(emptyLabel("No favourites yet",
 					"Tap the ★ on any item's Insights tab to add it here."));
@@ -2496,6 +2445,21 @@ public class O7FlipPanel extends PluginPanel
 		panel.repaint();
 	}
 
+	/**
+	 * Builds a standalone tab whose entire content is the premium-gate card.
+	 * Used by {@link #buildTabs()} to replace premium-only features (Screener,
+	 * Plan, Dumps, Dips, Moons, Barrows, Tablets, Decant) for non-premium users
+	 * so no data is shown — only the upsell card. {@code rebuildTabs()} runs
+	 * whenever premium status changes, so the real content returns on upgrade.
+	 */
+	private JPanel buildPremiumGateTab(String title, String sub)
+	{
+		JPanel p = new JPanel(new BorderLayout());
+		p.setBackground(ColorScheme.DARK_GRAY_COLOR);
+		renderLocked(p, title, sub);
+		return p;
+	}
+
 	// =========================================================================
 	// Generic list filler with pagination and auth-gating
 	// =========================================================================
@@ -3351,6 +3315,29 @@ public class O7FlipPanel extends PluginPanel
 		JPanel favouritesContent = buildFavouritesTab();
 		JPanel screenersContent  = buildScreenersTab();
 		JPanel planContent       = buildPlanTab();
+
+		// Premium gate: the recommended-price feeds and the optimiser are
+		// premium features, so for non-premium users these tabs show an upsell
+		// card instead of any data. Reassign the content vars BEFORE they're
+		// slotted into Other (below) and the top-row map, so the gate shows
+		// wherever the feature lives (top row OR inside Other). The real list
+		// panels were still built above (initialising their fields); we simply
+		// never display them. Flips, Trades, Favourites, Item, Alerts, Spikes
+		// and High Alch stay accessible.
+		if (!isPremium)
+		{
+			final String gate = "To view this feature you need to be a member and link your API key.";
+			dumpsContent     = buildPremiumGateTab("Dumps",     gate);
+			moonContent      = buildPremiumGateTab("Moons",     gate);
+			barrowsContent   = buildPremiumGateTab("Barrows",   gate);
+			decantContent    = buildPremiumGateTab("Decant",    gate);
+			dipsContent      = buildPremiumGateTab("Dips",      gate);
+			tabletsContent   = buildPremiumGateTab("Tablets",   gate);
+			planContent      = buildPremiumGateTab("Plan",      gate);
+			screenersContent = buildPremiumGateTab("Screeners",
+				"To use screeners, sign up and link your API key.");
+		}
+
 		JPanel otherContent      = buildOtherTab(decantContent, dipsContent,
 			highAlchContent, tabletsContent, favouritesContent, screenersContent,
 			planContent,

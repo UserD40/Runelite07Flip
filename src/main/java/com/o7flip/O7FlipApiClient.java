@@ -148,7 +148,7 @@ public class O7FlipApiClient
 		try
 		{
 			String encoded = java.net.URLEncoder.encode(query.trim(), "UTF-8");
-			fetch(BASE_URL + "/search?q=" + encoded + "&limit=10", new Callback()
+			fetch(BASE_URL + "/v2/search?q=" + encoded + "&limit=10", new Callback()
 			{
 				@Override
 				public void onFailure(Call call, IOException e)
@@ -170,6 +170,11 @@ public class O7FlipApiClient
 						item.margin         = getLongOrNull(obj, "margin");
 						item.profit         = getLongOrNull(obj, "profit");
 						item.roi            = getDoubleOrNull(obj, "roi");
+						// Premium-only on /v2/search — null for free/anon. Used to
+						// queue the rec buy price for premium users (free → live).
+						item.recBuyPrice    = getLongOrNull(obj, "rec_buy_price");
+						item.recSellPrice   = getLongOrNull(obj, "rec_sell_price");
+						item.recProfit      = getLongOrNull(obj, "rec_profit");
 						item.hourlyVolume   = getIntOrNull(obj, "hourly_volume");
 						item.dailyVolume    = getIntOrNull(obj, "daily_volume");
 						item.buyLimit       = getInt(obj, "buy_limit", 0);
@@ -1005,7 +1010,7 @@ public class O7FlipApiClient
 	                       BiConsumer<List<FlipItem>, Integer> callback,
 	                       Consumer<String> onPremiumRequired)
 	{
-		StringBuilder url = new StringBuilder(BASE_URL + "/flips?limit=").append(PAGE_LIMIT)
+		StringBuilder url = new StringBuilder(BASE_URL + "/v2/flips?limit=").append(PAGE_LIMIT)
 			.append("&page=").append(page);
 		if (preset != null && !preset.isEmpty())
 		{

@@ -373,6 +373,47 @@ public class O7FlipPlugin extends Plugin
 		// Flips list first (cheapest source of the rec pair); if the item
 		// isn't in any tracked list, fall back to /recommended-prices.
 		freezeFromTrackedOrFetch(itemId);
+
+		// The panel row's price can be minutes stale: the flips list refreshes
+		// every ~90s and pauses entirely while the panel is hidden, so a market
+		// move between fetch and right-click fills a visibly wrong price (seen
+		// live: row said 10,025,488 while the wiki low had moved to 10,350,000).
+		// Re-resolve from /v2/item at click time and swap the queued price when
+		// the response lands — the gap between right-clicking the panel and
+		// clicking a GE slot is ample. Tier rule as everywhere: premium → rec
+		// buy, free → live buy. Guards keep a late response from clobbering a
+		// different item the user queued afterwards.
+		final boolean premiumAtQueue = panel != null && panel.isPremium();
+		apiClient.fetchItemInsights(itemId, ins ->
+		{
+			if (ins == null || ins.current == null)
+			{
+				return;
+			}
+			long fresh = premiumAtQueue && ins.current.recBuy != null && ins.current.recBuy > 0
+				? ins.current.recBuy : ins.current.buyPrice;
+			if (fresh <= 0)
+			{
+				return;
+			}
+			final long freshPrice = fresh;
+			clientThread.invokeLater(() ->
+			{
+				if (pendingGeBuyItemId == itemId)
+				{
+					pendingGeBuyPrice = freshPrice;
+				}
+				if (overlayQueueItemId == itemId && overlayQueueIsBuy)
+				{
+					overlayQueuePrice = freshPrice;
+				}
+				if (pendingGeSetItemId == itemId)
+				{
+					pendingGeSetPrice = freshPrice;
+				}
+			});
+		});
+
 		clientThread.invokeLater(() ->
 		{
 			// Always arm the queue first. The search chatbox only appears AFTER
@@ -539,12 +580,38 @@ public class O7FlipPlugin extends Plugin
 	 */
 	long computeAutoSellPrice(int itemId)
 	{
-		Long frozen = getFrozenSell(itemId);
-		Long live   = lookupLiveRecSell(itemId);
-		long best   = -1L;
-		if (frozen != null && frozen > 0)                best = frozen;
-		if (live   != null && live   > 0 && live > best) best = live;
+		// Premium → 07Flip recommended sell (plus the frozen-at-buy floor).
+		// Free  → live market sell price only (rec + freeze are premium features).
+		boolean premium = panel != null && panel.isPremium();
+		if (!premium)
+		{
+			Long liveSell = lookupLiveSell(itemId);
+			return (liveSell != null && liveSell > 0) ? liveSell : -1L;
+		}
+		Long frozen  = getFrozenSell(itemId);
+		Long recSell = lookupLiveRecSell(itemId);
+		long best    = -1L;
+		if (frozen  != null && frozen  > 0)                   best = frozen;
+		if (recSell != null && recSell > 0 && recSell > best) best = recSell;
 		return best;
+	}
+
+	/**
+	 * Live market sell price for the free-user sell auto-fill. Pulled from the
+	 * loaded flips list, whose {@code sellPrice} is the live market sell on the
+	 * v2 feed. Returns null when the item isn't listed — free users then type
+	 * the sell price manually (we don't fetch premium rec prices for them).
+	 */
+	private Long lookupLiveSell(int itemId)
+	{
+		for (FlipItem f : lastFlips)
+		{
+			if (f.itemId == itemId && f.sellPrice > 0)
+			{
+				return f.sellPrice;
+			}
+		}
+		return null;
 	}
 
 	private Long lookupLiveRecSell(int itemId)
@@ -905,13 +972,56 @@ public class O7FlipPlugin extends Plugin
 		{
 			pendingGeInputPrice = auto;
 			log.debug("[07Flip] sell-setup detector: armed sell price {} for itemId {}", auto, itemId);
-			return;
 		}
-		// No cached recommendation yet — trigger the shared rec-prices fetcher.
-		// Its completion callback runs {@code armSellPriceIfStillRelevant}
-		// which arms pendingGeInputPrice once the response lands.
-		log.debug("[07Flip] sell-setup detector: no cached rec for itemId {}, kicking off fetch", itemId);
-		getRecommendedPrices(itemId);
+		if (panel != null && panel.isPremium())
+		{
+			if (auto <= 0)
+			{
+				// Premium: no cached rec yet — the shared rec-prices fetcher's
+				// completion callback re-arms via armSellPriceIfStillRelevant.
+				log.debug("[07Flip] sell-setup detector: no cached rec for itemId {}, kicking off fetch", itemId);
+				getRecommendedPrices(itemId);
+			}
+		}
+		else
+		{
+			// Free: the flips-list live sell (when present) can be minutes
+			// stale, and unlisted items have nothing at all — refresh the live
+			// sell from /v2/item and re-arm when the response lands.
+			refreshFreeLiveSell(itemId);
+		}
+	}
+
+	/**
+	 * Click-time freshness for the FREE-tier sell auto-fill: fetches the item's
+	 * current live sell price from /v2/item and re-arms {@code pendingGeInputPrice}
+	 * if the sell setup is still showing the same item when the response lands.
+	 * Mirrors {@link #armSellPriceIfStillRelevant}'s guards so a slow response
+	 * can never overwrite a different item's (or a buy screen's) price.
+	 */
+	private void refreshFreeLiveSell(int itemId)
+	{
+		apiClient.fetchItemInsights(itemId, ins ->
+		{
+			if (ins == null || ins.current == null || ins.current.sellPrice <= 0)
+			{
+				return;
+			}
+			final long freshSell = ins.current.sellPrice;
+			clientThread.invokeLater(() ->
+			{
+				Widget setup = client.getWidget(InterfaceID.GeOffers.SETUP);
+				if (!isSellSetupVisible(setup))
+				{
+					return;
+				}
+				if (resolveItemIdFromSetupWidget() != itemId)
+				{
+					return;
+				}
+				pendingGeInputPrice = freshSell;
+			});
+		});
 	}
 
 	/**
@@ -4140,6 +4250,9 @@ public class O7FlipPlugin extends Plugin
 	/** Startup GET — pulls whatever was last saved on either surface. */
 	private void doHydrateOptimizerSession()
 	{
+		// Premium-only feature — don't touch the optimiser session endpoints
+		// for non-premium users.
+		if (panel == null || !panel.isPremium()) return;
 		apiClient.fetchActiveSession(session ->
 		{
 			if (session == null || session.slots == null || session.slots.isEmpty())
@@ -4163,6 +4276,9 @@ public class O7FlipPlugin extends Plugin
 	 */
 	public void onPlanTabSelected()
 	{
+		// Optimiser is premium-only — never start a session poll/POST for a
+		// non-premium user (the Plan tab shows the upsell card for them).
+		if (panel == null || !panel.isPremium()) return;
 		if (executor == null || executor.isShutdown()) return;
 		executor.execute(this::doPollActiveSession);
 		// Also pull the shared history so web-side closes show on tab open.
@@ -4189,6 +4305,8 @@ public class O7FlipPlugin extends Plugin
 	 */
 	private void doBackgroundPollActiveSession()
 	{
+		// Premium-only — skip the always-on session discovery for non-premium.
+		if (panel == null || !panel.isPremium()) return;
 		ScheduledFuture<?> fast = sessionPollTask;
 		if (fast != null && !fast.isCancelled() && !fast.isDone())
 		{
@@ -4726,6 +4844,9 @@ public class O7FlipPlugin extends Plugin
 
 	void onScreenersTabSelected()
 	{
+		// Screeners are premium-only — the tab shows the upsell card for
+		// non-premium users, so don't fetch matches for them.
+		if (panel == null || !panel.isPremium()) return;
 		if (!shouldPollScreeners())
 		{
 			return;

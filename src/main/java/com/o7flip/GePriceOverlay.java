@@ -113,6 +113,15 @@ public class GePriceOverlay extends Overlay
 			return null;
 		}
 
+		// 07Flip recommended prices are a premium feature, so the whole price
+		// overlay is hidden for non-premium users. The panel right-click still
+		// auto-fills the live buy price; this overlay (rec prices, score, chart)
+		// is premium-only.
+		if (plugin.panel == null || !plugin.panel.isPremium())
+		{
+			return null;
+		}
+
 		Widget setup = client.getWidget(InterfaceID.GeOffers.SETUP);
 		if (setup == null || setup.isHidden())
 		{

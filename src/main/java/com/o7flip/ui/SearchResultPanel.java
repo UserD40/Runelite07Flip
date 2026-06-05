@@ -130,11 +130,14 @@ public class SearchResultPanel extends JPanel
 			sellLabel.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
 		}
 
-		// Queue the Buy at the low buy-side price (market bid) — what a flipper
-		// actually wants their buy offer set to. The search payload doesn't
-		// carry rec prices (search is the "look anything up" surface, not the
-		// curated feed), so we use the market buy price directly.
-		final long buyTarget = hasPrice ? item.buyPrice : 0L;
+		// Queue the Buy at the same price tier as the Flips panel: premium users
+		// get the 07Flip recommended buy (premium-only on /v2/search), free users
+		// get the live market buy price (the low/bid). rec_* is null for free/anon
+		// so the ternary naturally falls back to the live price.
+		final boolean isPremium = plugin != null && plugin.panel != null && plugin.panel.isPremium();
+		final long buyTarget = !hasPrice ? 0L
+			: (isPremium && item.recBuyPrice != null && item.recBuyPrice > 0)
+				? item.recBuyPrice : item.buyPrice;
 
 		// ── PROFIT + ROI ──────────────────────────────────────────────────────
 		JLabel profitLabel = new JLabel("");

@@ -73,7 +73,7 @@ public interface O7FlipConfig extends Config
 	@ConfigItem(
 		keyName = "apiKey",
 		name = "API key",
-		description = "Your 07flip.com API key. To get it: sign up at 07flip.com, log in with Discord, then click your Discord user icon (top-right) and select 'View API Key'. No player data is sent to external servers.",
+		description = "Your 07flip.com API key. To get it: sign up at 07flip.com, then visit 07flip.com/account and copy your API key. Paste it here to connect your account. No player data is sent to external servers.",
 		secret = true,
 		section = generalSection,
 		position = 0
