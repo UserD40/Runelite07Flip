@@ -286,6 +286,47 @@ public class O7FlipPanel extends PluginPanel
 	private boolean authChecked = false;
 
 	// -------------------------------------------------------------------------
+	// Panel visibility (RuneLite Activatable) — gate optimiser polling on show/hide.
+	// NavigationButton has no onSelect/onDeselect; these Activatable hooks are the
+	// canonical signal the client fires when this panel is shown/hidden.
+	// -------------------------------------------------------------------------
+
+	@Override
+	public void onActivate()
+	{
+		// Our sidebar panel became the visible one — resume the optimiser session
+		// polling we pause while hidden.
+		if (plugin != null)
+		{
+			plugin.onPanelShown();
+		}
+	}
+
+	@Override
+	public void onDeactivate()
+	{
+		// Panel hidden/collapsed — stop optimiser polling so we don't keep hitting
+		// the server when the user can't see the panel.
+		if (plugin != null)
+		{
+			plugin.onPanelHidden();
+		}
+	}
+
+	/**
+	 * True when the Plan view is the one currently on screen — either as the
+	 * top-row Plan tab, or as the Plan sub-tab inside the Other pane. Lets the
+	 * plugin resume the fast session poll when the panel re-opens directly onto
+	 * Plan (the tab-change listener won't fire in that case).
+	 */
+	public boolean isPlanTabActive()
+	{
+		String top = currentTabName();
+		if ("Plan".equals(top)) return true;
+		return "Other".equals(top) && "Plan".equals(lastOtherSubTab);
+	}
+
+	// -------------------------------------------------------------------------
 	// Stored data
 	// -------------------------------------------------------------------------
 	private List<FlipItem>    allFlips   = new ArrayList<>();
@@ -5391,14 +5432,28 @@ public class O7FlipPanel extends PluginPanel
 		JButton reconfigure = pillButton("Reconfigure");
 		reconfigure.setBackground(new Color(0x3E3E3E));
 		reconfigure.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
+		reconfigure.setToolTipText("Reconfigure your plan on 07flip.com, then hit ⟳ to resync");
 		reconfigure.addActionListener(e ->
+			LinkBrowser.browse("https://07flip.com/optimiser"));
+
+		// ⟳ Resync — force-GET the server plan and adopt its structure, re-attaching
+		// local fills. For when a website re-optimise hasn't shown up in the panel yet.
+		JButton resync = pillButton("⟳");
+		resync.setBackground(new Color(0x2A2A2A));
+		resync.setForeground(new Color(0x888888));
+		resync.setToolTipText("Resync the plan from 07flip.com (keeps your local fills)");
+		resync.addActionListener(e ->
 		{
-			optFormCollapsed = false;
-			applyOptimizerFormVisibility();
+			if (plugin != null) plugin.resyncActivePlan();
 		});
 
+		JPanel east = new JPanel(new FlowLayout(FlowLayout.RIGHT, 6, 0));
+		east.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+		east.add(resync);
+		east.add(reconfigure);
+
 		row.add(optCollapsedLabel, BorderLayout.CENTER);
-		row.add(reconfigure,       BorderLayout.EAST);
+		row.add(east,              BorderLayout.EAST);
 		return row;
 	}
 
@@ -5573,24 +5628,34 @@ public class O7FlipPanel extends PluginPanel
 		com.o7flip.model.OptimizeResult result = new com.o7flip.model.OptimizeResult();
 		result.updatedAt   = session.generatedAt;
 		result.allocations = new java.util.ArrayList<>(session.slots);
-		// Best-effort summary reconstruction — sums what we have without
-		// re-deriving anything the server hadn't already computed.
-		long deployed = 0, cycleProfit = 0;
-		for (com.o7flip.model.OptimizeResult.Allocation a : session.slots)
+		// Phase 4 — carry the server's plan summary verbatim so a poll renders the
+		// real figures (slotSuggestion, emptyReason, degradedTrendData, fill
+		// confidence, …) instead of a lossy re-sum. Fall back to a best-effort
+		// local re-sum only when the server omitted it (older sessions), so a poll
+		// never renders an all-zero summary.
+		if (session.summary != null)
 		{
-			if (a == null) continue;
-			deployed    += a.gpAllocated;
-			cycleProfit += a.expectedProfit;
+			result.summary = session.summary;
 		}
-		result.summary.capitalInput        = session.inputs.capital;
-		result.summary.capitalDeployed     = deployed;
-		result.summary.capitalUnused       = Math.max(0L, session.inputs.capital - deployed);
-		result.summary.slotsRequested      = session.inputs.slots;
-		result.summary.slotsUsed           = session.slots.size();
-		result.summary.risk                = optRisk;
-		result.summary.maxFillHours        = optMaxFillHours;
-		result.summary.members             = optMembers;
-		result.summary.expectedProfitTotal = cycleProfit;
+		else
+		{
+			long deployed = 0, cycleProfit = 0;
+			for (com.o7flip.model.OptimizeResult.Allocation a : session.slots)
+			{
+				if (a == null) continue;
+				deployed    += a.gpAllocated;
+				cycleProfit += a.expectedProfit;
+			}
+			result.summary.capitalInput        = session.inputs.capital;
+			result.summary.capitalDeployed     = deployed;
+			result.summary.capitalUnused       = Math.max(0L, session.inputs.capital - deployed);
+			result.summary.slotsRequested      = session.inputs.slots;
+			result.summary.slotsUsed           = session.slots.size();
+			result.summary.risk                = optRisk;
+			result.summary.maxFillHours        = optMaxFillHours;
+			result.summary.members             = optMembers;
+			result.summary.expectedProfitTotal = cycleProfit;
+		}
 
 		lastOptimize = result;
 		optFormCollapsed = true;
@@ -5683,15 +5748,23 @@ public class O7FlipPanel extends PluginPanel
 			return;
 		}
 
-		// Summary block first — most important info up top.
-		optimizerListPanel.add(buildOptimizerSummary(r.summary));
-		// A3 — "you left slots on the table" suggestion banner.
+		// Phase 4 — offline-completion notice (the Phase 3 reconcile flag) at the
+		// very top so the user sees it before the cards.
+		JComponent reconcileBanner = buildOfflineReconcileBanner(r);
+		if (reconcileBanner != null)
+		{
+			optimizerListPanel.add(reconcileBanner);
+			optimizerListPanel.add(sep());
+		}
+
+		// A3 — "you left slots on the table" suggestion banner. (The Plan summary
+		// block is no longer shown.)
 		JComponent slotSuggestion = buildSlotSuggestionBanner(r.summary);
 		if (slotSuggestion != null)
 		{
 			optimizerListPanel.add(slotSuggestion);
+			optimizerListPanel.add(sep());
 		}
-		optimizerListPanel.add(sep());
 
 		for (int i = 0; i < r.allocations.size(); i++)
 		{
@@ -5707,9 +5780,6 @@ public class O7FlipPanel extends PluginPanel
 				r.allocations.get(i), itemManager, i % 2 != 0, plugin, swap, i));
 			optimizerListPanel.add(sep());
 		}
-
-		// Footer: quiet link into the completed-positions history (Task D).
-		optimizerListPanel.add(buildHistoryFooter());
 
 		optimizerListPanel.revalidate();
 		optimizerListPanel.repaint();
@@ -5738,190 +5808,6 @@ public class O7FlipPanel extends PluginPanel
 		optimizerListPanel.add(emptyLabel(title, sub));
 		optimizerListPanel.revalidate();
 		optimizerListPanel.repaint();
-	}
-
-	private JPanel buildOptimizerSummary(com.o7flip.model.OptimizeResult.Summary s)
-	{
-		JPanel p = new JPanel();
-		p.setLayout(new BoxLayout(p, BoxLayout.Y_AXIS));
-		p.setBackground(new Color(0x1F1F1F));
-		p.setBorder(new EmptyBorder(10, 12, 10, 12));
-		p.setAlignmentX(Component.LEFT_ALIGNMENT);
-
-		JLabel title = new JLabel("<html><font color='#FF981F'><b>Plan summary</b></font></html>");
-		title.setFont(Fonts.BOLD);
-		title.setAlignmentX(Component.LEFT_ALIGNMENT);
-		p.add(title);
-
-		// Cycle total, NOT per-hour — server changed semantics. The figure is
-		// "what you keep after tax once every slot completes one buy→sell".
-		JLabel profit = new JLabel("<html>"
-			+ "<font color='#888888'>Expected profit: </font>"
-			+ "<font color='#00C27A'><b>+" + FlipItemPanel.formatGpCompact(s.expectedProfitTotal) + "</b></font>"
-			+ "</html>");
-		profit.setFont(Fonts.SM);
-		profit.setAlignmentX(Component.LEFT_ALIGNMENT);
-		profit.setBorder(new EmptyBorder(4, 0, 0, 0));
-		profit.setToolTipText("After-tax profit when all slots complete one buy→sell cycle. Not a per-hour rate.");
-		p.add(profit);
-
-		JLabel capital = new JLabel("<html>"
-			+ "<font color='#888888'>Deployed: </font>"
-			+ "<font color='#FFFFFF'>" + FlipItemPanel.formatGpCompact(s.capitalDeployed) + "</font>"
-			+ "<font color='#888888'> / " + FlipItemPanel.formatGpCompact(s.capitalInput) + "</font>"
-			+ (s.capitalUnused > 0
-				? "  <font color='#888888'>· Unused " + FlipItemPanel.formatGpCompact(s.capitalUnused) + "</font>"
-				: "")
-			+ "</html>");
-		capital.setFont(Fonts.SM);
-		capital.setAlignmentX(Component.LEFT_ALIGNMENT);
-		p.add(capital);
-
-		StringBuilder mix = new StringBuilder("<html><font color='#888888'>Slots: </font>")
-			.append("<font color='#FFFFFF'>").append(s.slotsUsed).append("</font>")
-			.append("<font color='#888888'> / ").append(s.slotsRequested).append("</font>");
-		mix.append("  <font color='#888888'>· ").append(s.risk).append(" risk</font>");
-		if (s.maxFillHours != null)
-		{
-			mix.append("<font color='#888888'> · ").append(s.maxFillHours).append("h window</font>");
-		}
-		mix.append("</html>");
-		JLabel mixLbl = new JLabel(mix.toString());
-		mixLbl.setFont(Fonts.SM);
-		mixLbl.setAlignmentX(Component.LEFT_ALIGNMENT);
-		p.add(mixLbl);
-
-		// Applied per-slot wealth floor (echoed by the server) + degraded-data caveat.
-		if (s.minProfitPctApplied != null && s.minProfitPctApplied > 0)
-		{
-			JLabel floor = new JLabel("<html><font color='#888888'>Min profit floor: </font>"
-				+ "<font color='#FFFFFF'>" + trimZeros(String.format("%.2f", s.minProfitPctApplied)) + "%</font>"
-				+ "<font color='#888888'> of bank per slot</font></html>");
-			floor.setFont(Fonts.SM);
-			floor.setAlignmentX(Component.LEFT_ALIGNMENT);
-			p.add(floor);
-		}
-		if (s.degradedTrendData)
-		{
-			JLabel degraded = new JLabel("<html><font color='#FFB454'>⚠ </font>"
-				+ "<font color='#888888'>Trend data was limited this run — ranking leaned on fallbacks.</font></html>");
-			degraded.setFont(Fonts.SM);
-			degraded.setAlignmentX(Component.LEFT_ALIGNMENT);
-			degraded.setBorder(new EmptyBorder(2, 0, 0, 0));
-			p.add(degraded);
-		}
-
-		// Contextual hints. The optimizer returning fewer slots / leftover
-		// capital isn't always a problem — sometimes (small capital → ≤2
-		// concentrated positions) it's the genuinely optimal play. Other
-		// times it's a signal that the risk gate or fill window is too tight.
-		// We branch on the case so the message is directive, not generic.
-		JLabel hint = buildPlanHint(s);
-		if (hint != null)
-		{
-			hint.setBorder(new EmptyBorder(6, 0, 0, 0));
-			p.add(hint);
-		}
-
-		return p;
-	}
-
-	/**
-	 * Produces a contextual one-or-two-line hint about the plan's deployment
-	 * profile, or null when everything looks normal (full slots + full
-	 * capital). Cases distinguished:
-	 *
-	 * <ol>
-	 *   <li><b>Optimal concentration</b> — ≤2 slots used + ≥95% deployed.
-	 *       Likely small capital funnelling into one bulk position. Positive
-	 *       framing, no warning icon.</li>
-	 *   <li><b>Gates too tight</b> — slots short on Low/Medium risk. Suggest
-	 *       widening risk so more items qualify.</li>
-	 *   <li><b>Window too short</b> — slots short on High risk (no further
-	 *       risk knob to widen). Suggest a longer fill window.</li>
-	 *   <li><b>Capital unused</b> — slots full but ≥5% of capital sits
-	 *       idle. Generic widen-the-knobs prompt.</li>
-	 * </ol>
-	 */
-	private JLabel buildPlanHint(com.o7flip.model.OptimizeResult.Summary s)
-	{
-		boolean meaningfulUnused = s.capitalUnused > 100_000 && s.capitalInput > 0
-			&& (s.capitalUnused * 100) / s.capitalInput >= 5;
-		boolean slotsShort = s.slotsUsed < s.slotsRequested;
-		boolean nearFullyDeployed = s.capitalInput > 0
-			&& (s.capitalDeployed * 100) / s.capitalInput >= 95;
-		String risk = s.risk == null ? "medium" : s.risk.toLowerCase();
-		boolean isLowOrMedium = "low".equals(risk) || "medium".equals(risk);
-
-		// Case 1 — optimal small-capital concentration. Encouraging copy.
-		if (slotsShort && s.slotsUsed > 0 && s.slotsUsed <= 2 && nearFullyDeployed)
-		{
-			String html = "<html><font color='#00C27A'>● </font>"
-				+ "<font color='#FFFFFF'>" + FlipItemPanel.formatGpCompact(s.capitalInput) + "</font>"
-				+ "<font color='#888888'> was best deployed into "
-				+ (s.slotsUsed == 1 ? "a single position" : s.slotsUsed + " concentrated positions")
-				+ ".</font><br>"
-				+ "<font color='#888888'>This is the optimal play at this capital — "
-				+ "split across sessions for more breadth.</font></html>";
-			JLabel l = new JLabel(html);
-			l.setFont(Fonts.SM);
-			l.setAlignmentX(Component.LEFT_ALIGNMENT);
-			return l;
-		}
-
-		// Case 2 — slots short on Low/Medium → gates filtering aggressively.
-		if (slotsShort && isLowOrMedium)
-		{
-			String suggest = "low".equals(risk) ? "Medium or High" : "High";
-			String html = "<html><font color='#FF981F'>⚠ </font>"
-				+ "<font color='#FFFFFF'>Only " + s.slotsUsed + "</font>"
-				+ "<font color='#888888'> of " + s.slotsRequested + " slots filled at </font>"
-				+ "<font color='#FFFFFF'>" + risk + "</font>"
-				+ "<font color='#888888'> risk — not enough items pass the tier's gates.</font><br>"
-				+ "<font color='#888888'>Try </font>"
-				+ "<font color='#FFFFFF'>" + suggest + "</font>"
-				+ "<font color='#888888'> to fill the remaining slots.</font></html>";
-			JLabel l = new JLabel(html);
-			l.setFont(Fonts.SM);
-			l.setAlignmentX(Component.LEFT_ALIGNMENT);
-			return l;
-		}
-
-		// Case 3 — slots short on High → risk already maxed; suggest window.
-		if (slotsShort)
-		{
-			String html = "<html><font color='#FF981F'>⚠ </font>"
-				+ "<font color='#FFFFFF'>Only " + s.slotsUsed + "</font>"
-				+ "<font color='#888888'> of " + s.slotsRequested + " slots filled.</font><br>"
-				+ "<font color='#888888'>Try a longer Window so slower-filling items qualify.</font></html>";
-			JLabel l = new JLabel(html);
-			l.setFont(Fonts.SM);
-			l.setAlignmentX(Component.LEFT_ALIGNMENT);
-			return l;
-		}
-
-		// Case 4 — slots full but capital idle (server's volume cap doing its job).
-		if (meaningfulUnused)
-		{
-			String html = "<html><font color='#FF981F'>⚠ </font>"
-				+ "<font color='#FFFFFF'>" + FlipItemPanel.formatGpCompact(s.capitalUnused) + "</font>"
-				+ "<font color='#888888'> can't be deployed at </font>"
-				+ "<font color='#FFFFFF'>" + risk + "</font>"
-				+ (s.maxFillHours != null
-					? "<font color='#888888'> / </font>"
-						+ "<font color='#FFFFFF'>" + s.maxFillHours + "h</font>"
-					: "")
-				+ "<font color='#888888'>.</font><br>"
-				+ "<font color='#888888'>Buy limits cap how much each item absorbs per 4h. Try a longer Window"
-				+ (s.slotsRequested < 8 ? ", more slots," : "")
-				+ " or higher Risk to deploy more.</font></html>";
-			JLabel l = new JLabel(html);
-			l.setFont(Fonts.SM);
-			l.setAlignmentX(Component.LEFT_ALIGNMENT);
-			return l;
-		}
-
-		return null;
 	}
 
 	/**
@@ -5975,6 +5861,56 @@ public class O7FlipPanel extends PluginPanel
 		return p;
 	}
 
+	/**
+	 * Phase 4 — surfaces the Phase 3 offline-completion flag
+	 * ({@code Allocation.pendingOfflineReconcile}) as a non-destructive banner with
+	 * a Dismiss. Returns null when no leg is flagged. Mirrors
+	 * {@link #buildSlotSuggestionBanner}.
+	 */
+	private JComponent buildOfflineReconcileBanner(com.o7flip.model.OptimizeResult r)
+	{
+		if (r == null || r.allocations == null) return null;
+		java.util.List<com.o7flip.model.OptimizeResult.Allocation> flagged = new java.util.ArrayList<>();
+		for (com.o7flip.model.OptimizeResult.Allocation a : r.allocations)
+		{
+			if (a != null && a.pendingOfflineReconcile) flagged.add(a);
+		}
+		if (flagged.isEmpty()) return null;
+
+		JPanel p = new JPanel(new BorderLayout(8, 0));
+		p.setBackground(new Color(0x2E2A1E));
+		p.setBorder(new EmptyBorder(8, 12, 8, 12));
+		p.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+		String body = flagged.size() == 1
+			? "<html><font color='#FF981F'>⚠ </font><font color='#FFFFFF'>"
+				+ (flagged.get(0).name != null ? flagged.get(0).name : "A sell")
+				+ "</font><font color='#888888'> looks complete after being offline — confirm on 07flip.com.</font></html>"
+			: "<html><font color='#FF981F'>⚠ </font><font color='#FFFFFF'>" + flagged.size()
+				+ " sells</font><font color='#888888'> look complete after being offline — confirm on 07flip.com.</font></html>";
+		JLabel label = new JLabel(body);
+		label.setFont(Fonts.SM);
+
+		JButton dismiss = pillButton("Dismiss");
+		dismiss.setBackground(new Color(0x2A2A2A));
+		dismiss.setForeground(new Color(0xAAAAAA));
+		dismiss.setToolTipText("Hide this notice — your recorded fills are unchanged");
+		dismiss.addActionListener(e ->
+		{
+			if (plugin != null)
+			{
+				for (com.o7flip.model.OptimizeResult.Allocation a : flagged)
+				{
+					plugin.dismissOfflineReconcile(a.itemId);
+				}
+			}
+		});
+
+		p.add(label, BorderLayout.CENTER);
+		p.add(dismiss, BorderLayout.EAST);
+		return p;
+	}
+
 	// -------------------------------------------------------------------------
 	// Completed-positions history (Task D)
 	// -------------------------------------------------------------------------
@@ -5982,29 +5918,6 @@ public class O7FlipPanel extends PluginPanel
 	/** History sort modes for the completed-positions view. */
 	private enum HistorySort { RECENT, QUICKEST, MOST_PROFIT }
 	private HistorySort optHistorySort = HistorySort.RECENT;
-
-	/** Quiet footer link under the allocations that opens the history view. */
-	private JComponent buildHistoryFooter()
-	{
-		int count = plugin != null ? plugin.getCompletedPositions().size() : 0;
-		JButton link = pillButton(count > 0 ? "Completed positions (" + count + ")" : "Completed positions");
-		link.setBackground(new Color(0x2A2A2A));
-		link.setForeground(new Color(0xAAAAAA));
-		link.setBorder(new EmptyBorder(6, 12, 6, 12));
-		link.addActionListener(e ->
-		{
-			optShowingHistory = true;
-			renderCompletedPositionsHistory();
-			// Pull the latest shared list so web-side closes show; the GET
-			// callback re-renders via onCompletedPositionsChanged when it lands.
-			if (plugin != null) plugin.refreshCompletedPositions();
-		});
-		JPanel wrap = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 6));
-		wrap.setBackground(ColorScheme.DARK_GRAY_COLOR);
-		wrap.setAlignmentX(Component.LEFT_ALIGNMENT);
-		wrap.add(link);
-		return wrap;
-	}
 
 	/** Re-render the active view if the history changed underneath us. */
 	public void onCompletedPositionsChanged()

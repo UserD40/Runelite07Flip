@@ -35,4 +35,16 @@ public class SlotFill
 	public int    qty;
 	public long   priceEach;
 	public String tradedAt;   // ISO datetime
+
+	/** Deep copy. {@code foldFill} mutates {@code qty}/{@code priceEach} in place,
+	 *  so an off-thread POST snapshot must clone the SlotFill itself, not just the
+	 *  containing list, to avoid a torn read. */
+	public SlotFill copy()
+	{
+		SlotFill c = new SlotFill();
+		c.qty       = qty;
+		c.priceEach = priceEach;
+		c.tradedAt  = tradedAt;
+		return c;
+	}
 }

@@ -87,6 +87,18 @@ public class O7FlipApiClient
 
 	/** Epoch ms until which all requests should be skipped after a 429 response. */
 	private volatile long backoffUntil = 0;
+	/** Consecutive 429 incidents — drives mild escalation. Reset to 0 after a
+	 *  clean gap with no rate limiting. Only touched inside the synchronised
+	 *  {@link #markRateLimited(Response)}. */
+	private int rateLimitIncidents = 0;
+
+	/** Base cooldown applied when the server sends no usable {@code Retry-After}. */
+	private static final long RATE_LIMIT_BASE_MS  = 60_000L;
+	/** Hard ceiling on any single cooldown window, even after escalation/jitter. */
+	private static final long RATE_LIMIT_MAX_MS   = 5L * 60_000L;
+	/** A fresh 429 arriving this long after the previous window ended starts a
+	 *  new incident (escalation counter resets). */
+	private static final long RATE_LIMIT_RESET_MS = 5L * 60_000L;
 
 	/** One-shot log guard so we only report sanitisation once per plugin session. */
 	private volatile boolean loggedKeySanitisation = false;
@@ -97,10 +109,92 @@ public class O7FlipApiClient
 		return System.currentTimeMillis() < backoffUntil;
 	}
 
-	private void markRateLimited()
+	/**
+	 * Records a 429 and (re)arms the global backoff window. The cooldown is:
+	 * <ul>
+	 *   <li>the server's {@code Retry-After} (delta-seconds or HTTP-date) when
+	 *       present and parseable, else {@link #RATE_LIMIT_BASE_MS};</li>
+	 *   <li>multiplied by a mild escalation factor (×2 per consecutive incident,
+	 *       capped ×8) so a server that keeps limiting us is backed off harder;</li>
+	 *   <li>plus up to 20% random jitter so many clients don't retry in lockstep;</li>
+	 *   <li>clamped to {@link #RATE_LIMIT_MAX_MS}.</li>
+	 * </ul>
+	 * Concurrent 429s belonging to the SAME incident (those arriving while a
+	 * window is already active) only extend the window if the server asks for
+	 * longer — they never re-escalate. {@code synchronized} because it is a
+	 * read-modify-write across the OkHttp dispatcher threads; it only runs on a
+	 * 429 so contention is negligible.
+	 */
+	private synchronized void markRateLimited(Response response)
 	{
-		backoffUntil = System.currentTimeMillis() + 60_000;
-		log.warn("[07Flip] Rate limited (429) — pausing all requests for 60s");
+		long now     = System.currentTimeMillis();
+		long retryMs = parseRetryAfterMs(response);          // -1 when absent/unparseable
+		long base    = retryMs > 0 ? retryMs : RATE_LIMIT_BASE_MS;
+
+		if (now < backoffUntil)
+		{
+			// Same incident — another in-flight request also got 429. Only push
+			// the window out further if the server explicitly asked for longer.
+			if (retryMs > 0)
+			{
+				long until = now + withJitter(Math.min(base, RATE_LIMIT_MAX_MS));
+				if (until > backoffUntil) backoffUntil = until;
+			}
+			return;
+		}
+
+		// New incident — reset escalation if we had a clean gap since the last window.
+		if (now - backoffUntil > RATE_LIMIT_RESET_MS) rateLimitIncidents = 0;
+		rateLimitIncidents++;
+
+		double mult     = Math.min(Math.pow(2, rateLimitIncidents - 1), 8.0);   // 1,2,4,8
+		long   cooldown = Math.min((long) (base * mult), RATE_LIMIT_MAX_MS);
+		backoffUntil    = now + withJitter(cooldown);
+		log.warn("[07Flip] Rate limited (429) — pausing requests ~{}s (incident #{}, retry-after={})",
+			(backoffUntil - now) / 1000, rateLimitIncidents,
+			retryMs > 0 ? (retryMs / 1000) + "s" : "none");
+	}
+
+	/** Adds 0–20% random jitter to a cooldown, clamped to {@link #RATE_LIMIT_MAX_MS}. */
+	private static long withJitter(long ms)
+	{
+		long jittered = ms + (long) (ms * 0.20 * Math.random());
+		return Math.min(jittered, RATE_LIMIT_MAX_MS);
+	}
+
+	/**
+	 * Parses an HTTP {@code Retry-After} header into milliseconds. Supports both
+	 * the delta-seconds form ({@code "120"}) and the HTTP-date form
+	 * ({@code "Wed, 21 Oct 2015 07:28:00 GMT"}). Returns -1 when the header is
+	 * absent, empty, or unparseable so the caller falls back to the base cooldown.
+	 */
+	private static long parseRetryAfterMs(Response response)
+	{
+		if (response == null) return -1L;
+		String raw = response.header("Retry-After");
+		if (raw == null) return -1L;
+		raw = raw.trim();
+		if (raw.isEmpty()) return -1L;
+		try
+		{
+			long secs = Long.parseLong(raw);
+			return secs > 0 ? secs * 1000L : -1L;
+		}
+		catch (NumberFormatException notSeconds)
+		{
+			// Fall through to HTTP-date parsing.
+		}
+		try
+		{
+			java.time.ZonedDateTime when = java.time.ZonedDateTime.parse(
+				raw, java.time.format.DateTimeFormatter.RFC_1123_DATE_TIME);
+			long delta = when.toInstant().toEpochMilli() - System.currentTimeMillis();
+			return delta > 0 ? delta : -1L;
+		}
+		catch (Exception notADate)
+		{
+			return -1L;
+		}
 	}
 
 	/**
@@ -128,6 +222,16 @@ public class O7FlipApiClient
 
 	private void fetch(String url, Callback callback)
 	{
+		// Global 429 backoff — when the server has rate-limited us recently, skip
+		// the request entirely and signal the caller via its onFailure path (every
+		// fetch* callback degrades gracefully there: empty list / null). This keeps
+		// EVERY GET routed through here off the server for the whole cooldown,
+		// instead of only throttling the periodic bundle refresh.
+		if (isRateLimited())
+		{
+			callback.onFailure(null, new IOException("07Flip: request skipped — rate-limit backoff active"));
+			return;
+		}
 		Request.Builder builder = new Request.Builder()
 			.url(url)
 			.header("User-Agent", USER_AGENT);
@@ -224,6 +328,11 @@ public class O7FlipApiClient
 			if (callback != null) callback.accept(BulkSyncResult.empty(true));
 			return;
 		}
+		if (isRateLimited())
+		{
+			if (callback != null) callback.accept(BulkSyncResult.empty(false));
+			return;
+		}
 
 		JsonObject body = new JsonObject();
 		JsonArray arr = new JsonArray();
@@ -277,6 +386,7 @@ public class O7FlipApiClient
 			{
 				try
 				{
+					if (response.code() == 429) markRateLimited(response);
 					if (!response.isSuccessful() || response.body() == null)
 					{
 						log.warn("[07Flip] postTradeRecordsBulk HTTP {}", response.code());
@@ -392,6 +502,11 @@ public class O7FlipApiClient
 	 */
 	public void postTradeRecord(TradeRecord trade, Consumer<Long> onTradeId)
 	{
+		if (isRateLimited())
+		{
+			if (onTradeId != null) onTradeId.accept(null);
+			return;
+		}
 		JsonObject body = new JsonObject();
 		body.addProperty("item_id",   trade.itemId);
 		body.addProperty("name",      trade.name);
@@ -426,6 +541,7 @@ public class O7FlipApiClient
 			{
 				try
 				{
+					if (response.code() == 429) markRateLimited(response);
 					if (!response.isSuccessful() || response.body() == null)
 					{
 						log.warn("[07Flip] postTradeRecord HTTP {}", response.code());
@@ -485,7 +601,7 @@ public class O7FlipApiClient
 				{
 					if (response.code() == 429)
 					{
-						markRateLimited();
+						markRateLimited(response);
 					}
 					if (!response.isSuccessful() || response.body() == null)
 					{
@@ -557,7 +673,7 @@ public class O7FlipApiClient
 				{
 					if (response.code() == 429)
 					{
-						markRateLimited();
+						markRateLimited(response);
 					}
 					if (!response.isSuccessful() || response.body() == null)
 					{
@@ -630,6 +746,11 @@ public class O7FlipApiClient
 			if (callback != null) callback.accept(false);
 			return;
 		}
+		if (isRateLimited())
+		{
+			if (callback != null) callback.accept(false);
+			return;
+		}
 		JsonObject body = new JsonObject();
 		body.addProperty("frozen_buy",  frozenBuy);
 		body.addProperty("frozen_sell", frozenSell);
@@ -650,6 +771,7 @@ public class O7FlipApiClient
 			@Override
 			public void onResponse(Call call, Response response) throws IOException
 			{
+				if (response.code() == 429) markRateLimited(response);
 				boolean ok = response.isSuccessful();
 				response.close();
 				if (!ok)
@@ -674,6 +796,11 @@ public class O7FlipApiClient
 			if (callback != null) callback.accept(false);
 			return;
 		}
+		if (isRateLimited())
+		{
+			if (callback != null) callback.accept(false);
+			return;
+		}
 		// Empty JSON body — server only needs the {itemId, userId} pair.
 		RequestBody requestBody = RequestBody.create(MEDIA_TYPE_JSON, "{}");
 		Request.Builder builder = new Request.Builder()
@@ -692,6 +819,7 @@ public class O7FlipApiClient
 			@Override
 			public void onResponse(Call call, Response response) throws IOException
 			{
+				if (response.code() == 429) markRateLimited(response);
 				boolean ok = response.isSuccessful();
 				response.close();
 				if (!ok)
@@ -731,7 +859,7 @@ public class O7FlipApiClient
 				{
 					if (response.code() == 429)
 					{
-						markRateLimited();
+						markRateLimited(response);
 					}
 					if (!response.isSuccessful() || response.body() == null)
 					{
@@ -1185,7 +1313,7 @@ public class O7FlipApiClient
 			{
 				if (response.code() == 429)
 				{
-					markRateLimited();
+					markRateLimited(response);
 				}
 				if (!response.isSuccessful() || response.body() == null)
 				{
@@ -1447,6 +1575,11 @@ public class O7FlipApiClient
 			onResult.accept(false);
 			return;
 		}
+		if (isRateLimited())
+		{
+			onResult.accept(false);
+			return;
+		}
 		JsonObject body = new JsonObject();
 		body.addProperty("item_id", itemId);
 		RequestBody requestBody = RequestBody.create(MEDIA_TYPE_JSON, gson.toJson(body));
@@ -1475,6 +1608,7 @@ public class O7FlipApiClient
 			public void onResponse(Call call, Response response) throws IOException
 			{
 				int code = response.code();
+				if (code == 429) markRateLimited(response);
 				boolean ok = response.isSuccessful();
 				if (!ok)
 				{
@@ -1522,6 +1656,11 @@ public class O7FlipApiClient
 			if (onError != null) onError.accept("no_api_key");
 			return;
 		}
+		if (isRateLimited())
+		{
+			if (onError != null) onError.accept("rate_limited");
+			return;
+		}
 
 		JsonObject body = new JsonObject();
 		body.addProperty("capital", capital);
@@ -1565,6 +1704,12 @@ public class O7FlipApiClient
 				int code = response.code();
 				try
 				{
+					if (code == 429)
+					{
+						markRateLimited(response);
+						if (onError != null) onError.accept("http_429");
+						return;
+					}
 					if (code == 403)
 					{
 						String upgrade = "https://07flip.com/premium";
@@ -1619,28 +1764,7 @@ public class O7FlipApiClient
 			out.updatedAt = getString(root, "updated_at", "");
 			if (root.has("summary") && root.get("summary").isJsonObject())
 			{
-				JsonObject s = root.getAsJsonObject("summary");
-				OptimizeResult.Summary sum = out.summary;
-				sum.capitalInput               = getLong(s, "capital_input", 0);
-				sum.capitalDeployed            = getLong(s, "capital_deployed", 0);
-				sum.capitalUnused              = getLong(s, "capital_unused", 0);
-				sum.slotsUsed                  = getInt(s,  "slots_used", 0);
-				sum.slotsRequested             = getInt(s,  "slots_requested", 0);
-				sum.risk                       = getString(s, "risk", "medium");
-				sum.members                    = getBoolOrNull(s, "members");
-				sum.expectedProfitTotal        = getLong(s, "expected_profit_total", 0);
-				sum.avgFillConfidence          = getDoubleOrNull(s, "avg_fill_confidence");
-				sum.minFillConfidence          = getDoubleOrNull(s, "min_fill_confidence");
-				sum.recommendedCount           = getInt(s, "recommended_count", 0);
-				sum.rawCount                   = getInt(s, "raw_count", 0);
-				sum.maxFillHours               = getIntOrNull(s, "max_fill_hours");
-				sum.avgEstimatedFillHours      = getDoubleOrNull(s, "avg_estimated_fill_hours");
-				sum.maxEstimatedFillHours      = getDoubleOrNull(s, "max_estimated_fill_hours");
-				sum.fillConfidenceFormula      = getString(s, "fill_confidence_formula", "");
-				sum.pricingNote                = getString(s, "pricing_note", "");
-				sum.compositionNote            = getString(s, "composition_note", "");
-				sum.realismNote                = getString(s, "realism_note", "");
-				parseSummaryExtras(s, sum);
+				out.summary = parseSummary(root.getAsJsonObject("summary"));
 			}
 			if (root.has("allocations") && root.get("allocations").isJsonArray())
 			{
@@ -1703,7 +1827,97 @@ public class O7FlipApiClient
 		al.state                 = com.o7flip.model.SlotState.fromWire(getString(a, "state", "pending"));
 		al.partial               = getBool(a, "partial", false);
 		al.reservedGp            = getLong(a, "reserved_gp", 0);
+		al.offerInstanceId       = getLongOrNull(a, "offer_instance_id");
+		// §7 manual override — server-owned rev + source, round-tripped on POST.
+		al.overrideRev           = getInt(a, "override_rev", 0);
+		String overrideSource    = getString(a, "override_source", "");
+		al.overrideSource        = overrideSource.isEmpty() ? null : overrideSource;
+		// A leg parsed straight from the server already reflects this rev, so the
+		// plugin's applied high-water mark starts equal (no redundant re-adopt).
+		al.appliedOverrideRev    = al.overrideRev;
 		return al;
+	}
+
+	/**
+	 * Parses a plan summary object. Shared by {@link #parseOptimizeResponse} and
+	 * {@link #parseSession} so the {@code /optimize} and {@code /optimize/active}
+	 * summaries never drift. Package-private + symmetric with {@link #summaryToJson}
+	 * so the round-trip is unit-testable.
+	 */
+	OptimizeResult.Summary parseSummary(JsonObject s)
+	{
+		OptimizeResult.Summary sum = new OptimizeResult.Summary();
+		sum.capitalInput               = getLong(s, "capital_input", 0);
+		sum.capitalDeployed            = getLong(s, "capital_deployed", 0);
+		sum.capitalUnused              = getLong(s, "capital_unused", 0);
+		sum.slotsUsed                  = getInt(s,  "slots_used", 0);
+		sum.slotsRequested             = getInt(s,  "slots_requested", 0);
+		sum.risk                       = getString(s, "risk", "medium");
+		sum.members                    = getBoolOrNull(s, "members");
+		sum.expectedProfitTotal        = getLong(s, "expected_profit_total", 0);
+		sum.avgFillConfidence          = getDoubleOrNull(s, "avg_fill_confidence");
+		sum.minFillConfidence          = getDoubleOrNull(s, "min_fill_confidence");
+		sum.recommendedCount           = getInt(s, "recommended_count", 0);
+		sum.rawCount                   = getInt(s, "raw_count", 0);
+		sum.maxFillHours               = getIntOrNull(s, "max_fill_hours");
+		sum.avgEstimatedFillHours      = getDoubleOrNull(s, "avg_estimated_fill_hours");
+		sum.maxEstimatedFillHours      = getDoubleOrNull(s, "max_estimated_fill_hours");
+		sum.fillConfidenceFormula      = getString(s, "fill_confidence_formula", "");
+		sum.pricingNote                = getString(s, "pricing_note", "");
+		sum.compositionNote            = getString(s, "composition_note", "");
+		sum.realismNote                = getString(s, "realism_note", "");
+		parseSummaryExtras(s, sum);
+		return sum;
+	}
+
+	/**
+	 * Serialises a plan summary back to the wire shape. Key-symmetric with
+	 * {@link #parseSummary} so a GET→POST round-trip preserves the server figures.
+	 * Package-private so the round-trip is unit-testable.
+	 */
+	JsonObject summaryToJson(OptimizeResult.Summary sum)
+	{
+		JsonObject s = new JsonObject();
+		s.addProperty("capital_input",         sum.capitalInput);
+		s.addProperty("capital_deployed",      sum.capitalDeployed);
+		s.addProperty("capital_unused",        sum.capitalUnused);
+		s.addProperty("slots_used",            sum.slotsUsed);
+		s.addProperty("slots_requested",       sum.slotsRequested);
+		if (sum.risk != null)    s.addProperty("risk", sum.risk);
+		if (sum.members != null) s.addProperty("members", sum.members);
+		s.addProperty("expected_profit_total", sum.expectedProfitTotal);
+		if (sum.avgFillConfidence != null)     s.addProperty("avg_fill_confidence", sum.avgFillConfidence);
+		if (sum.minFillConfidence != null)     s.addProperty("min_fill_confidence", sum.minFillConfidence);
+		s.addProperty("recommended_count",     sum.recommendedCount);
+		s.addProperty("raw_count",             sum.rawCount);
+		if (sum.maxFillHours != null)          s.addProperty("max_fill_hours", sum.maxFillHours);
+		if (sum.avgEstimatedFillHours != null) s.addProperty("avg_estimated_fill_hours", sum.avgEstimatedFillHours);
+		if (sum.maxEstimatedFillHours != null) s.addProperty("max_estimated_fill_hours", sum.maxEstimatedFillHours);
+		if (sum.fillConfidenceFormula != null) s.addProperty("fill_confidence_formula", sum.fillConfidenceFormula);
+		if (sum.pricingNote != null)           s.addProperty("pricing_note", sum.pricingNote);
+		if (sum.compositionNote != null)       s.addProperty("composition_note", sum.compositionNote);
+		if (sum.realismNote != null)           s.addProperty("realism_note", sum.realismNote);
+		if (sum.emptyReason != null)           s.addProperty("empty_reason", sum.emptyReason);
+		s.addProperty("degraded_trend_data",   sum.degradedTrendData);
+		if (sum.minProfitPctApplied != null)   s.addProperty("min_profit_pct_applied", sum.minProfitPctApplied);
+		if (sum.slotSuggestion != null)
+		{
+			JsonObject ss = new JsonObject();
+			ss.addProperty("suggested_slots",             sum.slotSuggestion.suggestedSlots);
+			ss.addProperty("additional_capital_deployed", sum.slotSuggestion.additionalCapitalDeployed);
+			ss.addProperty("additional_expected_profit",  sum.slotSuggestion.additionalExpectedProfit);
+			s.add("slot_suggestion", ss);
+		}
+		if (sum.eligibilityRejections != null && !sum.eligibilityRejections.isEmpty())
+		{
+			JsonObject er = new JsonObject();
+			for (java.util.Map.Entry<String, Integer> e : sum.eligibilityRejections.entrySet())
+			{
+				if (e.getValue() != null) er.addProperty(e.getKey(), e.getValue());
+			}
+			s.add("eligibility_rejections", er);
+		}
+		return s;
 	}
 
 	/**
@@ -1758,6 +1972,7 @@ public class O7FlipApiClient
 	{
 		String key = sanitizedApiKey();
 		if (key == null) { callback.accept(null); return; }
+		if (isRateLimited()) { callback.accept(null); return; }
 
 		Request request = new Request.Builder()
 			.url(BASE_URL + "/optimize/active")
@@ -1779,6 +1994,7 @@ public class O7FlipApiClient
 			{
 				try
 				{
+					if (response.code() == 429) markRateLimited(response);
 					if (response.code() == 204)
 					{
 						callback.accept(null);
@@ -1809,6 +2025,7 @@ public class O7FlipApiClient
 		String key = sanitizedApiKey();
 		if (key == null) { if (onComplete != null) onComplete.accept(false); return; }
 		if (session == null) { if (onComplete != null) onComplete.accept(false); return; }
+		if (isRateLimited()) { if (onComplete != null) onComplete.accept(false); return; }
 
 		String bodyJson = sessionToJson(session);
 		RequestBody body = RequestBody.create(MEDIA_TYPE_JSON, bodyJson);
@@ -1831,6 +2048,7 @@ public class O7FlipApiClient
 			{
 				try
 				{
+					if (response.code() == 429) markRateLimited(response);
 					boolean ok = response.isSuccessful();
 					if (!ok) log.warn("[07Flip] /optimize/active POST HTTP {}", response.code());
 					if (onComplete != null) onComplete.accept(ok);
@@ -1845,6 +2063,7 @@ public class O7FlipApiClient
 	{
 		String key = sanitizedApiKey();
 		if (key == null) { if (onComplete != null) onComplete.accept(false); return; }
+		if (isRateLimited()) { if (onComplete != null) onComplete.accept(false); return; }
 
 		Request request = new Request.Builder()
 			.url(BASE_URL + "/optimize/active")
@@ -1865,6 +2084,7 @@ public class O7FlipApiClient
 			{
 				try
 				{
+					if (response.code() == 429) markRateLimited(response);
 					boolean ok = response.isSuccessful();
 					if (!ok) log.warn("[07Flip] /optimize/active DELETE HTTP {}", response.code());
 					if (onComplete != null) onComplete.accept(ok);
@@ -1921,6 +2141,12 @@ public class O7FlipApiClient
 					}
 					catch (Exception ignored) {}
 				}
+			}
+			// Phase 4 — carry the server's plan summary verbatim (read from the
+			// unwrapped body) so the panel renders real figures, not a re-sum.
+			if (body.has("summary") && body.get("summary").isJsonObject())
+			{
+				s.summary = parseSummary(body.getAsJsonObject("summary"));
 			}
 		}
 		catch (Exception e)
@@ -2002,6 +2228,14 @@ public class O7FlipApiClient
 					s.addProperty("partial", true);
 					if (al.reservedGp > 0) s.addProperty("reserved_gp", al.reservedGp);
 				}
+				// SYNC_CONTRACT §2 — leg identity. Server keys by (item_id,
+				// offer_instance_id); omit when the plugin hasn't traded this slot.
+				if (al.offerInstanceId != null) s.addProperty("offer_instance_id", al.offerInstanceId);
+				// SYNC_CONTRACT §7 — round-trip the manual-override rev/source so the
+				// server keeps its own correction across plugin POSTs. The plugin
+				// never bumps these itself (site-first, §8.3).
+				if (al.overrideRev > 0) s.addProperty("override_rev", al.overrideRev);
+				if (al.overrideSource != null) s.addProperty("override_source", al.overrideSource);
 				slots.add(s);
 			}
 		}
@@ -2012,6 +2246,12 @@ public class O7FlipApiClient
 		if (session.updatedAt != null && !session.updatedAt.isEmpty())
 		{
 			body.addProperty("updated_at", session.updatedAt);
+		}
+		// Phase 4 — round-trip the server plan summary so a fill-only POST doesn't
+		// blank it server-side. Plugin never invents summary figures (site-authoritative).
+		if (session.summary != null)
+		{
+			body.add("summary", summaryToJson(session.summary));
 		}
 		// POST body is the raw session shape (not wrapped in a "session"
 		// envelope). The envelope only appears on the GET RESPONSE side —
@@ -2049,6 +2289,7 @@ public class O7FlipApiClient
 	{
 		String key = sanitizedApiKey();
 		if (key == null) { callback.accept(null); return; }
+		if (isRateLimited()) { callback.accept(null); return; }
 
 		Request request = new Request.Builder()
 			.url(BASE_URL + "/optimize/completed")
@@ -2070,6 +2311,7 @@ public class O7FlipApiClient
 			{
 				try
 				{
+					if (response.code() == 429) markRateLimited(response);
 					if (response.code() == 204)
 					{
 						callback.accept(new ArrayList<>());
@@ -2098,6 +2340,7 @@ public class O7FlipApiClient
 	{
 		String key = sanitizedApiKey();
 		if (key == null || cp == null) { if (callback != null) callback.accept(null); return; }
+		if (isRateLimited()) { if (callback != null) callback.accept(null); return; }
 
 		RequestBody body = RequestBody.create(MEDIA_TYPE_JSON, gson.toJson(completedPositionToJson(cp)));
 		Request request = new Request.Builder()
@@ -2120,6 +2363,7 @@ public class O7FlipApiClient
 			{
 				try
 				{
+					if (response.code() == 429) markRateLimited(response);
 					if (!response.isSuccessful() || response.body() == null)
 					{
 						log.warn("[07Flip] /optimize/completed POST HTTP {}", response.code());
@@ -2212,7 +2456,7 @@ public class O7FlipApiClient
 			{
 				if (response.code() == 429)
 				{
-					markRateLimited();
+					markRateLimited(response);
 				}
 				if (!response.isSuccessful() || response.body() == null)
 				{
@@ -2407,7 +2651,7 @@ public class O7FlipApiClient
 	{
 		if (response.code() == 429)
 		{
-			markRateLimited();
+			markRateLimited(response);
 		}
 		if (!response.isSuccessful() || response.body() == null)
 		{
@@ -2537,6 +2781,12 @@ public class O7FlipApiClient
 		Consumer<String>                     onConnectUrl
 	)
 	{
+		// Honour the global 429 backoff (this is also gated upstream in
+		// fetchAll(), but guard here too so every enqueue path is covered).
+		if (isRateLimited())
+		{
+			return;
+		}
 		JsonObject body = new JsonObject();
 		body.add("sections", sections);
 		RequestBody requestBody = RequestBody.create(MEDIA_TYPE_JSON, gson.toJson(body));
@@ -2568,7 +2818,7 @@ public class O7FlipApiClient
 			{
 				if (response.code() == 429)
 				{
-					markRateLimited();
+					markRateLimited(response);
 					return;
 				}
 				if (!response.isSuccessful() || response.body() == null)
@@ -2802,6 +3052,25 @@ public class O7FlipApiClient
 	 */
 	public void fetchRecommendedPrices(int itemId, Consumer<RecommendedPrices> callback)
 	{
+		fetchRecommendedPrices(itemId, callback, null);
+	}
+
+	/**
+	 * As {@link #fetchRecommendedPrices(int, Consumer)} but with a transient-retry
+	 * hook for deploy-warmup 503s. On a 503 this:
+	 * <ul>
+	 *   <li>does NOT trip the global 429 backoff;</li>
+	 *   <li>does NOT invoke {@code callback} — so the caller keeps serving its
+	 *       last-known cached price untouched (no stamping it stale);</li>
+	 *   <li>fires {@code onRetryAfter} with the delay in ms parsed from the
+	 *       server's {@code Retry-After} (default 30s) so the caller can schedule
+	 *       a single retry.</li>
+	 * </ul>
+	 * 429 still trips the backoff and yields {@code callback(null)} as before.
+	 */
+	public void fetchRecommendedPrices(int itemId, Consumer<RecommendedPrices> callback,
+	                                   java.util.function.LongConsumer onRetryAfter)
+	{
 		if (itemId <= 0)
 		{
 			callback.accept(null);
@@ -2821,13 +3090,27 @@ public class O7FlipApiClient
 			{
 				try
 				{
-					if (response.code() == 429)
+					int code = response.code();
+					if (code == 429)
 					{
-						markRateLimited();
+						markRateLimited(response);
+						callback.accept(null);
+						return;
+					}
+					if (code == 503)
+					{
+						// Server deploy warmup. Keep the 429 backoff out of it,
+						// leave the caller's last-known value in place (don't call
+						// callback), and ask for one retry after Retry-After.
+						long retry = parseRetryAfterMs(response);
+						if (retry <= 0) retry = 30_000L;
+						log.debug("[07Flip] /recommended-prices 503 — retry in {}ms (keeping last-known)", retry);
+						if (onRetryAfter != null) onRetryAfter.accept(retry);
+						return;
 					}
 					if (!response.isSuccessful() || response.body() == null)
 					{
-						log.warn("[07Flip] fetchRecommendedPrices HTTP {}", response.code());
+						log.warn("[07Flip] fetchRecommendedPrices HTTP {}", code);
 						callback.accept(null);
 						return;
 					}
@@ -3122,7 +3405,7 @@ public class O7FlipApiClient
 	{
 		if (response.code() == 429)
 		{
-			markRateLimited();
+			markRateLimited(response);
 		}
 		if (!response.isSuccessful() || response.body() == null)
 		{
@@ -3251,7 +3534,7 @@ public class O7FlipApiClient
 	{
 		if (response.code() == 429)
 		{
-			markRateLimited();
+			markRateLimited(response);
 		}
 		if (!response.isSuccessful() || response.body() == null)
 		{

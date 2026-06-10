@@ -51,6 +51,39 @@ public class OptimizerSession
 	public List<OptimizeResult.Allocation> slots = new ArrayList<>();
 	public String generatedAt;
 	public String lastPollAt;
+	/** Server-supplied plan summary (Phase 4). Carried verbatim from the
+	 *  {@code /optimize/active} GET so the panel renders the real server figures
+	 *  (slotSuggestion, emptyReason, degradedTrendData, fill-confidence, …) rather
+	 *  than re-deriving a lossy version each poll. Null when the server omits it
+	 *  (older sessions) — callers fall back to a local re-sum. Plan STRUCTURE, so
+	 *  site-authoritative: adopted alongside {@link #generatedAt}. */
+	public OptimizeResult.Summary summary;
+
+	/**
+	 * Deep copy of the session — fresh {@link #inputs} and a fresh {@link #slots}
+	 * list of {@link OptimizeResult.Allocation#copy() deep-copied} allocations.
+	 * Snapshot the live session on the game thread with this before handing it to
+	 * an off-thread POST, so the serialiser never iterates buys/sells while the
+	 * game thread mutates them.
+	 */
+	public OptimizerSession copy()
+	{
+		OptimizerSession c = new OptimizerSession();
+		c.inputs      = inputs != null ? inputs.copy() : new Inputs();
+		c.generatedAt = generatedAt;
+		c.lastPollAt  = lastPollAt;
+		c.updatedAt   = updatedAt;
+		c.summary     = summary != null ? summary.copy() : null;
+		c.slots       = new ArrayList<>();
+		if (slots != null)
+		{
+			for (OptimizeResult.Allocation a : slots)
+			{
+				if (a != null) c.slots.add(a.copy());
+			}
+		}
+		return c;
+	}
 	/** Server-stamped last-modified time. Echoed back on GET; the plugin
 	 *  round-trips it on POST so future server-side updated_at semantics
 	 *  (e.g. If-Unmodified-Since) work without a client change. */
@@ -69,5 +102,18 @@ public class OptimizerSession
 		/** Optional per-slot wealth floor (0..10), echoed so the plugin can
 		 *  re-hydrate the Min profit input. Null = server default/auto. */
 		public Double        minProfitPct;
+
+		public Inputs copy()
+		{
+			Inputs c = new Inputs();
+			c.capital        = capital;
+			c.slots          = slots;
+			c.maxFillHours   = maxFillHours;
+			c.risk           = risk;
+			c.excludeItemIds = new ArrayList<>(excludeItemIds);
+			c.members        = members;
+			c.minProfitPct   = minProfitPct;
+			return c;
+		}
 	}
 }

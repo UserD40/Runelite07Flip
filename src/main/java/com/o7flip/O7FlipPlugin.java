@@ -36,10 +36,12 @@ import com.o7flip.model.SpikeItem;
 import com.o7flip.model.TrackedItemData;
 import com.o7flip.model.TradeRecord;
 import net.runelite.api.Client;
+import net.runelite.api.GameState;
 import net.runelite.api.GrandExchangeOffer;
 import net.runelite.api.GrandExchangeOfferState;
 import net.runelite.api.InventoryID;
 import net.runelite.api.Item;
+import net.runelite.api.events.GameStateChanged;
 import net.runelite.api.events.GrandExchangeOfferChanged;
 import net.runelite.api.events.ItemContainerChanged;
 import net.runelite.api.ScriptID;
@@ -786,12 +788,14 @@ public class O7FlipPlugin extends Plugin
 		// the website (or from a previous plugin session) so the user sees
 		// their plan immediately, without having to click Build again.
 		executor.execute(this::doHydrateOptimizerSession);
-		// Keep that hydration alive in the background regardless of tab, so a
-		// plan built on the website mid-session is picked up and in-client fills
-		// start syncing to it without the user having to open the Plan tab.
-		sessionBackgroundPollTask = executor.scheduleAtFixedRate(
-			this::doBackgroundPollActiveSession,
-			SESSION_BACKGROUND_POLL_INTERVAL_S, SESSION_BACKGROUND_POLL_INTERVAL_S, TimeUnit.SECONDS);
+		// The background session poll is gated on sidebar visibility — started in
+		// onPanelShown() (the Activatable hook fired when our panel is shown) and
+		// cancelled in onPanelHidden(). Kick it now only if the sidebar is already
+		// open at startup; otherwise it starts the first time the user opens it.
+		if (panel.isShowing())
+		{
+			startSessionBackgroundPoll();
+		}
 		// Pull the shared completed-positions history (web ↔ plugin synced store).
 		executor.execute(this::refreshCompletedPositions);
 		refreshTask = executor.scheduleAtFixedRate(
@@ -839,6 +843,18 @@ public class O7FlipPlugin extends Plugin
 	// it does NOT re-fire WidgetLoaded. onGameTick polls instead.
 
 	@Subscribe
+	public void onGameStateChanged(GameStateChanged event)
+	{
+		// Arm the offline-completion reconcile on login (SYNC_CONTRACT §7). The
+		// actual scan runs on the next game tick, where GE offers are reliably
+		// readable; doing it here can race the client populating the offer array.
+		if (event.getGameState() == GameState.LOGGED_IN)
+		{
+			offlineReconcileArmed = true;
+		}
+	}
+
+	@Subscribe
 	public void onGameTick(GameTick event)
 	{
 		// Keep activeOffers in sync with the client's view of the GE.
@@ -847,6 +863,14 @@ public class O7FlipPlugin extends Plugin
 		// offers already running) is invisible to the event-driven path.
 		// Game-tick polling closes that gap — cheap snapshot, hash-compared.
 		syncActiveOffersFromClient();
+
+		// Once per login, after GE offers are readable, reconcile any optimiser
+		// leg whose live sell offer vanished while offline (§7 offline-sell half).
+		if (offlineReconcileArmed && activeSession != null)
+		{
+			offlineReconcileArmed = false;
+			reconcileOfflineCompletions();
+		}
 
 		// Mirror the buy flow's deterministic queue, but for sells the trigger
 		// is "sell setup screen is visible" — there's no panel right-click to
@@ -2255,7 +2279,7 @@ public class O7FlipPlugin extends Plugin
 			if (existingIdx < 0)
 			{
 				existingIdx = findReObservableActiveOfferRow(tradeHistory,
-					offer.getItemId(), isBuy, fallbackPriceEach, totalQtyForLookup);
+					offer.getItemId(), isBuy, totalQtyForLookup, slot, currentQty, currentGp);
 			}
 			if (existingIdx >= 0)
 			{
@@ -2421,7 +2445,7 @@ public class O7FlipPlugin extends Plugin
 		// the active plan, push a SlotFill so the website's polling can
 		// surface the same fills on its end (and vice versa via mergeRemoteFills).
 		long pricePer = deltaQty > 0 ? deltaGp / deltaQty : fallbackPriceEach;
-		attributeTradeToActiveSlot(offer.getItemId(), deltaQty, pricePer, isBuy, timestamp);
+		attributeTradeToActiveSlot(offer.getItemId(), deltaQty, pricePer, isBuy, timestamp, offerInstanceId);
 
 		if (!isBuy && config.showGpDropOverlay())
 		{
@@ -2764,14 +2788,35 @@ public class O7FlipPlugin extends Plugin
 	 * row with a fresh offerInstanceId, and tradeHistory accumulates one
 	 * duplicate per session for as long as the offer sits stuck.
 	 *
-	 * Matches on the offer's SHAPE — same item, side, per-item price, and
-	 * total quantity — rather than on the recorded fill count. The fill
-	 * count is allowed to differ (the row's quantity may be less than the
-	 * current observation if more items have filled since the row was
-	 * last touched).
+	 * Matches on the offer's SHAPE plus OFFER-EPOCH CONTINUITY — same item,
+	 * side, total quantity, and the same GE slot the stuck row was minted in —
+	 * rather than on per-item price. priceEach is the integer-divided running
+	 * average ({@code totalGp/quantity}); it DRIFTS when fills land while the
+	 * plugin is offline, so an exact-price match silently failed and a duplicate
+	 * row was appended on restart (P7). The fill count is allowed to differ (the
+	 * row's quantity may be less than the current observation if more items have
+	 * filled since the row was last touched).
+	 *
+	 * Slot continuity is read from the offerInstanceId itself: it is minted as
+	 * {@code currentTimeMillis()*10 + slot}, so {@code offerInstanceId % 10} is
+	 * the slot. A still-partial GE offer never changes slot across a restart, so
+	 * this is a precise "same physical offer" signal without depending on price.
+	 *
+	 * Guarded by the fills-accumulate invariant ({@code recordedQty <= currentQty}
+	 * and {@code recordedGp <= currentGp}): the same still-active offer can only
+	 * have recorded at-or-behind its live cumulative. A candidate row that sits
+	 * AHEAD of the live observation is a different, more-progressed offer — most
+	 * importantly a terminal CANCELLED partial row from a PRIOR flip in this slot
+	 * (cancellation keeps {@code partial == true}, see
+	 * {@link #finaliseAndPostExistingRow}). Reclaiming such a row would rewrite
+	 * that trade's identity and, via the {@code existingQty >= currentQty}
+	 * early-return in {@link #recordIfNewFills}, swallow the new offer's fills.
 	 */
-	private static int findReObservableActiveOfferRow(
-		List<TradeRecord> list, int itemId, boolean isBuy, long priceEach, int totalQuantity)
+	// Package-private (not private) so SlotReuseDetectionTest-style unit tests can
+	// exercise the reclaim matcher directly.
+	static int findReObservableActiveOfferRow(
+		List<TradeRecord> list, int itemId, boolean isBuy, int totalQuantity, int slot,
+		int currentQty, long currentGp)
 	{
 		if (totalQuantity <= 0)
 		{
@@ -2785,8 +2830,13 @@ public class O7FlipPlugin extends Plugin
 			if (!t.partial)                continue;          // terminal row isn't this active offer
 			if (t.itemId != itemId)        continue;
 			if (t.isBuy != isBuy)          continue;
-			if (t.priceEach != priceEach)  continue;
 			if (t.totalQuantity == null || t.totalQuantity != totalQuantity) continue;
+			// Offer-epoch (slot) continuity instead of exact price — see javadoc.
+			if (t.offerInstanceId % 10 != slot) continue;
+			// Fills-accumulate invariant — never reclaim a row that is ahead of the
+			// live offer (e.g. a cancelled partial from a prior flip in this slot).
+			if (t.quantity > currentQty) continue;
+			if (t.totalGp  > currentGp)  continue;
 			return i;
 		}
 		return -1;
@@ -3235,25 +3285,48 @@ public class O7FlipPlugin extends Plugin
 		boolean stale = fetched == null || (System.currentTimeMillis() - fetched) > REC_PRICE_TTL_MS;
 		if (stale && executor != null && !executor.isShutdown() && recPriceInFlight.add(itemId))
 		{
-			executor.execute(() -> apiClient.fetchRecommendedPrices(itemId, rp ->
-			{
-				try
+			executor.execute(() -> apiClient.fetchRecommendedPrices(itemId,
+				rp ->
 				{
-					if (rp != null)
+					try
 					{
-						recPriceCache.put(itemId, rp);
-						// Any fresh rec-price arrival is a chance to arm the
-						// implicit-sell auto-fill if the user is still on a
-						// matching sell setup. No-op otherwise.
-						clientThread.invokeLater(() -> armSellPriceIfStillRelevant(itemId));
+						if (rp != null)
+						{
+							recPriceCache.put(itemId, rp);
+							// Any fresh rec-price arrival is a chance to arm the
+							// implicit-sell auto-fill if the user is still on a
+							// matching sell setup. No-op otherwise.
+							clientThread.invokeLater(() -> armSellPriceIfStillRelevant(itemId));
+						}
+						recPriceFetchedAt.put(itemId, System.currentTimeMillis());
 					}
-					recPriceFetchedAt.put(itemId, System.currentTimeMillis());
-				}
-				finally
+					finally
+					{
+						recPriceInFlight.remove(itemId);
+					}
+				},
+				retryMs ->
 				{
+					// /recommended-prices 503 (server deploy warmup): keep the
+					// last-known cached price on screen and retry once after the
+					// server's Retry-After. Release the in-flight guard first so the
+					// retry — and any user-triggered refresh meanwhile — can proceed.
+					// The 2-arg overload on the retry means a second 503 just falls
+					// through; the next on-demand call will try again.
 					recPriceInFlight.remove(itemId);
-				}
-			}));
+					if (executor != null && !executor.isShutdown())
+					{
+						executor.schedule(() -> apiClient.fetchRecommendedPrices(itemId, rp ->
+						{
+							if (rp != null)
+							{
+								recPriceCache.put(itemId, rp);
+								recPriceFetchedAt.put(itemId, System.currentTimeMillis());
+								clientThread.invokeLater(() -> armSellPriceIfStillRelevant(itemId));
+							}
+						}), retryMs, TimeUnit.MILLISECONDS);
+					}
+				}));
 		}
 		return recPriceCache.get(itemId);
 	}
@@ -4205,7 +4278,9 @@ public class O7FlipPlugin extends Plugin
 					return;
 				}
 				panel.onOptimizeSlotSwapped(swapIndex, result.allocations.get(0));
-				replaceSlotInActiveSession(swapIndex, result.allocations.get(0));
+				// Advance generated_at to the swap's server timestamp so the POST is
+				// structurally newer and the site adopts the new item (plugin→site).
+				replaceSlotInActiveSession(swapIndex, result.allocations.get(0), result.updatedAt);
 				scheduleSessionPost();
 			}),
 			upgradeUrl -> SwingUtilities.invokeLater(() -> panel.onOptimizePremiumRequired(upgradeUrl)),
@@ -4224,6 +4299,9 @@ public class O7FlipPlugin extends Plugin
 	// the panel UI and the wire-format converter (sessionToJson) read from it.
 
 	private volatile com.o7flip.model.OptimizerSession activeSession;
+	/** Armed on login (GameState.LOGGED_IN); the next game tick runs the
+	 *  offline-completion reconcile once GE offers are reliably readable. */
+	private volatile boolean offlineReconcileArmed = false;
 	private ScheduledFuture<?> pendingSessionPost;
 	private ScheduledFuture<?> sessionPollTask;
 	/** Always-on, low-frequency GET of the synced session, independent of which
@@ -4259,8 +4337,17 @@ public class O7FlipPlugin extends Plugin
 			{
 				return;
 			}
-			activeSession = session;
-			SwingUtilities.invokeLater(() -> panel.hydrateOptimizerSession(session));
+			// Assign on the game thread (P3 consistency) so the startup hydrate
+			// can't race the fold path's reads/writes of activeSession — the
+			// fetchActiveSession callback runs on an OkHttp dispatcher thread.
+			clientThread.invoke(() ->
+			{
+				activeSession = session;
+				// Arm the offline-completion scan too — covers enabling the plugin
+				// while already logged in (no LOGGED_IN transition fires then).
+				offlineReconcileArmed = true;
+				SwingUtilities.invokeLater(() -> panel.hydrateOptimizerSession(session));
+			});
 		});
 	}
 
@@ -4298,6 +4385,54 @@ public class O7FlipPlugin extends Plugin
 	}
 
 	/**
+	 * Starts the always-on (45s) background session poll if it isn't already
+	 * running. Premium- and executor-gated. Called when the sidebar panel
+	 * becomes visible ({@link #onPanelShown}), and at startup if it's already open.
+	 */
+	private void startSessionBackgroundPoll()
+	{
+		if (executor == null || executor.isShutdown()) return;
+		if (panel == null || !panel.isPremium()) return;
+		if (sessionBackgroundPollTask == null
+			|| sessionBackgroundPollTask.isCancelled()
+			|| sessionBackgroundPollTask.isDone())
+		{
+			sessionBackgroundPollTask = executor.scheduleAtFixedRate(
+				this::doBackgroundPollActiveSession,
+				SESSION_BACKGROUND_POLL_INTERVAL_S, SESSION_BACKGROUND_POLL_INTERVAL_S, TimeUnit.SECONDS);
+		}
+	}
+
+	/**
+	 * The 07Flip sidebar panel became visible (RuneLite {@code Activatable} hook,
+	 * via {@link O7FlipPanel#onActivate()}). Resume the optimiser polling we pause
+	 * while hidden so we don't hit the server when the user can't see the panel.
+	 */
+	public void onPanelShown()
+	{
+		startSessionBackgroundPoll();
+		// If the panel re-opened directly onto the Plan tab, the tab-change
+		// listener won't fire (the selection didn't change), so resume the fast
+		// poll explicitly here.
+		if (panel != null && panel.isPremium() && panel.isPlanTabActive())
+		{
+			onPlanTabSelected();
+		}
+	}
+
+	/**
+	 * The 07Flip sidebar panel was hidden/collapsed ({@link O7FlipPanel#onDeactivate()}).
+	 * Stop BOTH session polls so no GET /optimize/active fires while the panel
+	 * isn't visible — including the 15s fast poll, which the Plan-tab listener
+	 * cannot stop on a collapse (the tab selection doesn't change).
+	 */
+	public void onPanelHidden()
+	{
+		if (sessionBackgroundPollTask != null) sessionBackgroundPollTask.cancel(false);
+		if (sessionPollTask != null) sessionPollTask.cancel(false);
+	}
+
+	/**
 	 * Background tick — defers to the Plan-tab fast poll when it's running (that
 	 * already covers updates at 15s while the tab is open) and otherwise runs
 	 * the same merge-safe GET so a web-built plan is discovered and in-client
@@ -4307,6 +4442,8 @@ public class O7FlipPlugin extends Plugin
 	{
 		// Premium-only — skip the always-on session discovery for non-premium.
 		if (panel == null || !panel.isPremium()) return;
+		// Visibility gate — don't poll while the sidebar is hidden/collapsed.
+		if (!panel.isShowing()) return;
 		ScheduledFuture<?> fast = sessionPollTask;
 		if (fast != null && !fast.isCancelled() && !fast.isDone())
 		{
@@ -4317,32 +4454,88 @@ public class O7FlipPlugin extends Plugin
 
 	private void doPollActiveSession()
 	{
+		// Visibility gate — never poll the session endpoint while the sidebar is
+		// hidden/collapsed (covers the fast poll lingering on the Plan tab and the
+		// immediate poll fired on tab-select).
+		if (panel == null || !panel.isShowing()) return;
 		apiClient.fetchActiveSession(remote ->
 		{
 			if (remote == null) return;
-			com.o7flip.model.OptimizerSession local = activeSession;
-			if (local == null)
+			// P3 — serialise all activeSession/leg mutations onto the game thread.
+			// The fold path (attributeTradeToActiveSlot → foldFill) already runs on
+			// the game thread; routing this poll merge there too means the two never
+			// race on the non-thread-safe buys/sells ArrayLists, and the
+			// isEmpty()-check-then-adopt in mergeRemoteFills becomes atomic w.r.t. a
+			// concurrent fold. Fill semantics are unchanged — only the thread.
+			clientThread.invoke(() ->
 			{
-				activeSession = remote;
-				SwingUtilities.invokeLater(() -> panel.hydrateOptimizerSession(remote));
-				return;
-			}
-			// Merge any new buys/sells the website's tracker poll discovered,
-			// so the plugin's next POST doesn't clobber them. Item identity
-			// is by item_id; per-slot fill arrays are unioned by traded_at
-			// (de-duped against what we already have locally).
-			boolean changed = mergeRemoteFills(local, remote);
-			if (changed)
-			{
-				SwingUtilities.invokeLater(() -> panel.hydrateOptimizerSession(local));
-			}
+				com.o7flip.model.OptimizerSession local = activeSession;
+				if (local == null)
+				{
+					activeSession = remote;
+					SwingUtilities.invokeLater(() -> panel.hydrateOptimizerSession(remote));
+					return;
+				}
+				// Merge any new buys/sells the website's tracker poll discovered,
+				// so the plugin's next POST doesn't clobber them. Item identity
+				// is by item_id; per-slot fill arrays are unioned by traded_at
+				// (de-duped against what we already have locally).
+				boolean changed = mergeRemoteFills(local, remote);
+				if (changed)
+				{
+					SwingUtilities.invokeLater(() -> panel.hydrateOptimizerSession(local));
+				}
+			});
 		});
 	}
 
-	private boolean mergeRemoteFills(com.o7flip.model.OptimizerSession local,
+	/**
+	 * Force-GET the server session and adopt its plan structure (Phase 4 Resync
+	 * button), re-attaching the plugin's local fills. Unlike a normal poll this
+	 * ignores the generated_at gate and always adopts the server's allocation set,
+	 * but it keeps local fills via {@link #adoptServerStructure} so it is
+	 * non-destructive to in-flight progress. Deliberate user action, so it is NOT
+	 * gated on panel visibility (only premium + a live executor).
+	 */
+	public void resyncActivePlan()
+	{
+		if (panel == null || !panel.isPremium()) return;
+		if (executor == null || executor.isShutdown()) return;
+		apiClient.fetchActiveSession(remote ->
+		{
+			if (remote == null) return;
+			clientThread.invoke(() ->
+			{
+				if (activeSession == null)
+				{
+					activeSession = remote;
+				}
+				else
+				{
+					adoptServerStructure(activeSession, remote);
+				}
+				final com.o7flip.model.OptimizerSession snap = activeSession;
+				SwingUtilities.invokeLater(() -> panel.hydrateOptimizerSession(snap));
+			});
+		});
+	}
+
+	// Package-private static (no instance state) so the §7 override carve-out is
+	// unit-testable; see OverrideAdoptionTest.
+	static boolean mergeRemoteFills(com.o7flip.model.OptimizerSession local,
 	                                 com.o7flip.model.OptimizerSession remote)
 	{
 		if (local.slots == null || remote.slots == null) return false;
+		// Phase 4 — plan STRUCTURE is site-authoritative by generated_at. When the
+		// server's version is strictly newer (a website re-optimise), adopt its
+		// allocation SET wholesale — add new items, drop removed ones — and re-attach
+		// the plugin-owned fills to surviving legs. Same-version polls fall through to
+		// the local-authoritative fill merge below (today's behaviour, unchanged).
+		if (isRemoteStructurallyNewer(local, remote))
+		{
+			adoptServerStructure(local, remote);
+			return true;
+		}
 		boolean anyChange = false;
 		// Build remote lookup by item_id — last-write-wins on item identity
 		// rather than slot position so a swap on one side reflects on the other.
@@ -4356,6 +4549,25 @@ public class O7FlipPlugin extends Plugin
 			if (l == null) continue;
 			com.o7flip.model.OptimizeResult.Allocation r = byId.get(l.itemId);
 			if (r == null) continue;
+			// §7 manual-override carve-out — when the server's overrideRev for this
+			// leg is AHEAD of what we've applied, adopt the server's bought/sold/state
+			// AUTHORITATIVELY, bypassing the local-authoritative isEmpty() rule for
+			// THIS leg only (e.g. a site-entered offline-sell correction). Record the
+			// applied rev so we don't re-adopt every poll, and clear any pending
+			// offline-reconcile prompt the correction resolves. All other legs below
+			// stay local-authoritative.
+			if (r.overrideRev > l.appliedOverrideRev)
+			{
+				l.buys                    = new java.util.ArrayList<>(r.buys);
+				l.sells                   = new java.util.ArrayList<>(r.sells);
+				l.state                   = r.state;
+				l.overrideRev             = r.overrideRev;
+				l.overrideSource          = r.overrideSource;
+				l.appliedOverrideRev      = r.overrideRev;
+				l.pendingOfflineReconcile = false;
+				anyChange = true;
+				continue;
+			}
 			// The plugin owns the fill ledger for slots it is trading (§5/§5a):
 			// buys/sells are single consolidated entries it overwrites in place.
 			// Only adopt remote fills when WE have none yet — e.g. a plan built
@@ -4365,6 +4577,17 @@ public class O7FlipPlugin extends Plugin
 			// it fills) would be re-added as a duplicate and double-count.
 			if (l.buys.isEmpty()  && mergeFillList(l.buys,  r.buys))  anyChange = true;
 			if (l.sells.isEmpty() && mergeFillList(l.sells, r.sells)) anyChange = true;
+			// Hydrate leg-identity (NOT the §7 override path — that returned above):
+			// when the plugin has no offerInstanceId for this leg yet (a freshly
+			// Built plan, or a post-restart rebuild) but the server-discovered leg
+			// carries one, adopt it so the NEXT in-client fill merges into the SAME
+			// leg via attributeTradeToActiveSlot's first-fill stamp, instead of
+			// minting a fresh epoch and forking the leg server-side. The server
+			// already holds this id, so no POST is needed (no anyChange).
+			if (l.offerInstanceId == null && r.offerInstanceId != null)
+			{
+				l.offerInstanceId = r.offerInstanceId;
+			}
 			com.o7flip.model.SlotState derived =
 				com.o7flip.model.SlotState.derive(l.qty, l.buys, l.sells);
 			if (l.state != derived) { l.state = derived; anyChange = true; }
@@ -4373,8 +4596,141 @@ public class O7FlipPlugin extends Plugin
 		return anyChange;
 	}
 
+	/**
+	 * Plan STRUCTURE version check (Phase 4). True when the server's
+	 * {@code generated_at} is present AND strictly newer than the local session's
+	 * — the website re-optimised and the plugin should adopt the new allocation
+	 * set. Empty/absent server version ⇒ false (nothing to adopt); empty local
+	 * version ⇒ true (adopt the server's). Package-private static for unit tests.
+	 */
+	static boolean isRemoteStructurallyNewer(com.o7flip.model.OptimizerSession local,
+		com.o7flip.model.OptimizerSession remote)
+	{
+		String rg = remote == null ? null : remote.generatedAt;
+		if (rg == null || rg.isEmpty()) return false;
+		String lg = local == null ? null : local.generatedAt;
+		if (lg == null || lg.isEmpty()) return true;
+		return isIsoAfter(rg, lg);
+	}
+
+	/** True when ISO-8601 timestamp {@code a} is strictly after {@code b}. Parses
+	 *  to {@link java.time.Instant} so differing precision can't misorder; falls
+	 *  back to a lexical compare if either isn't a parseable instant. */
+	static boolean isIsoAfter(String a, String b)
+	{
+		try
+		{
+			return java.time.Instant.parse(a).isAfter(java.time.Instant.parse(b));
+		}
+		catch (Exception notInstants)
+		{
+			return a.compareTo(b) > 0;
+		}
+	}
+
+	/**
+	 * Next {@code generated_at} for a plugin-side STRUCTURE change — the symmetric
+	 * counterpart to the server's {@code nextGeneratedAt}. Returns
+	 * {@code max(serverUpdatedAt, prev + 1s)} as an ISO-8601 UTC string, floored
+	 * strictly-monotonic so the plugin's version can never go backwards (clock skew
+	 * or a non-monotonic {@code /optimize updated_at}). {@code serverUpdatedAt} is
+	 * the swap/build's {@code /optimize} {@code updated_at} when there was a
+	 * round-trip; pass null for a local-only change (e.g. "Stop buying"), where the
+	 * base falls back to now and is then floored to {@code prev + 1s}.
+	 */
+	static String nextGeneratedAt(String prevIso, String serverUpdatedAt)
+	{
+		java.time.Instant base = parseInstantOrNull(serverUpdatedAt);
+		if (base == null) base = java.time.Instant.now();
+		java.time.Instant prev = parseInstantOrNull(prevIso);
+		if (prev != null)
+		{
+			java.time.Instant floor = prev.plusSeconds(1);
+			if (floor.isAfter(base)) base = floor;
+		}
+		return base.toString();
+	}
+
+	private static java.time.Instant parseInstantOrNull(String iso)
+	{
+		if (iso == null || iso.isEmpty()) return null;
+		try { return java.time.Instant.parse(iso); }
+		catch (Exception notAnInstant) { return null; }
+	}
+
+	/**
+	 * Adopts the server's allocation SET as the new plan structure
+	 * (site-authoritative by generated_at) while keeping the plugin's local FILLS
+	 * (plugin-authoritative). Each server leg is matched to a local leg by
+	 * offerInstanceId then item_id; when matched AND the plugin has fills, the
+	 * plugin-owned fields (buys/sells/offerInstanceId/appliedOverrideRev/
+	 * pendingOfflineReconcile) are carried onto the server's plan leg and state is
+	 * re-derived — UNLESS the server's overrideRev is ahead (§7), where the server's
+	 * authoritative fills/state win. New server items keep their parsed fills; local
+	 * legs absent from the new plan are dropped. Adopts generated_at / updated_at /
+	 * summary / last_poll_at. Runs on the game thread (poll merge / Resync).
+	 */
+	static void adoptServerStructure(com.o7flip.model.OptimizerSession local,
+		com.o7flip.model.OptimizerSession remote)
+	{
+		java.util.Map<Long, com.o7flip.model.OptimizeResult.Allocation> byOid = new java.util.HashMap<>();
+		java.util.Map<Integer, com.o7flip.model.OptimizeResult.Allocation> byItem = new java.util.HashMap<>();
+		if (local.slots != null)
+		{
+			for (com.o7flip.model.OptimizeResult.Allocation l : local.slots)
+			{
+				if (l == null) continue;
+				if (l.offerInstanceId != null) byOid.put(l.offerInstanceId, l);
+				if (l.itemId > 0) byItem.putIfAbsent(l.itemId, l);
+			}
+		}
+		java.util.List<com.o7flip.model.OptimizeResult.Allocation> rebuilt = new java.util.ArrayList<>();
+		if (remote.slots != null)
+		{
+			for (com.o7flip.model.OptimizeResult.Allocation r : remote.slots)
+			{
+				if (r == null) continue;
+				com.o7flip.model.OptimizeResult.Allocation l =
+					r.offerInstanceId != null ? byOid.get(r.offerInstanceId) : null;
+				if (l == null && r.itemId > 0) l = byItem.get(r.itemId);
+				if (l != null)
+				{
+					if (r.overrideRev > l.appliedOverrideRev)
+					{
+						// §7 override newer than the plugin applied — server's
+						// authoritative bought/sold/state (already on r) win.
+						r.appliedOverrideRev      = r.overrideRev;
+						r.pendingOfflineReconcile = false;
+					}
+					else
+					{
+						// Re-attach plugin fills onto the new plan leg, but only when
+						// the plugin actually has fills — otherwise keep the server's
+						// (first-hydration) fills so none are lost.
+						boolean localHasFills = !l.buys.isEmpty() || !l.sells.isEmpty();
+						if (localHasFills)
+						{
+							r.buys  = l.buys;
+							r.sells = l.sells;
+						}
+						if (l.offerInstanceId != null) r.offerInstanceId = l.offerInstanceId;
+						r.appliedOverrideRev      = Math.max(l.appliedOverrideRev, r.overrideRev);
+						r.pendingOfflineReconcile = l.pendingOfflineReconcile;
+						r.state = com.o7flip.model.SlotState.derive(r.qty, r.buys, r.sells);
+					}
+				}
+				rebuilt.add(r);
+			}
+		}
+		local.slots       = rebuilt;
+		local.generatedAt = remote.generatedAt;
+		local.updatedAt   = remote.updatedAt;
+		local.summary     = remote.summary;
+		local.lastPollAt  = remote.lastPollAt;
+	}
+
 	/** Union remote fills into local on (qty, price_each, traded_at) identity. */
-	private boolean mergeFillList(java.util.List<com.o7flip.model.SlotFill> local,
+	private static boolean mergeFillList(java.util.List<com.o7flip.model.SlotFill> local,
 	                              java.util.List<com.o7flip.model.SlotFill> remote)
 	{
 		if (remote == null || remote.isEmpty()) return false;
@@ -4394,6 +4750,108 @@ public class O7FlipPlugin extends Plugin
 		return f.qty + "@" + f.priceEach + "@" + (f.tradedAt == null ? "" : f.tradedAt);
 	}
 
+	/**
+	 * Login reconcile (SYNC_CONTRACT §7, offline-sell half). Scans the GE slots
+	 * and, for any optimiser leg the plugin still thinks is {@code SELLING}
+	 * (bought, partially sold) whose sell offer has VANISHED — no live
+	 * BUYING/SELLING offer for the item in any slot — flags it and surfaces a
+	 * NON-DESTRUCTIVE "looks complete — confirm?" prompt.
+	 *
+	 * <p>It never mutates counts, state, or guesses the sold quantity. The
+	 * authoritative correction is entered site-side (§8.3) and flows back via the
+	 * §7 override carve-out in {@link #mergeRemoteFills}, which clears the flag.
+	 * Runs on the game thread (reads {@code client.getGrandExchangeOffers()}).
+	 */
+	private void reconcileOfflineCompletions()
+	{
+		com.o7flip.model.OptimizerSession s = activeSession;
+		if (s == null || s.slots == null) return;
+
+		// Items with a live (in-progress) GE offer right now — a sell still sitting
+		// in the GE means the position is NOT complete.
+		java.util.Set<Integer> liveOfferItems = new java.util.HashSet<>();
+		GrandExchangeOffer[] offers = client.getGrandExchangeOffers();
+		if (offers != null)
+		{
+			for (GrandExchangeOffer o : offers)
+			{
+				if (o == null) continue;
+				GrandExchangeOfferState st = o.getState();
+				if (st == GrandExchangeOfferState.BUYING || st == GrandExchangeOfferState.SELLING)
+				{
+					liveOfferItems.add(o.getItemId());
+				}
+			}
+		}
+
+		java.util.List<String> flagged = new java.util.ArrayList<>();
+		for (com.o7flip.model.OptimizeResult.Allocation a : s.slots)
+		{
+			if (a == null || a.pendingOfflineReconcile) continue;
+			if (!isOfflineSellCompletion(a, liveOfferItems)) continue;
+			a.pendingOfflineReconcile = true;
+			flagged.add(a.name != null ? a.name : ("item " + a.itemId));
+		}
+
+		if (flagged.isEmpty()) return;
+
+		// Non-destructive prompt only — direct the user to confirm/adjust on the
+		// site (site-first per §8.3); the override then flows back and clears it.
+		String msg = flagged.size() == 1
+			? "07Flip: your sell of " + flagged.get(0) + " looks complete after being offline. "
+				+ "Confirm or adjust it on 07flip.com and the plan will update."
+			: "07Flip: " + flagged.size() + " optimiser sells look complete after being offline. "
+				+ "Confirm or adjust them on 07flip.com and the plan will update.";
+		notifier.notify(msg);
+
+		final com.o7flip.model.OptimizerSession snap = s;
+		SwingUtilities.invokeLater(() -> panel.hydrateOptimizerSession(snap));
+	}
+
+	/**
+	 * The offline-SELL completion signature for one leg: the plugin still records
+	 * it as {@code SELLING} (a sell was in progress) but there is no live GE offer
+	 * for the item, so the sale resolved while the plugin was offline. Pure +
+	 * package-private for unit testing (see OfflineReconcileTest).
+	 */
+	static boolean isOfflineSellCompletion(com.o7flip.model.OptimizeResult.Allocation a,
+		java.util.Set<Integer> liveOfferItems)
+	{
+		return a != null
+			&& a.state == com.o7flip.model.SlotState.SELLING
+			&& !liveOfferItems.contains(a.itemId);
+	}
+
+	/**
+	 * Clears the offline-reconcile flag for a leg WITHOUT touching its counts —
+	 * the user dismissed the "looks complete" prompt (it wasn't actually done).
+	 * Public so a panel control can call it; routed onto the game thread to stay
+	 * consistent with the rest of the leg-mutation serialisation (P3). No-op if
+	 * the leg isn't flagged.
+	 */
+	public void dismissOfflineReconcile(int itemId)
+	{
+		clientThread.invoke(() ->
+		{
+			com.o7flip.model.OptimizerSession s = activeSession;
+			if (s == null || s.slots == null) return;
+			boolean changed = false;
+			for (com.o7flip.model.OptimizeResult.Allocation a : s.slots)
+			{
+				if (a != null && a.itemId == itemId && a.pendingOfflineReconcile)
+				{
+					a.pendingOfflineReconcile = false;
+					changed = true;
+				}
+			}
+			if (changed)
+			{
+				final com.o7flip.model.OptimizerSession snap = s;
+				SwingUtilities.invokeLater(() -> panel.hydrateOptimizerSession(snap));
+			}
+		});
+	}
+
 	/** Builds an OptimizerSession from a fresh /optimize response. */
 	private void seedActiveSessionFrom(com.o7flip.model.OptimizeResult result, long capital, int slots,
 	                                   String risk, int maxFillHours, Boolean members, Double minProfitPct)
@@ -4407,16 +4865,35 @@ public class O7FlipPlugin extends Plugin
 		s.inputs.members      = members;
 		s.inputs.minProfitPct = minProfitPct;
 		s.slots               = new java.util.ArrayList<>(result.allocations);
-		s.generatedAt         = result.updatedAt;
+		// Floor against the prior plan's stamp so a re-Build can't regress the version.
+		String prevGen = activeSession != null ? activeSession.generatedAt : null;
+		s.generatedAt         = nextGeneratedAt(prevGen, result.updatedAt);
 		activeSession         = s;
 	}
 
-	/** Drop-in replacement when a single slot was swapped via /optimize (slots=1). */
-	private void replaceSlotInActiveSession(int idx, com.o7flip.model.OptimizeResult.Allocation next)
+	/** Drop-in replacement when a single slot was swapped via /optimize (slots=1).
+	 *  Callers fire from the EDT after a /optimize swap, so the structural
+	 *  {@code slots.set(...)} is routed onto the game thread to avoid racing a
+	 *  concurrent game-thread iteration of {@code activeSession.slots}.
+	 *
+	 *  A swap is a plugin-side STRUCTURE change, so it must advance {@code generated_at}
+	 *  ({@code newGeneratedAt} = the swap's {@code /optimize} {@code updated_at}, a fresh
+	 *  server timestamp). Without this the POST ships an equal/stale version and the
+	 *  server keeps the old leg under the Phase 4 merge-by-leg-key write model — i.e. the
+	 *  swap never reaches the site. Stamped on the game thread so it's visible in the
+	 *  snapshot the debounced POST copies. */
+	private void replaceSlotInActiveSession(int idx, com.o7flip.model.OptimizeResult.Allocation next,
+		String newGeneratedAt)
 	{
-		com.o7flip.model.OptimizerSession s = activeSession;
-		if (s == null || s.slots == null || idx < 0 || idx >= s.slots.size()) return;
-		s.slots.set(idx, next);
+		clientThread.invoke(() ->
+		{
+			com.o7flip.model.OptimizerSession s = activeSession;
+			if (s == null || s.slots == null || idx < 0 || idx >= s.slots.size()) return;
+			s.slots.set(idx, next);
+			// Floored-monotonic from the current stamp (mirrors the server helper) so
+			// a stale/non-monotonic /optimize updated_at can't regress the version.
+			s.generatedAt = nextGeneratedAt(s.generatedAt, newGeneratedAt);
+		});
 	}
 
 	/** Debounce window — collapse a flurry of local edits into one POST. */
@@ -4430,9 +4907,18 @@ public class O7FlipPlugin extends Plugin
 
 	private void doPostActiveSession()
 	{
-		com.o7flip.model.OptimizerSession snap = activeSession;
-		if (snap == null) return;
-		apiClient.postActiveSession(snap, ok -> { /* fire-and-forget */ });
+		// Snapshot the live session on the GAME THREAD before it is serialised — the
+		// scheduler thread must never iterate buys/sells (or the slots list) while
+		// the game thread mutates them (foldFill / mergeRemoteFills / §7 override
+		// adoption). The deep copy is unshared, so the OkHttp/serialisation path can
+		// read it freely. Building the JSON here (≤8 slots) is trivial work.
+		clientThread.invoke(() ->
+		{
+			com.o7flip.model.OptimizerSession live = activeSession;
+			if (live == null) return;
+			com.o7flip.model.OptimizerSession snapshot = live.copy();
+			apiClient.postActiveSession(snapshot, ok -> { /* fire-and-forget */ });
+		});
 	}
 
 	/** Called from the panel's ✕ Clear button — wipe both local and remote. */
@@ -4462,7 +4948,8 @@ public class O7FlipPlugin extends Plugin
 	 *       {@code /optimize/active} so the website sees the rolled plan.</li>
 	 * </ul>
 	 */
-	private void attributeTradeToActiveSlot(int itemId, int qty, long pricePer, boolean isBuy, long timestampMs)
+	private void attributeTradeToActiveSlot(int itemId, int qty, long pricePer, boolean isBuy,
+		long timestampMs, long offerInstanceId)
 	{
 		com.o7flip.model.OptimizerSession s = activeSession;
 		if (s == null || s.slots == null || qty <= 0 || itemId <= 0) return;
@@ -4474,6 +4961,15 @@ public class O7FlipPlugin extends Plugin
 			if (a != null && a.itemId == itemId) { slot = a; slotIdx = i; break; }
 		}
 		if (slot == null) return;
+		// SYNC_CONTRACT §2 — stamp the leg with the offer epoch on the first fill
+		// the plugin attributes here, and hold it stable for the flip so the server
+		// keys legs by (item_id, offerInstanceId) and never collapses repeat flips
+		// of the same item. Recycling the slot installs a fresh allocation
+		// (offerInstanceId == null), so the next flip gets a new epoch.
+		if (slot.offerInstanceId == null && offerInstanceId > 0)
+		{
+			slot.offerInstanceId = offerInstanceId;
+		}
 		com.o7flip.model.SlotState prevState = slot.state;
 
 		// §5a — sync LIVE (in-progress) fill progress, not just on completion.
@@ -4487,8 +4983,17 @@ public class O7FlipPlugin extends Plugin
 		// not dozens, well under the ~32KB synced-row cap. The buy entry keeps
 		// the earliest traded_at (flip start) while the sell entry advances to
 		// the latest (honest closed_at / fill_hours).
+		// Black-and-white cap (product decision): the optimiser leg counts only up
+		// to the PLAN target — if the plan says buy 1000 and the user buys 1100, the
+		// card and the POSTed leg count 1000. The extra units (and their profit) are
+		// still recorded in My Trades + the GE log (tradeHistory), tracked
+		// independently of this leg. Capping here also makes the leg immune to any
+		// re-fold inflation from a lost cross-session baseline.
+		int countedQty = cappedFillQty(isBuy, slot, qty);
+		if (countedQty <= 0) return;   // leg already at its cap — counted in My Trades only
+
 		String tradedAt = java.time.Instant.ofEpochMilli(timestampMs).toString();
-		foldFill(isBuy ? slot.buys : slot.sells, qty, pricePer, tradedAt, !isBuy);
+		foldFill(isBuy ? slot.buys : slot.sells, countedQty, pricePer, tradedAt, !isBuy);
 		slot.state = com.o7flip.model.SlotState.derive(slot.qty, slot.buys, slot.sells);
 		scheduleSessionPost();
 
@@ -4503,14 +5008,16 @@ public class O7FlipPlugin extends Plugin
 			armSellAutoFill(slot.itemId, slot.sellPrice, slot.name);
 		}
 
-		// CLOSED transition — record the finished position in local history,
-		// then recycle the slot (capture realised profit + roll a fresh
-		// allocation into the same slot index).
+		// CLOSED transition — record the finished position in local history. The
+		// slot is then left CLOSED (its capital is realised); the plugin does NOT
+		// pick a replacement. Plan STRUCTURE is site-authoritative (Phase 4), so the
+		// site re-optimises to redeploy the freed capital and the plugin adopts the
+		// new structure on the next poll. The closed state itself reaches the server
+		// via the fill-path scheduleSessionPost already queued above.
 		if (prevState != com.o7flip.model.SlotState.CLOSED
 			&& slot.state == com.o7flip.model.SlotState.CLOSED)
 		{
 			appendCompletedPosition(slot);
-			recycleClosedSlot(slotIdx, slot);
 		}
 
 		final com.o7flip.model.OptimizerSession snap = s;
@@ -4535,57 +5042,18 @@ public class O7FlipPlugin extends Plugin
 	}
 
 	/**
-	 * Rolls a closed slot into the next allocation. Realised profit
-	 * (sum sells.gp − sum buys.gp) is folded into the new slot's gp budget,
-	 * and the existing item is added to the exclude list so the server
-	 * doesn't recommend the same item back to itself immediately.
+	 * Quantity to count on the OPTIMISER leg, capped to the plan (black-and-white):
+	 * a buy fills only up to {@code slot.qty} (the plan target); a sell only up to
+	 * what the leg counts as bought. Actual fills beyond the cap are still recorded
+	 * in My Trades + the GE log (tradeHistory) — they're just not counted here.
 	 */
-	private void recycleClosedSlot(int slotIdx, com.o7flip.model.OptimizeResult.Allocation closed)
+	static int cappedFillQty(boolean isBuy, com.o7flip.model.OptimizeResult.Allocation slot, int qty)
 	{
-		if (executor == null || executor.isShutdown()) return;
-		com.o7flip.model.OptimizerSession s = activeSession;
-		if (s == null || s.slots == null) return;
-
-		long boughtGp = sumGp(closed.buys);
-		long soldGp   = sumGp(closed.sells);
-		long realisedProfit = Math.max(0L, soldGp - boughtGp);
-		// For a partial slot, gpAllocated was capped to the actual spend when
-		// the user hit "Stop buying" — the original budget lives in reservedGp.
-		// Redeploy the FULL original budget plus realised profit so the unspent
-		// remainder isn't stranded (Task C: "redeploys realised + unspent").
-		long base = closed.partial && closed.reservedGp > 0 ? closed.reservedGp : closed.gpAllocated;
-		long newCapital = base + realisedProfit;
-
-		// Exclude the just-closed item + every other currently-active item.
-		java.util.List<Integer> excludes = new java.util.ArrayList<>();
-		for (com.o7flip.model.OptimizeResult.Allocation a : s.slots)
-		{
-			if (a != null && a.itemId > 0) excludes.add(a.itemId);
-		}
-
-		String risk = s.inputs.risk != null ? s.inputs.risk : "medium";
-		int maxFillHours = s.inputs.maxFillHours != null ? s.inputs.maxFillHours : 4;
-		Boolean members = s.inputs.members;
-		Double minProfit = s.inputs.minProfitPct;
-
-		log.debug("[07Flip] Plan: recycling closed slot {} ({}). gp budget {} -> {} (+{} profit)",
-			slotIdx, closed.name, closed.gpAllocated, newCapital, realisedProfit);
-
-		executor.execute(() -> apiClient.fetchOptimize(
-			newCapital, 1, risk, maxFillHours, members, excludes, minProfit,
-			result -> SwingUtilities.invokeLater(() ->
-			{
-				if (result == null || result.allocations == null || result.allocations.isEmpty())
-				{
-					log.debug("[07Flip] Plan: recycle returned no candidate for slot {}", slotIdx);
-					return;
-				}
-				panel.onOptimizeSlotSwapped(slotIdx, result.allocations.get(0));
-				replaceSlotInActiveSession(slotIdx, result.allocations.get(0));
-				scheduleSessionPost();
-			}),
-			upgradeUrl -> SwingUtilities.invokeLater(() -> panel.onOptimizePremiumRequired(upgradeUrl)),
-			reason -> log.debug("[07Flip] Plan: recycle failed: {}", reason)));
+		if (slot == null) return 0;
+		int capacity = isBuy
+			? slot.qty - sumQty(slot.buys)              // headroom to the plan target
+			: sumQty(slot.buys) - sumQty(slot.sells);   // can't sell beyond counted-bought
+		return Math.min(qty, Math.max(0, capacity));
 	}
 
 	/**
@@ -4658,9 +5126,10 @@ public class O7FlipPlugin extends Plugin
 	 * "Stop buying" — caps a still-buying slot to whatever has been bought so
 	 * far, freeing the rest of its budget. Mirrors the website's
 	 * {@code markPartial}: the slot advances to FILLED/SELLING and sits there
-	 * (no redeploy) until its bought units sell, at which point
-	 * {@link #recycleClosedSlot} redeploys the realised proceeds plus the
-	 * unspent {@code reservedGp}. Backs the Stop-buying button on BUYING cards.
+	 * until its bought units sell and it CLOSES. The plugin no longer redeploys the
+	 * freed/realised capital itself (plan structure is site-authoritative, Phase 4);
+	 * {@code reservedGp} is round-tripped so the SITE can redeploy on its next
+	 * re-optimise. Backs the Stop-buying button on BUYING cards.
 	 */
 	public void markPartial(int slotIdx)
 	{
@@ -4685,10 +5154,19 @@ public class O7FlipPlugin extends Plugin
 			armSellAutoFill(slot.itemId, slot.sellPrice, slot.name);
 		}
 
+		// "Stop buying" shrinks the buy target — a STRUCTURE change, so advance
+		// generated_at (floored-monotonic; no /optimize round-trip here) or the
+		// website (strictly-newer adoption) never picks up the cap. Mirrors the
+		// server's nextGeneratedAt on its own markPartialFill.
+		s.generatedAt = nextGeneratedAt(s.generatedAt, null);
+
 		scheduleSessionPost();
 		final com.o7flip.model.OptimizerSession snap = s;
 		SwingUtilities.invokeLater(() -> panel.hydrateOptimizerSession(snap));
 	}
+
+	// (Per-position resetSlotFills/removeSlot removed — the ⟳ Resync button
+	// re-pulls the site's plan wholesale, which covers clearing/dropping legs.)
 
 	// -------------------------------------------------------------------------
 	// Completed-positions history (Task D) — shared web ↔ plugin store

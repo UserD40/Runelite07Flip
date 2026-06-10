@@ -184,49 +184,19 @@ public class OptimizerAllocationCard extends JPanel
 			.append("<font color='#FFFFFF'>").append(formatNumber(a.qty)).append("</font>")
 			.append("<font color='#888888'>×</font> ")
 			.append("<font color='#FFE07A'>").append(FlipItemPanel.formatGpCompact(a.gpAllocated)).append("</font>")
-			.append("  <font color='#555555'>·</font>  ")
-			.append("<font color='#00C27A'>+").append(FlipItemPanel.formatGpCompact(a.expectedProfit))
-			.append("</font><font color='#888888'> total profit</font>");
-		// A1 — per-slot share of bank, e.g. "+0.49% of bank".
-		if (a.profitPctOfBank != null)
-		{
-			line4.append("  <font color='#555555'>·</font>  ")
-				.append("<font color='#6FC3FF'>+").append(formatPct(a.profitPctOfBank))
-				.append("%</font><font color='#888888'> of bank</font>");
-		}
-		line4.append("</html>");
+			.append("</html>");
 		JLabel allocLine = new JLabel(line4.toString());
 		allocLine.setFont(Fonts.SM);
-		allocLine.setToolTipText("Total profit if this slot completes one buy/sell cycle, after GE tax. Not a per-hour rate.");
+		allocLine.setToolTipText("Units to buy × total gp allocated to this slot.");
 
 		JPanel bottomRow = new JPanel(new BorderLayout(6, 0));
 		bottomRow.setBackground(bg);
 		bottomRow.add(allocLine, BorderLayout.CENTER);
 
-		// ── Meta line: bought/qty progress + honest server fill ETA ──────────
+		// ── Buy/sell progress label + bar — mirrors the website's card UI ─────
 		int boughtSoFar = sumQty(a.buys);
-		StringBuilder meta = new StringBuilder("<html><font color='#888888'>");
-		boolean hasMeta = false;
-		if (boughtSoFar > 0)
-		{
-			meta.append("Bought ").append(formatNumber(boughtSoFar))
-				.append(" / ").append(formatNumber(a.qty));
-			hasMeta = true;
-		}
-		if (a.estimatedFillHours != null && a.estimatedFillHours > 0)
-		{
-			if (hasMeta) meta.append("  ·  ");
-			// Verbatim server estimate — already buy-limit-paced server-side.
-			meta.append("~").append(formatHours(a.estimatedFillHours)).append(" to fill");
-			hasMeta = true;
-		}
-		meta.append("</font></html>");
-		JLabel metaLine = hasMeta ? new JLabel(meta.toString()) : null;
-		if (metaLine != null)
-		{
-			metaLine.setFont(Fonts.SM);
-			metaLine.setToolTipText("Estimated fill time accounts for the 4-hour buy-limit reset pacing.");
-		}
+		JLabel progressLabel = buildProgressLabel(a);
+		JComponent progressBar = buildProgressBar(a);
 
 		// ── C — "Stop buying" on still-buying, not-yet-partial slots ─────────
 		JButton stopBuyingBtn = null;
@@ -235,6 +205,19 @@ public class OptimizerAllocationCard extends JPanel
 			stopBuyingBtn = buildStopBuyingButton(boughtSoFar);
 			final int idx = slotIndex;
 			stopBuyingBtn.addActionListener(e -> plugin.markPartial(idx));
+		}
+
+		// Regenerate — on a sold-complete slot, replace the finished position with
+		// a fresh pick. Reuses the swap path (swapPlanSlot), which now bumps
+		// generated_at so the new item also propagates to the site.
+		JButton regenerateBtn = null;
+		if (onSwapClicked != null && isSoldComplete(a))
+		{
+			regenerateBtn = roundedPill("↻ Regenerate");
+			regenerateBtn.setBackground(new Color(0x3E3E3E));
+			regenerateBtn.setForeground(Color.WHITE);
+			regenerateBtn.setToolTipText("Replace this completed slot with a fresh item (updates 07flip.com too)");
+			regenerateBtn.addActionListener(e -> onSwapClicked.run());
 		}
 
 		// ── Stack rows ───────────────────────────────────────────────────────
@@ -254,20 +237,21 @@ public class OptimizerAllocationCard extends JPanel
 		textPanel.add(profitPerUnit);
 		textPanel.add(Box.createVerticalStrut(2));
 		textPanel.add(bottomRow);
-		if (metaLine != null)
+		progressLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
+		progressBar.setAlignmentX(Component.LEFT_ALIGNMENT);
+		textPanel.add(Box.createVerticalStrut(3));
+		textPanel.add(progressLabel);
+		textPanel.add(Box.createVerticalStrut(3));
+		textPanel.add(progressBar);
+		if (stopBuyingBtn != null || regenerateBtn != null)
 		{
-			metaLine.setAlignmentX(Component.LEFT_ALIGNMENT);
-			textPanel.add(Box.createVerticalStrut(2));
-			textPanel.add(metaLine);
-		}
-		if (stopBuyingBtn != null)
-		{
-			JPanel stopRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
-			stopRow.setBackground(bg);
-			stopRow.setAlignmentX(Component.LEFT_ALIGNMENT);
-			stopRow.add(stopBuyingBtn);
+			JPanel actionRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 0));
+			actionRow.setBackground(bg);
+			actionRow.setAlignmentX(Component.LEFT_ALIGNMENT);
+			if (stopBuyingBtn != null) actionRow.add(stopBuyingBtn);
+			if (regenerateBtn != null) actionRow.add(regenerateBtn);
 			textPanel.add(Box.createVerticalStrut(4));
-			textPanel.add(stopRow);
+			textPanel.add(actionRow);
 		}
 
 		add(iconLabel, BorderLayout.WEST);
@@ -363,6 +347,16 @@ public class OptimizerAllocationCard extends JPanel
 		setMaximumSize(new Dimension(Integer.MAX_VALUE, getPreferredSize().height));
 	}
 
+	/** True when the slot's sells have completed its target — CLOSED, or SELLING
+	 *  with {@code sold >=} target qty (covers the bought=0 / site-tracked-sold
+	 *  case where {@code SlotState.derive} can't reach CLOSED). */
+	static boolean isSoldComplete(OptimizeResult.Allocation a)
+	{
+		if (a == null) return false;
+		if (a.state == SlotState.CLOSED) return true;
+		return a.state == SlotState.SELLING && sumQty(a.sells) >= Math.max(1, a.qty);
+	}
+
 	private static JComponent buildStateChip(OptimizeResult.Allocation a)
 	{
 		// PENDING is the empty state — no point rendering a chip for "nothing
@@ -370,13 +364,22 @@ public class OptimizerAllocationCard extends JPanel
 		if (a.state == null || a.state == SlotState.PENDING) return null;
 		String text;
 		Color bg;
-		switch (a.state)
+		if (isSoldComplete(a))
 		{
-			case BUYING:  text = "Buying";  bg = new Color(0x1E3556); break;
-			case FILLED:  text = "Filled";  bg = new Color(0x004D2E); break;
-			case SELLING: text = "Selling"; bg = new Color(0x4A3B17); break;
-			case CLOSED:  text = "Closed";  bg = new Color(0x2A2A2A); break;
-			default:      return null;
+			// Fully sold — show "Sold", not "Selling"/"Closed".
+			text = "Sold";
+			bg = new Color(0x3A2A4A);
+		}
+		else
+		{
+			switch (a.state)
+			{
+				case BUYING:  text = "Buying";  bg = new Color(0x1E3556); break;
+				case FILLED:  text = "Filled";  bg = new Color(0x004D2E); break;
+				case SELLING: text = "Selling"; bg = new Color(0x4A3B17); break;
+				case CLOSED:  text = "Sold";    bg = new Color(0x3A2A4A); break;
+				default:      return null;
+			}
 		}
 		int bought = sumQty(a.buys);
 		int sold   = sumQty(a.sells);
@@ -424,10 +427,10 @@ public class OptimizerAllocationCard extends JPanel
 		return chip;
 	}
 
-	/** Pill button: "Stop buying · sell N & recycle". */
-	private static JButton buildStopBuyingButton(int bought)
+	/** Shared rounded-pill button template for the card's action controls. */
+	private static JButton roundedPill(String text)
 	{
-		JButton btn = new JButton("Stop buying · sell " + formatNumber(bought) + " & recycle")
+		JButton btn = new JButton(text)
 		{
 			@Override
 			protected void paintComponent(Graphics g)
@@ -452,37 +455,94 @@ public class OptimizerAllocationCard extends JPanel
 			public boolean isOpaque() { return false; }
 		};
 		btn.setFont(Fonts.SM);
-		btn.setBackground(new Color(0x4A3B17));
-		btn.setForeground(new Color(0xFFC077));
 		btn.setFocusPainted(false);
 		btn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
 		btn.setBorder(new EmptyBorder(3, 10, 3, 10));
+		return btn;
+	}
+
+	/** Pill button: "Stop buying · sell N & recycle". */
+	private static JButton buildStopBuyingButton(int bought)
+	{
+		JButton btn = roundedPill("Stop buying · sell " + formatNumber(bought) + " & recycle");
+		btn.setBackground(new Color(0x4A3B17));
+		btn.setForeground(new Color(0xFFC077));
 		btn.setToolTipText("<html>Cap this slot to the units you've already bought.<br>"
 			+ "<font color='#888888'>The rest of its budget is freed and redeploys once these sell.</font></html>");
 		return btn;
 	}
 
-	private static String formatPct(double v)
+	/** "B / Q bought · S sold" — the text beside the progress bar. The optimiser
+	 *  counts only up to the plan target, so clamp the displayed counts to qty
+	 *  (belt-and-suspenders for any legacy over-filled leg). */
+	private static JLabel buildProgressLabel(OptimizeResult.Allocation a)
 	{
-		// Two decimals, trailing zeros trimmed: 0.49, 1.2, 3
-		String s = String.format("%.2f", v);
-		if (s.contains("."))
+		int target = Math.max(0, a.qty);
+		int bought = Math.min(sumQty(a.buys), target);
+		int sold   = Math.min(sumQty(a.sells), target);
+		StringBuilder sb = new StringBuilder("<html><font color='#888888'>")
+			.append(formatNumber(bought)).append(" / ").append(formatNumber(a.qty)).append(" bought");
+		if (sold > 0)
 		{
-			s = s.replaceAll("0+$", "").replaceAll("\\.$", "");
+			sb.append("  ·  ").append(formatNumber(sold)).append(" sold");
 		}
-		return s;
+		sb.append("</font></html>");
+		JLabel l = new JLabel(sb.toString());
+		l.setFont(Fonts.SM);
+		l.setToolTipText("Buy/sell progress for this slot.");
+		return l;
 	}
 
-	private static String formatHours(double h)
+	/**
+	 * Thin rounded progress bar mirroring the website's card: GREEN fill = buy
+	 * progress (bought / qty) while the slot is pending/buying; PURPLE fill = sell
+	 * progress (sold / qty) once selling/closed. Empty track when nothing has
+	 * filled yet.
+	 */
+	private static JComponent buildProgressBar(OptimizeResult.Allocation a)
 	{
-		if (h < 1.0)
+		int bought = sumQty(a.buys);
+		int sold   = sumQty(a.sells);
+		boolean selling = a.state == SlotState.SELLING || a.state == SlotState.CLOSED;
+		final Color fill = selling ? new Color(0x9B59B6) : new Color(0x00C27A);
+		// Both phases measure against the slot's TARGET qty: green = bought/qty
+		// while buying, purple = sold/qty while selling/closed. Using qty (not
+		// bought) as the sell denominator matches the site and stays correct when
+		// the tracked bought count is 0/unknown for an already-sold position.
+		int target = Math.max(1, a.qty);
+		double f = selling
+			? Math.min(1.0, sold / (double) target)
+			: Math.min(1.0, bought / (double) target);
+		final double fraction = Math.max(0.0, f);
+
+		JComponent bar = new JComponent()
 		{
-			long mins = Math.round(h * 60);
-			return Math.max(1, mins) + "m";
-		}
-		String s = String.format("%.1f", h);
-		if (s.endsWith(".0")) s = s.substring(0, s.length() - 2);
-		return s + "h";
+			@Override
+			protected void paintComponent(Graphics g)
+			{
+				Graphics2D g2 = (Graphics2D) g.create();
+				g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+				int w = getWidth();
+				int h = getHeight();
+				int arc = h;
+				// Visible track (clearly lighter than the card bg) so an empty bar
+				// still reads as a progress bar at 0%.
+				g2.setColor(new Color(0x3E3E3E));
+				g2.fillRoundRect(0, 0, w, h, arc, arc);
+				int fw = (int) Math.round(w * fraction);
+				if (fw > 0)
+				{
+					g2.setColor(fill);
+					g2.fillRoundRect(0, 0, Math.max(fw, h), h, arc, arc);
+				}
+				g2.dispose();
+			}
+		};
+		bar.setOpaque(false);
+		bar.setPreferredSize(new java.awt.Dimension(0, 8));
+		bar.setMaximumSize(new java.awt.Dimension(Integer.MAX_VALUE, 8));
+		bar.setMinimumSize(new java.awt.Dimension(40, 8));
+		return bar;
 	}
 
 	private static String priceSourceLabel(OptimizeResult.Allocation a)

@@ -83,6 +83,40 @@ public class OptimizeResult
 		 *  surfaced in the empty-state / hint tooltips. Keys are the server's
 		 *  reason codes (low_confidence, low_volume, low_roi, …). */
 		public java.util.Map<String, Integer> eligibilityRejections = new java.util.LinkedHashMap<>();
+
+		/** Deep copy — fresh {@link #slotSuggestion} and {@code eligibilityRejections}
+		 *  map so a game-thread POST snapshot can't tear the nested mutables. */
+		public Summary copy()
+		{
+			Summary c = new Summary();
+			c.capitalInput          = capitalInput;
+			c.capitalDeployed       = capitalDeployed;
+			c.capitalUnused         = capitalUnused;
+			c.slotsUsed             = slotsUsed;
+			c.slotsRequested        = slotsRequested;
+			c.risk                  = risk;
+			c.members               = members;
+			c.expectedProfitTotal   = expectedProfitTotal;
+			c.avgFillConfidence     = avgFillConfidence;
+			c.minFillConfidence     = minFillConfidence;
+			c.recommendedCount      = recommendedCount;
+			c.rawCount              = rawCount;
+			c.maxFillHours          = maxFillHours;
+			c.avgEstimatedFillHours = avgEstimatedFillHours;
+			c.maxEstimatedFillHours = maxEstimatedFillHours;
+			c.fillConfidenceFormula = fillConfidenceFormula;
+			c.pricingNote           = pricingNote;
+			c.compositionNote       = compositionNote;
+			c.realismNote           = realismNote;
+			c.emptyReason           = emptyReason;
+			c.degradedTrendData     = degradedTrendData;
+			c.minProfitPctApplied   = minProfitPctApplied;
+			c.slotSuggestion        = slotSuggestion != null ? slotSuggestion.copy() : null;
+			c.eligibilityRejections = eligibilityRejections != null
+				? new java.util.LinkedHashMap<>(eligibilityRejections)
+				: new java.util.LinkedHashMap<>();
+			return c;
+		}
 	}
 
 	/**
@@ -95,6 +129,15 @@ public class OptimizeResult
 		public int  suggestedSlots;
 		public long additionalCapitalDeployed;
 		public long additionalExpectedProfit;
+
+		public SlotSuggestion copy()
+		{
+			SlotSuggestion c = new SlotSuggestion();
+			c.suggestedSlots            = suggestedSlots;
+			c.additionalCapitalDeployed = additionalCapitalDeployed;
+			c.additionalExpectedProfit  = additionalExpectedProfit;
+			return c;
+		}
 	}
 
 	public static class Allocation
@@ -143,5 +186,76 @@ public class OptimizeResult
 		 *  (so freed capital can be redeployed after the partial sells). 0 when
 		 *  not partial. Wire key {@code reserved_gp}. */
 		public long reservedGp;
+		/** The GE offer epoch this leg's fills belong to
+		 *  ({@code currentTimeMillis()*10 + slot}, minted per offer by the plugin).
+		 *  Set on the first fill the plugin attributes to this slot and held stable
+		 *  for the flip, so the server can key legs by {@code (item_id,
+		 *  offerInstanceId)} (SYNC_CONTRACT §2) instead of collapsing repeat flips
+		 *  of the same item. Null until the plugin trades the slot. Wire key
+		 *  {@code offer_instance_id}. */
+		public Long offerInstanceId;
+		/** Manual-override revision for this leg (SYNC_CONTRACT §7). Server-owned,
+		 *  monotonic, default 0; round-tripped on the wire ({@code override_rev}). A
+		 *  site/plugin correction bumps it and sets authoritative {@code bought}/
+		 *  {@code sold}. */
+		public int overrideRev;
+		/** Who issued the last override — {@code "site"} or {@code "plugin"}, null
+		 *  when none. Round-tripped ({@code override_source}). */
+		public String overrideSource;
+		/** Plugin-local high-water mark: the highest {@link #overrideRev} this client
+		 *  has already adopted for the leg. Drives the §7 merge carve-out. NOT sent to
+		 *  the server (re-adopting an unchanged override is idempotent); {@code transient}
+		 *  so a stray Gson pass never serialises it. */
+		public transient int appliedOverrideRev;
+		/** Plugin-local: set when the login reconcile sees this in-progress leg's GE
+		 *  offer has vanished (offline-completion signature). A non-destructive
+		 *  "looks complete — confirm?" flag — it NEVER mutates counts. Cleared on
+		 *  dismiss or when a server override is adopted. NOT sent to the server. */
+		public transient boolean pendingOfflineReconcile;
+
+		/**
+		 * Deep copy of this allocation, including fresh {@link #buys}/{@link #sells}
+		 * lists of cloned {@link SlotFill}s and a cloned {@link #hourlyTrend}. Used
+		 * to snapshot the live session on the game thread before an off-thread POST
+		 * serialises it, so the writer never iterates a list the game thread is
+		 * mutating. Copies every field (incl. the plugin-local transient ones).
+		 */
+		public Allocation copy()
+		{
+			Allocation c = new Allocation();
+			c.itemId               = itemId;
+			c.name                 = name;
+			c.qty                  = qty;
+			c.gpAllocated          = gpAllocated;
+			c.buyPrice             = buyPrice;
+			c.sellPrice            = sellPrice;
+			c.profitPerUnit        = profitPerUnit;
+			c.expectedProfit       = expectedProfit;
+			c.fillConfidence       = fillConfidence;
+			c.buyLimit             = buyLimit;
+			c.hourlyVolume         = hourlyVolume;
+			c.priceSource          = priceSource;
+			c.rawBuyPrice          = rawBuyPrice;
+			c.rawSellPrice         = rawSellPrice;
+			c.rawProfitPerUnit     = rawProfitPerUnit;
+			c.estimatedFillHours   = estimatedFillHours;
+			c.realisticQtyCap      = realisticQtyCap;
+			c.hourlyTrend          = hourlyTrend != null ? hourlyTrend.clone() : null;
+			c.profitPctOfBank      = profitPctOfBank;
+			c.belowWealthThreshold = belowWealthThreshold;
+			c.state                = state;
+			c.partial              = partial;
+			c.reservedGp           = reservedGp;
+			c.offerInstanceId      = offerInstanceId;
+			c.overrideRev          = overrideRev;
+			c.overrideSource       = overrideSource;
+			c.appliedOverrideRev   = appliedOverrideRev;
+			c.pendingOfflineReconcile = pendingOfflineReconcile;
+			c.buys  = new ArrayList<>();
+			for (SlotFill f : buys)  if (f != null) c.buys.add(f.copy());
+			c.sells = new ArrayList<>();
+			for (SlotFill f : sells) if (f != null) c.sells.add(f.copy());
+			return c;
+		}
 	}
 }
