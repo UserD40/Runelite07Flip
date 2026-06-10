@@ -4377,7 +4377,11 @@ public class O7FlipPlugin extends Plugin
 				activeSession = session;
 				// §5b — fold any trades that landed before this hydrate (the fill
 				// path no-ops while activeSession is null) back onto empty legs.
-				if (retroAttributeFills(session))
+				boolean changed = retroAttributeFills(session);
+				// §10 — pick up sell listings that predate this hydrate (login
+				// replay fires before the session GET lands).
+				changed |= sweepSellListedFromOffers(session);
+				if (changed)
 				{
 					scheduleSessionPost();
 				}
@@ -4539,7 +4543,9 @@ public class O7FlipPlugin extends Plugin
 				if (local == null)
 				{
 					activeSession = remote;
-					if (retroAttributeFills(remote))
+					boolean seeded = retroAttributeFills(remote);
+					seeded |= sweepSellListedFromOffers(remote);
+					if (seeded)
 					{
 						scheduleSessionPost();
 					}
@@ -4554,7 +4560,10 @@ public class O7FlipPlugin extends Plugin
 				// §5b — heal legs that are STILL empty on both surfaces from the
 				// local GE history (covers fills lost before this poll cycle).
 				// Idempotent: a healed leg is non-empty and skipped next poll.
-				if (retroAttributeFills(local))
+				boolean healed = retroAttributeFills(local);
+				// §10 — reconcile sell-listed flags against the live GE offers.
+				healed |= sweepSellListedFromOffers(local);
+				if (healed)
 				{
 					changed = true;
 					scheduleSessionPost();
@@ -4594,7 +4603,9 @@ public class O7FlipPlugin extends Plugin
 				}
 				// §5b — Resync is the user's "make it right" button, so also heal
 				// any legs that are empty on both surfaces from local GE history.
-				if (retroAttributeFills(activeSession))
+				boolean healed = retroAttributeFills(activeSession);
+				healed |= sweepSellListedFromOffers(activeSession);
+				if (healed)
 				{
 					scheduleSessionPost();
 				}
@@ -4852,6 +4863,16 @@ public class O7FlipPlugin extends Plugin
 	{
 		com.o7flip.model.OptimizerSession s = activeSession;
 		if (s == null || s.slots == null) return;
+
+		// §10 — post-login sweep: the GE offer replay at login fires before the
+		// session hydrate, so reconcile the sell-listed flags here too (this
+		// runs once per arm, on the game thread, with the offers loaded).
+		if (sweepSellListedFromOffers(s))
+		{
+			scheduleSessionPost();
+			final com.o7flip.model.OptimizerSession listedSnap = s;
+			SwingUtilities.invokeLater(() -> panel.hydrateOptimizerSession(listedSnap));
+		}
 
 		// Items with a live (in-progress) GE offer right now — a sell still sitting
 		// in the GE means the position is NOT complete.
@@ -5159,6 +5180,51 @@ public class O7FlipPlugin extends Plugin
 		pendingGeSellItemId   = itemId;
 		pendingGeSellPrice    = price;
 		pendingGeSellName     = name;
+	}
+
+	/**
+	 * SYNC_CONTRACT §10 sweep — reconciles every plan leg's {@code sellListed}
+	 * flag against the CURRENT GE offers. The offer-changed handler catches live
+	 * transitions, but misses listings that predate session hydration: at login
+	 * the GE events replay within the first ticks, BEFORE the startup session
+	 * GET has landed, so {@link #markPlanSellListed} no-ops on a null session —
+	 * and a listed offer that just sits there never fires another event. The
+	 * sweep also self-heals missed cancellations. Game thread only; no-op
+	 * unless logged in (the offer array is only trustworthy in game).
+	 *
+	 * @return true when any leg changed (caller should POST + re-render).
+	 */
+	private boolean sweepSellListedFromOffers(com.o7flip.model.OptimizerSession s)
+	{
+		if (s == null || s.slots == null) return false;
+		if (client.getGameState() != GameState.LOGGED_IN) return false;
+		GrandExchangeOffer[] offers = client.getGrandExchangeOffers();
+		if (offers == null) return false;
+		java.util.Set<Integer> liveSells = new java.util.HashSet<>();
+		for (GrandExchangeOffer o : offers)
+		{
+			if (o != null && o.getState() == GrandExchangeOfferState.SELLING)
+			{
+				liveSells.add(o.getItemId());
+			}
+		}
+		boolean changed = false;
+		for (com.o7flip.model.OptimizeResult.Allocation a : s.slots)
+		{
+			if (a == null || a.itemId <= 0) continue;
+			boolean live = liveSells.contains(a.itemId);
+			if (live && !a.sellListed && a.state != com.o7flip.model.SlotState.CLOSED)
+			{
+				a.sellListed = true;
+				changed = true;
+			}
+			else if (!live && a.sellListed)
+			{
+				a.sellListed = false;
+				changed = true;
+			}
+		}
+		return changed;
 	}
 
 	/**
