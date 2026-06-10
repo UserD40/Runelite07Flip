@@ -1826,6 +1826,7 @@ public class O7FlipApiClient
 		parseSlotFills(a, "sells", al.sells);
 		al.state                 = com.o7flip.model.SlotState.fromWire(getString(a, "state", "pending"));
 		al.partial               = getBool(a, "partial", false);
+		al.sellListed            = getBool(a, "sell_listed", false);
 		al.reservedGp            = getLong(a, "reserved_gp", 0);
 		al.offerInstanceId       = getLongOrNull(a, "offer_instance_id");
 		// §7 manual override — server-owned rev + source, round-tripped on POST.
@@ -2222,6 +2223,9 @@ public class O7FlipApiClient
 				s.add("buys",  fillsToJson(al.buys));
 				s.add("sells", fillsToJson(al.sells));
 				s.addProperty("state", al.state == null ? "pending" : al.state.wire());
+				// SYNC_CONTRACT §10 — live sell-listing signal so the site can show
+				// "Selling — awaiting buyer" the moment the offer is placed.
+				if (al.sellListed) s.addProperty("sell_listed", true);
 				// Partial-fill round-trip — the website tolerates + renders these.
 				if (al.partial)
 				{

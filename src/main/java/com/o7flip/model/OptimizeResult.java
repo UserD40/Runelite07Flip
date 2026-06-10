@@ -212,6 +212,13 @@ public class OptimizeResult
 		 *  "looks complete — confirm?" flag — it NEVER mutates counts. Cleared on
 		 *  dismiss or when a server override is adopted. NOT sent to the server. */
 		public transient boolean pendingOfflineReconcile;
+		/** SYNC_CONTRACT §10 — true while a GE SELL offer is LISTED for this leg's
+		 *  item (set the moment the offer is placed, before any sell fill lands).
+		 *  Bridges the gap where a fully-bought leg sat at "Filled" until the
+		 *  first sell fill: both surfaces can render "Selling — awaiting buyer".
+		 *  Plugin-authoritative; cleared when the sell is cancelled with no other
+		 *  live sell offer, or when the leg closes. Wire key {@code sell_listed}. */
+		public boolean sellListed;
 
 		/**
 		 * Deep copy of this allocation, including fresh {@link #buys}/{@link #sells}
@@ -251,6 +258,7 @@ public class OptimizeResult
 			c.overrideSource       = overrideSource;
 			c.appliedOverrideRev   = appliedOverrideRev;
 			c.pendingOfflineReconcile = pendingOfflineReconcile;
+			c.sellListed           = sellListed;
 			c.buys  = new ArrayList<>();
 			for (SlotFill f : buys)  if (f != null) c.buys.add(f.copy());
 			c.sells = new ArrayList<>();

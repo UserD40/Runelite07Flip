@@ -24,6 +24,7 @@
  */
 package com.o7flip;
 
+import java.awt.Color;
 import net.runelite.client.config.Config;
 import net.runelite.client.config.ConfigGroup;
 import net.runelite.client.config.ConfigItem;
@@ -37,29 +38,50 @@ public interface O7FlipConfig extends Config
 
 	@ConfigSection(
 		name = "General",
-		description = "API key, refresh interval and skill settings.",
+		description = "Your 07flip.com API key and how often data is refreshed.",
 		position = 0
 	)
 	String generalSection = "general";
 
 	@ConfigSection(
-		name = "Panel tabs",
-		description = "Show or hide tabs in the 07Flip sidebar panel.",
+		name = "Sidebar panel",
+		description = "Tabs and behaviour of the 07Flip sidebar panel.",
 		position = 1
 	)
 	String tabsSection = "tabs";
 
 	@ConfigSection(
-		name = "Grand Exchange integration",
-		description = "Overlays and helpers shown inside the Grand Exchange interface.",
+		name = "GE offers",
+		description = "Helpers for setting up buy and sell offers at the Grand Exchange.",
 		position = 2
 	)
 	String geSection = "ge";
 
 	@ConfigSection(
+		name = "GE price overlay",
+		description = "The movable 07Flip overlay shown on the GE offer setup screen.",
+		position = 3
+	)
+	String geOverlaySection = "geoverlay";
+
+	@ConfigSection(
+		name = "Inventory",
+		description = "Helpers shown on items in your inventory.",
+		position = 4
+	)
+	String inventorySection = "inventory";
+
+	@ConfigSection(
+		name = "GP drop animation",
+		description = "The fading +X gp / -X gp drop shown when a flip completes — position, font and colours.",
+		position = 5
+	)
+	String gpDropSection = "gpdrop";
+
+	@ConfigSection(
 		name = "Trade tracker",
 		description = "Options for the local trade history and sharing it with 07flip.com.",
-		position = 3
+		position = 6
 	)
 	String trackerSection = "tracker";
 
@@ -85,8 +107,9 @@ public interface O7FlipConfig extends Config
 
 	@ConfigItem(
 		keyName = "refreshInterval",
-		name = "Refresh interval (seconds)",
-		description = "How often to fetch data from 07flip.com. Minimum 60 seconds.",
+		name = "",
+		description = "",
+		hidden = true,
 		section = generalSection,
 		position = 1
 	)
@@ -99,8 +122,8 @@ public interface O7FlipConfig extends Config
 	@ConfigItem(
 		keyName = "smithingLevel",
 		name = "Smithing level",
-		description = "Your Smithing level, used to calculate PoH repair costs for Barrows and Moon.",
-		section = generalSection,
+		description = "Your Smithing level, used to calculate PoH repair costs in the Barrows and Moons tabs.",
+		section = tabsSection,
 		position = 2
 	)
 	@Range(min = 1, max = 99)
@@ -115,8 +138,8 @@ public interface O7FlipConfig extends Config
 		description = "<html>Filter the Flips tab to items you can afford right now based on the coins<br>"
 			+ "in your inventory. The cash value is rounded down to the nearest 100,000 gp before<br>"
 			+ "it leaves your machine — exact wealth is never sent to 07flip.com.</html>",
-		section = generalSection,
-		position = 3
+		section = tabsSection,
+		position = 1
 	)
 	default boolean usePersonalisedFlips()
 	{
@@ -466,10 +489,10 @@ public interface O7FlipConfig extends Config
 
 	@ConfigItem(
 		keyName = "showGeOfferOverlay",
-		name = "Show price overlay on GE setup",
+		name = "Show price overlay",
 		description = "Show a movable 07Flip overlay on the GE setup screen with recommended buy/sell prices for the current item. Right-click the overlay and pick a price to auto-fill the custom price input.",
-		section = geSection,
-		position = 1
+		section = geOverlaySection,
+		position = 0
 	)
 	default boolean showGeOfferOverlay()
 	{
@@ -481,7 +504,7 @@ public interface O7FlipConfig extends Config
 		name = "Highlight 'Enter price' button",
 		description = "Show the yellow highlight around the Enter price button after you right-click a flip in the panel.",
 		section = geSection,
-		position = 2
+		position = 1
 	)
 	default boolean showGePriceHint()
 	{
@@ -490,10 +513,10 @@ public interface O7FlipConfig extends Config
 
 	@ConfigItem(
 		keyName = "inventoryCheckOnSell",
-		name = "Hide 'Sell on GE' when not carrying item",
+		name = "Hide 'Sell on GE' if not held",
 		description = "Hide the Sell on GE right-click option if the item is not in your inventory.",
-		section = geSection,
-		position = 3
+		section = inventorySection,
+		position = 1
 	)
 	default boolean inventoryCheckOnSell()
 	{
@@ -501,23 +524,11 @@ public interface O7FlipConfig extends Config
 	}
 
 	@ConfigItem(
-		keyName = "showGpDropOverlay",
-		name = "Show GP drop animation on completed sells",
-		description = "Show a fading +X gp / -X gp drop near the GE interface each time a flip completes.",
-		section = geSection,
-		position = 4
-	)
-	default boolean showGpDropOverlay()
-	{
-		return true;
-	}
-
-	@ConfigItem(
 		keyName = "showInventoryTooltip",
-		name = "Show inventory tooltip with cost basis",
+		name = "Show cost basis tooltip",
 		description = "Hover an item in inventory to see your cost basis and 07Flip's recommended sell price.",
-		section = geSection,
-		position = 5
+		section = inventorySection,
+		position = 0
 	)
 	default boolean showInventoryTooltip()
 	{
@@ -526,10 +537,10 @@ public interface O7FlipConfig extends Config
 
 	@ConfigItem(
 		keyName = "showGeOverlayScore",
-		name = "Overlay: show Score row",
+		name = "Show Score row",
 		description = "Show the 07Flip merchant score row inside the GE setup overlay. Turn off for a smaller overlay.",
-		section = geSection,
-		position = 6
+		section = geOverlaySection,
+		position = 1
 	)
 	default boolean showGeOverlayScore()
 	{
@@ -538,10 +549,10 @@ public interface O7FlipConfig extends Config
 
 	@ConfigItem(
 		keyName = "showGeOverlayBuyLimit",
-		name = "Overlay: show Buy limit row",
+		name = "Show Buy limit row",
 		description = "Show the 4-hour GE buy limit inside the GE setup overlay.",
-		section = geSection,
-		position = 7
+		section = geOverlaySection,
+		position = 2
 	)
 	default boolean showGeOverlayBuyLimit()
 	{
@@ -550,10 +561,10 @@ public interface O7FlipConfig extends Config
 
 	@ConfigItem(
 		keyName = "showGeOverlayVolume",
-		name = "Overlay: show Volume row",
+		name = "Show Volume row",
 		description = "Show hourly GE volume inside the GE setup overlay. Turn off for a smaller overlay.",
-		section = geSection,
-		position = 8
+		section = geOverlaySection,
+		position = 3
 	)
 	default boolean showGeOverlayVolume()
 	{
@@ -562,10 +573,10 @@ public interface O7FlipConfig extends Config
 
 	@ConfigItem(
 		keyName = "showGeOverlayChart",
-		name = "Overlay: show 24h chart",
+		name = "Show 24h chart",
 		description = "Show the compact 24h buy/sell sparkline inside the GE setup overlay. Turn off for a much smaller overlay.",
-		section = geSection,
-		position = 9
+		section = geOverlaySection,
+		position = 4
 	)
 	default boolean showGeOverlayChart()
 	{
@@ -574,19 +585,161 @@ public interface O7FlipConfig extends Config
 
 	@ConfigItem(
 		keyName = "frozenSellStaleAfterHours",
-		name = "Refresh frozen sell after (hours)",
+		name = "Frozen sell expiry",
 		description = "<html>When you buy an item, the recommended sell price at that moment is "
 			+ "<b>frozen</b> so the GE setup overlay keeps suggesting that target even if the market dips. "
 			+ "If the item stays unsold for longer than this many hours, the frozen price is replaced "
 			+ "with the live 07flip recommended price so you're not chasing a stale target.<br>"
 			+ "Set higher to hold targets longer, lower to follow the market more aggressively.</html>",
 		section = geSection,
-		position = 10
+		position = 2
 	)
 	@Range(min = 1, max = 48)
 	default int frozenSellStaleAfterHours()
 	{
 		return 3;
+	}
+
+	// ── GP drop animation ──────────────────────────────────────────────────
+
+	/** Typeface options for the GP drop text. Mapped to actual fonts in
+	 *  {@code GpDropOverlay} — RuneScape faces come from {@code FontManager}. */
+	enum GpDropFontType
+	{
+		DEFAULT_BOLD("Default (bold)"),
+		RUNESCAPE("RuneScape"),
+		RUNESCAPE_BOLD("RuneScape bold"),
+		SANS("Sans"),
+		SANS_BOLD("Sans bold");
+
+		private final String label;
+
+		GpDropFontType(String label)
+		{
+			this.label = label;
+		}
+
+		@Override
+		public String toString()
+		{
+			return label;
+		}
+	}
+
+	@ConfigItem(
+		keyName = "showGpDropOverlay",
+		name = "Show GP drop animation",
+		description = "Show a fading +X gp / -X gp drop near the GE interface each time a flip completes.",
+		section = gpDropSection,
+		position = 0
+	)
+	default boolean showGpDropOverlay()
+	{
+		return true;
+	}
+
+	@ConfigItem(
+		keyName = "gpDropOffsetX",
+		name = "Offset X",
+		description = "<html>Horizontal position adjustment for the GP drop animation, in pixels.<br>"
+			+ "0 = default (centred on the GE window). Negative moves left, positive moves right.</html>",
+		section = gpDropSection,
+		position = 1
+	)
+	@Range(min = -2000, max = 2000)
+	default int gpDropOffsetX()
+	{
+		return 0;
+	}
+
+	@ConfigItem(
+		keyName = "gpDropOffsetY",
+		name = "Offset Y",
+		description = "<html>Vertical position adjustment for the GP drop animation, in pixels.<br>"
+			+ "0 = default (top of the GE window). Negative moves up, positive moves down.</html>",
+		section = gpDropSection,
+		position = 2
+	)
+	@Range(min = -2000, max = 2000)
+	default int gpDropOffsetY()
+	{
+		return 0;
+	}
+
+	@ConfigItem(
+		keyName = "gpDropPreview",
+		name = "Position preview",
+		description = "<html>Continuously show a sample GP drop so you can see exactly how and where it will<br>"
+			+ "appear while adjusting the settings in this section. <b>Turn this off when you're done.</b></html>",
+		section = gpDropSection,
+		position = 3
+	)
+	default boolean gpDropPreview()
+	{
+		return false;
+	}
+
+	@ConfigItem(
+		keyName = "gpDropDurationMs",
+		name = "Animation time (ms)",
+		description = "<html>How long each GP drop lasts, in milliseconds, before it fully fades out.<br>"
+			+ "Default 1500 (1.5 seconds). The rise distance stays the same, so longer = slower drift.</html>",
+		section = gpDropSection,
+		position = 4
+	)
+	@Range(min = 500, max = 10000)
+	default int gpDropDurationMs()
+	{
+		return 1500;
+	}
+
+	@ConfigItem(
+		keyName = "gpDropFontType",
+		name = "Font",
+		description = "Typeface used for the GP drop text.",
+		section = gpDropSection,
+		position = 5
+	)
+	default GpDropFontType gpDropFontType()
+	{
+		return GpDropFontType.DEFAULT_BOLD;
+	}
+
+	@ConfigItem(
+		keyName = "gpDropFontSize",
+		name = "Font size",
+		description = "Size of the GP drop text, in points.",
+		section = gpDropSection,
+		position = 6
+	)
+	@Range(min = 8, max = 48)
+	default int gpDropFontSize()
+	{
+		return 14;
+	}
+
+	@ConfigItem(
+		keyName = "gpDropProfitColor",
+		name = "Profit colour",
+		description = "Colour of the GP drop text when the completed flip made a profit.",
+		section = gpDropSection,
+		position = 7
+	)
+	default Color gpDropProfitColor()
+	{
+		return new Color(0x00C27A);
+	}
+
+	@ConfigItem(
+		keyName = "gpDropLossColor",
+		name = "Loss colour",
+		description = "Colour of the GP drop text when the completed flip made a loss.",
+		section = gpDropSection,
+		position = 8
+	)
+	default Color gpDropLossColor()
+	{
+		return new Color(0xE85050);
 	}
 
 	// ── Trade tracker ───────────────────────────────────────────────────────

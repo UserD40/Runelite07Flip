@@ -417,10 +417,8 @@ public class O7FlipPanel extends PluginPanel
 	 *  summary pill so the allocations get the panel's full vertical space.
 	 *  Reset by the Reconfigure button. */
 	private boolean optFormCollapsed;
-	private JPanel  optInputsPanel;       // the full setup form
-	private JPanel  optCollapsedPanel;    // the compact pill shown after build
-	private JPanel  optInputsHost;        // CardLayout-style container swapping the two
-	private JLabel  optCollapsedLabel;    // text on the compact pill
+	private JPanel  optCollapsedPanel;    // the "Active plan · Reconfigure" header strip
+	private JPanel  optInputsHost;        // hosts the strip while a plan is live, empty otherwise
 	private com.o7flip.model.ScreenerPreset activeScreenerPreset;
 	// Inner Other-tab selection — preserved across rebuildTabs so the user
 	// doesn't get snapped back to the first sub-tab whenever data refreshes
@@ -5230,188 +5228,22 @@ public class O7FlipPanel extends PluginPanel
 	 * Same pattern as the Barrows tab so the navigation feels consistent.
 	 */
 	/**
-	 * Builds the Optimizer "Plan" sub-tab. Header row hosts the inputs
-	 * (slots stepper, composition stepper, risk pills, fill-window chips,
-	 * members tri-state, Build button). The list panel below renders the
-	 * server's allocation cards + summary block.
+	 * Builds the Optimizer "Plan" sub-tab. Plans are BUILT on 07flip.com
+	 * (the in-panel slots/risk/window form is gone — the website is the
+	 * configuration surface and syncs here automatically). The header strip
+	 * shows a Reconfigure link while a plan is live; the list below renders
+	 * the allocation cards, or a setup CTA when there is no plan yet.
 	 */
 	private JPanel buildPlanTab()
 	{
 		optimizerListPanel = listPanel();
-		// Initial empty state — the user hasn't built a plan yet.
+		// Initial empty state — points the user at the website optimiser.
 		renderOptimizerEmpty();
 
-		// ── Inputs panel ─────────────────────────────────────────────────────
-		JPanel inputs = new JPanel();
-		inputs.setLayout(new BoxLayout(inputs, BoxLayout.Y_AXIS));
-		inputs.setBackground(ColorScheme.DARKER_GRAY_COLOR);
-		inputs.setBorder(new EmptyBorder(6, 8, 6, 8));
-
-		// Row: slots stepper. Composition (big_slots) is gone — the engine
-		// now picks per-slot gp/h dynamically, so the user only sets total
-		// slots and the optimiser splits them between big positions and
-		// fillers internally.
-		JPanel slotsRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 2));
-		slotsRow.setBackground(ColorScheme.DARKER_GRAY_COLOR);
-		slotsRow.add(buildStepper("Slots", () -> optSlots, v -> optSlots = Math.max(1, Math.min(8, v)), 1, 8));
-		inputs.add(slotsRow);
-
-		// Row: risk pills
-		JPanel riskRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 2));
-		riskRow.setBackground(ColorScheme.DARKER_GRAY_COLOR);
-		JLabel riskLabel = new JLabel("Risk");
-		riskLabel.setFont(Fonts.SM);
-		riskLabel.setForeground(new Color(0xAAAAAA));
-		riskRow.add(riskLabel);
-		String[] riskKeys = {"low", "medium", "high"};
-		String[] riskLabels = {"Low", "Medium", "High"};
-		JButton[] riskBtns = new JButton[3];
-		for (int i = 0; i < riskKeys.length; i++)
-		{
-			final String k = riskKeys[i];
-			JButton b = pillButton(riskLabels[i]);
-			applySortStyle(b, k.equals(optRisk));
-			b.addActionListener(e ->
-			{
-				optRisk = k;
-				for (int j = 0; j < riskBtns.length; j++)
-				{
-					applySortStyle(riskBtns[j], riskKeys[j].equals(optRisk));
-				}
-			});
-			riskBtns[i] = b;
-			riskRow.add(b);
-		}
-		inputs.add(riskRow);
-
-		// Row: fill-window chips (Quick 2h / Standard 4h / Patient 12h / Long 24h)
-		JPanel fillRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 2));
-		fillRow.setBackground(ColorScheme.DARKER_GRAY_COLOR);
-		JLabel fillLabel = new JLabel("Window");
-		fillLabel.setFont(Fonts.SM);
-		fillLabel.setForeground(new Color(0xAAAAAA));
-		fillRow.add(fillLabel);
-		int[]    fillHours  = {2, 4, 12, 24};
-		String[] fillLabels = {"2h", "4h", "12h", "24h"};
-		JButton[] fillBtns = new JButton[4];
-		for (int i = 0; i < fillHours.length; i++)
-		{
-			final int h = fillHours[i];
-			JButton b = pillButton(fillLabels[i]);
-			applySortStyle(b, h == optMaxFillHours);
-			b.addActionListener(e ->
-			{
-				optMaxFillHours = h;
-				for (int j = 0; j < fillBtns.length; j++)
-				{
-					applySortStyle(fillBtns[j], fillHours[j] == optMaxFillHours);
-				}
-			});
-			fillBtns[i] = b;
-			fillRow.add(b);
-		}
-		inputs.add(fillRow);
-
-		// Row: members tri-state
-		JPanel memRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 2));
-		memRow.setBackground(ColorScheme.DARKER_GRAY_COLOR);
-		JLabel memLabel = new JLabel("Items");
-		memLabel.setFont(Fonts.SM);
-		memLabel.setForeground(new Color(0xAAAAAA));
-		memRow.add(memLabel);
-		String[] memKeys = {"any", "members", "f2p"};
-		String[] memLabels = {"Any", "Members", "F2P"};
-		JButton[] memBtns = new JButton[3];
-		for (int i = 0; i < memKeys.length; i++)
-		{
-			final int idx = i;
-			JButton b = pillButton(memLabels[i]);
-			applySortStyle(b, memKeyMatches(memKeys[idx], optMembers));
-			b.addActionListener(e ->
-			{
-				switch (memKeys[idx])
-				{
-					case "any":     optMembers = null;        break;
-					case "members": optMembers = Boolean.TRUE; break;
-					case "f2p":     optMembers = Boolean.FALSE;break;
-				}
-				for (int j = 0; j < memBtns.length; j++)
-				{
-					applySortStyle(memBtns[j], memKeyMatches(memKeys[j], optMembers));
-				}
-			});
-			memBtns[i] = b;
-			memRow.add(b);
-		}
-		inputs.add(memRow);
-
-		// Row: optional per-slot wealth floor (Task B). 0 = auto (omitted from
-		// the request). Whole-percent stepper 0..10 keeps the UI simple while
-		// the wire value is a number the server clamps to 0..10.
-		JPanel minProfitRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 2));
-		minProfitRow.setBackground(ColorScheme.DARKER_GRAY_COLOR);
-		minProfitRow.add(buildStepper("Min profit %", () -> optMinProfitPct,
-			v -> optMinProfitPct = Math.max(0, Math.min(10, v)), 0, 10));
-		JLabel minProfitHint = new JLabel("0 = auto");
-		minProfitHint.setFont(Fonts.SM);
-		minProfitHint.setForeground(new Color(0x777777));
-		minProfitHint.setToolTipText("Per-slot wealth floor: suppress slots whose cycle profit is below this % of bank. 0 lets the server pick.");
-		minProfitRow.add(minProfitHint);
-		inputs.add(minProfitRow);
-
-		// Row: capital readout + Build button
-		JLabel capitalLabel = new JLabel(buildOptimizerCapitalLabel());
-		capitalLabel.setFont(Fonts.SM);
-		capitalLabel.setForeground(new Color(0xAAAAAA));
-		capitalLabel.setBorder(new EmptyBorder(6, 0, 0, 0));
-		inputs.add(capitalLabel);
-
-		JButton buildBtn = pillButton("Build plan");
-		buildBtn.setBackground(ORANGE);
-		buildBtn.setForeground(Color.BLACK);
-		buildBtn.addActionListener(e ->
-		{
-			if (optInFlight) return;
-			capitalLabel.setText(buildOptimizerCapitalLabel());
-			if (plugin == null) return;
-			long capital = plugin.effectiveCapital();
-			if (capital <= 0)
-			{
-				renderOptimizerEmptyMessage("Set capital first",
-					"Click the pen icon in the header to enter your capital before building a plan.");
-				return;
-			}
-			optInFlight = true;
-			optShowingHistory = false;
-			renderOptimizerLoading();
-			Double minProfit = optMinProfitPct > 0 ? (double) optMinProfitPct : null;
-			plugin.runOptimizer(capital, optSlots, optRisk, optMaxFillHours, optMembers, minProfit);
-		});
-		// ✕ Clear button — wipes both the local plan and the server-side
-		// session via DELETE /optimize/active. Discreet circular button so
-		// it doesn't compete visually with the orange Build button.
-		JButton clearBtn = pillButton("✕");
-		clearBtn.setForeground(new Color(0x888888));
-		clearBtn.setBackground(new Color(0x2A2A2A));
-		clearBtn.setToolTipText("Clear the active plan (also wipes it on the website)");
-		clearBtn.addActionListener(e ->
-		{
-			if (plugin != null) plugin.clearActivePlan();
-		});
-
-		JPanel buildRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 2));
-		buildRow.setBackground(ColorScheme.DARKER_GRAY_COLOR);
-		buildRow.add(buildBtn);
-		buildRow.add(clearBtn);
-		inputs.add(buildRow);
-
-		optInputsPanel = inputs;
 		optCollapsedPanel = buildOptimizerCollapsedPill();
 
-		// Host swaps between the full inputs and the compact summary pill.
-		// We use a plain panel with one-or-the-other visibility instead of
-		// CardLayout so the surrounding layout doesn't reserve room for the
-		// taller one.
+		// Host shows the header strip only while a plan is live; empty
+		// otherwise (the list's empty state carries the setup CTA).
 		optInputsHost = new JPanel(new BorderLayout());
 		optInputsHost.setBackground(ColorScheme.DARKER_GRAY_COLOR);
 		applyOptimizerFormVisibility();
@@ -5419,54 +5251,48 @@ public class O7FlipPanel extends PluginPanel
 		return assembleTab(optInputsHost, optimizerListPanel, null);
 	}
 
-	/** Builds the compact "100M · 8 slots · medium · 4h ✎ Reconfigure" pill. */
+	/**
+	 * Header strip shown while a plan is live. The ⟳ Resync button is gone —
+	 * the 15s poll now adopts site-side structure changes, merges fills and
+	 * retro-attributes automatically, so a manual resync had nothing left to
+	 * do. One button, one sentence saying what this view is.
+	 */
 	private JPanel buildOptimizerCollapsedPill()
 	{
-		JPanel row = new JPanel(new BorderLayout(6, 0));
+		JPanel row = new JPanel(new BorderLayout(8, 0));
 		row.setBackground(ColorScheme.DARKER_GRAY_COLOR);
-		row.setBorder(new EmptyBorder(8, 8, 8, 8));
+		row.setBorder(new EmptyBorder(8, 10, 8, 10));
 
-		optCollapsedLabel = new JLabel(buildOptimizerCollapsedLabelHtml());
-		optCollapsedLabel.setFont(Fonts.SM);
+		JLabel title = new JLabel("Active plan");
+		title.setFont(Fonts.BOLD);
+		title.setForeground(Color.WHITE);
+		JLabel caption = new JLabel("Syncs with 07flip.com");
+		caption.setFont(Fonts.SM);
+		caption.setForeground(new Color(0x888888));
+
+		JPanel text = new JPanel(new GridLayout(2, 1, 0, 1));
+		text.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+		text.add(title);
+		text.add(caption);
 
 		JButton reconfigure = pillButton("Reconfigure");
 		reconfigure.setBackground(new Color(0x3E3E3E));
 		reconfigure.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
-		reconfigure.setToolTipText("Reconfigure your plan on 07flip.com, then hit ⟳ to resync");
+		reconfigure.setToolTipText("<html>Adjust capital, slots, risk or fill window on 07flip.com.<br>"
+			+ "<font color='#888888'>Changes appear here automatically within a few seconds.</font></html>");
 		reconfigure.addActionListener(e ->
-			LinkBrowser.browse("https://07flip.com/optimiser"));
-
-		// ⟳ Resync — force-GET the server plan and adopt its structure, re-attaching
-		// local fills. For when a website re-optimise hasn't shown up in the panel yet.
-		JButton resync = pillButton("⟳");
-		resync.setBackground(new Color(0x2A2A2A));
-		resync.setForeground(new Color(0x888888));
-		resync.setToolTipText("Resync the plan from 07flip.com (keeps your local fills)");
-		resync.addActionListener(e ->
 		{
-			if (plugin != null) plugin.resyncActivePlan();
+			LinkBrowser.browse("https://07flip.com/optimiser");
+			if (plugin != null) plugin.startEagerSessionDiscovery();
 		});
 
-		JPanel east = new JPanel(new FlowLayout(FlowLayout.RIGHT, 6, 0));
+		JPanel east = new JPanel(new FlowLayout(FlowLayout.RIGHT, 0, 4));
 		east.setBackground(ColorScheme.DARKER_GRAY_COLOR);
-		east.add(resync);
 		east.add(reconfigure);
 
-		row.add(optCollapsedLabel, BorderLayout.CENTER);
-		row.add(east,              BorderLayout.EAST);
+		row.add(text, BorderLayout.CENTER);
+		row.add(east, BorderLayout.EAST);
 		return row;
-	}
-
-	private String buildOptimizerCollapsedLabelHtml()
-	{
-		long cap = plugin != null ? plugin.effectiveCapital() : 0L;
-		StringBuilder sb = new StringBuilder("<html><font color='#FFFFFF'><b>")
-			.append(formatCapital(cap)).append("</b></font>")
-			.append("  <font color='#888888'>· ").append(optSlots).append(" slots</font>")
-			.append("  <font color='#888888'>· ").append(optRisk).append("</font>")
-			.append("  <font color='#888888'>· ").append(optMaxFillHours).append("h</font>")
-			.append("</html>");
-		return sb.toString();
 	}
 
 	private void applyOptimizerFormVisibility()
@@ -5475,13 +5301,9 @@ public class O7FlipPanel extends PluginPanel
 		optInputsHost.removeAll();
 		if (optFormCollapsed && optCollapsedPanel != null)
 		{
-			optCollapsedLabel.setText(buildOptimizerCollapsedLabelHtml());
 			optInputsHost.add(optCollapsedPanel, BorderLayout.CENTER);
 		}
-		else if (optInputsPanel != null)
-		{
-			optInputsHost.add(optInputsPanel, BorderLayout.CENTER);
-		}
+		// No plan → empty header; the list's empty state carries the setup CTA.
 		optInputsHost.revalidate();
 		optInputsHost.repaint();
 	}
@@ -5680,8 +5502,31 @@ public class O7FlipPanel extends PluginPanel
 
 	private void renderOptimizerEmpty()
 	{
-		renderOptimizerEmptyMessage("Build a plan",
-			"Pick slots / risk / fill window above, then click Build plan.");
+		if (optimizerListPanel == null) return;
+		optimizerListPanel.removeAll();
+		optimizerListPanel.add(emptyLabel("No active plan",
+			"Build your flip plan on 07flip.com — it appears here automatically and tracks your GE fills."));
+
+		JButton open = pillButton("Open optimiser");
+		open.setBackground(ORANGE);
+		open.setForeground(Color.BLACK);
+		open.setToolTipText("Opens 07flip.com/optimiser in your browser");
+		open.addActionListener(e ->
+		{
+			LinkBrowser.browse("https://07flip.com/optimiser");
+			// Burst-poll while they build so the plan lands here within ~5s of
+			// saving, instead of waiting on the next regular poll cycle.
+			if (plugin != null) plugin.startEagerSessionDiscovery();
+		});
+		JPanel wrap = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
+		wrap.setBackground(ColorScheme.DARK_GRAY_COLOR);
+		wrap.setBorder(new EmptyBorder(0, 14, 16, 14));
+		wrap.setAlignmentX(Component.LEFT_ALIGNMENT);
+		wrap.add(open);
+		optimizerListPanel.add(wrap);
+
+		optimizerListPanel.revalidate();
+		optimizerListPanel.repaint();
 	}
 
 	private void renderOptimizerEmptyMessage(String title, String sub)

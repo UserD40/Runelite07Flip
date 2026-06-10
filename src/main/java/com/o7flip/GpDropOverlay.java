@@ -37,6 +37,7 @@ import javax.inject.Singleton;
 import net.runelite.api.Client;
 import net.runelite.api.gameval.InterfaceID;
 import net.runelite.api.widgets.Widget;
+import net.runelite.client.ui.FontManager;
 import net.runelite.client.ui.overlay.Overlay;
 import net.runelite.client.ui.overlay.OverlayLayer;
 import net.runelite.client.ui.overlay.OverlayPosition;
@@ -49,22 +50,25 @@ import net.runelite.client.ui.overlay.OverlayPosition;
 @Singleton
 public class GpDropOverlay extends Overlay
 {
-	private static final long DROP_LIFE_MS = 1500L;
 	private static final int  RISE_PIXELS  = 40;
 	private static final int  MAX_DROPS    = 6;
-	private static final Font DROP_FONT    = new Font("Dialog", Font.BOLD, 14);
 
-	private static final Color PROFIT_COLOR = new Color(0x00C27A);
-	private static final Color LOSS_COLOR   = new Color(0xE85050);
 	private static final Color SHADOW_COLOR = new Color(0, 0, 0, 180);
 
 	private final Client client;
+	private final O7FlipConfig config;
 	private final Deque<Drop> drops = new ArrayDeque<>();
 
+	// Cache the derived Font — render runs every frame and the config rarely changes.
+	private Font cachedFont;
+	private O7FlipConfig.GpDropFontType cachedFontType;
+	private int cachedFontSize;
+
 	@Inject
-	public GpDropOverlay(Client client)
+	public GpDropOverlay(Client client, O7FlipConfig config)
 	{
 		this.client = client;
+		this.config = config;
 		setPosition(OverlayPosition.DYNAMIC);
 		setLayer(OverlayLayer.ABOVE_WIDGETS);
 	}
@@ -82,7 +86,8 @@ public class GpDropOverlay extends Overlay
 	@Override
 	public Dimension render(Graphics2D graphics)
 	{
-		if (drops.isEmpty())
+		boolean preview = config.gpDropPreview();
+		if (drops.isEmpty() && !preview)
 		{
 			return null;
 		}
@@ -101,46 +106,104 @@ public class GpDropOverlay extends Overlay
 			anchorY = 80;
 		}
 
+		// User-configured nudge from the default anchor (config → Grand
+		// Exchange integration → GP drop offset X / Y).
+		anchorX += config.gpDropOffsetX();
+		anchorY += config.gpDropOffsetY();
+
 		long now = System.currentTimeMillis();
-		graphics.setFont(DROP_FONT);
+		long life = dropLifeMs();
+		graphics.setFont(dropFont());
 		FontMetrics fm = graphics.getFontMetrics();
+
+		if (preview)
+		{
+			// Position-preview mode: loop a sample drop forever so the user can
+			// see exactly where drops spawn while they adjust the X/Y offsets.
+			drawDrop(graphics, fm, 1_250_000L, now % life, anchorX, anchorY, 0);
+		}
 
 		synchronized (this)
 		{
 			Iterator<Drop> it = drops.iterator();
-			int idx = 0;
+			int idx = preview ? 1 : 0;
 			while (it.hasNext())
 			{
 				Drop d = it.next();
 				long age = now - d.startMs;
-				if (age >= DROP_LIFE_MS)
+				if (age >= life)
 				{
 					it.remove();
 					continue;
 				}
 
-				float t = age / (float) DROP_LIFE_MS;
-				int alpha = Math.max(0, Math.min(255, (int) (255 * (1 - t))));
-				int yOffset = (int) (RISE_PIXELS * t);
-
-				String text = (d.amount >= 0 ? "+" : "") + formatGp(d.amount) + " gp";
-				int textWidth = fm.stringWidth(text);
-
-				int x = anchorX - textWidth / 2;
-				int y = anchorY - yOffset - idx * 18;
-
-				graphics.setColor(new Color(0, 0, 0, Math.min(alpha, SHADOW_COLOR.getAlpha())));
-				graphics.drawString(text, x + 1, y + 1);
-
-				Color base = d.amount >= 0 ? PROFIT_COLOR : LOSS_COLOR;
-				graphics.setColor(new Color(base.getRed(), base.getGreen(), base.getBlue(), alpha));
-				graphics.drawString(text, x, y);
-
+				drawDrop(graphics, fm, d.amount, age, anchorX, anchorY, idx);
 				idx++;
 			}
 		}
 
 		return null;
+	}
+
+	/** Configured animation length, floored so a bad stored value can't divide by zero. */
+	private long dropLifeMs()
+	{
+		return Math.max(100, config.gpDropDurationMs());
+	}
+
+	/** Draws one drop at the given age in its rise-and-fade animation. */
+	private void drawDrop(Graphics2D graphics, FontMetrics fm, long amount, long age,
+		int anchorX, int anchorY, int idx)
+	{
+		float t = age / (float) dropLifeMs();
+		int alpha = Math.max(0, Math.min(255, (int) (255 * (1 - t))));
+		int yOffset = (int) (RISE_PIXELS * t);
+
+		String text = (amount >= 0 ? "+" : "") + formatGp(amount) + " gp";
+		int textWidth = fm.stringWidth(text);
+
+		int x = anchorX - textWidth / 2;
+		// Stack spacing scales with the font so big text doesn't overlap itself.
+		int y = anchorY - yOffset - idx * (fm.getHeight() + 4);
+
+		graphics.setColor(new Color(0, 0, 0, Math.min(alpha, SHADOW_COLOR.getAlpha())));
+		graphics.drawString(text, x + 1, y + 1);
+
+		Color base = amount >= 0 ? config.gpDropProfitColor() : config.gpDropLossColor();
+		graphics.setColor(new Color(base.getRed(), base.getGreen(), base.getBlue(), alpha));
+		graphics.drawString(text, x, y);
+	}
+
+	/** Resolves the configured typeface + size, cached between frames. */
+	private Font dropFont()
+	{
+		O7FlipConfig.GpDropFontType type = config.gpDropFontType();
+		int size = config.gpDropFontSize();
+		if (cachedFont == null || type != cachedFontType || size != cachedFontSize)
+		{
+			cachedFont = buildFont(type, size);
+			cachedFontType = type;
+			cachedFontSize = size;
+		}
+		return cachedFont;
+	}
+
+	private static Font buildFont(O7FlipConfig.GpDropFontType type, int size)
+	{
+		switch (type)
+		{
+			case RUNESCAPE:
+				return FontManager.getRunescapeFont().deriveFont((float) size);
+			case RUNESCAPE_BOLD:
+				return FontManager.getRunescapeBoldFont().deriveFont((float) size);
+			case SANS:
+				return new Font(Font.SANS_SERIF, Font.PLAIN, size);
+			case SANS_BOLD:
+				return new Font(Font.SANS_SERIF, Font.BOLD, size);
+			case DEFAULT_BOLD:
+			default:
+				return new Font("Dialog", Font.BOLD, size);
+		}
 	}
 
 	private static String formatGp(long amount)

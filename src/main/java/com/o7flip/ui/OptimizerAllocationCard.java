@@ -344,7 +344,20 @@ public class OptimizerAllocationCard extends JPanel
 			}
 		});
 
-		setMaximumSize(new Dimension(Integer.MAX_VALUE, getPreferredSize().height));
+	}
+
+	/**
+	 * Computed lazily so the HTML labels' preferred heights are correct at the
+	 * point BoxLayout queries us. Capturing getPreferredSize() in the
+	 * constructor measures the profit/price lines BEFORE they wrap to the
+	 * sidebar's actual width, so wrapped cards came out too short and the
+	 * progress bar at the bottom was clipped. Same fix as MoonSetPanel.
+	 */
+	@Override
+	public Dimension getMaximumSize()
+	{
+		Dimension pref = getPreferredSize();
+		return new Dimension(Integer.MAX_VALUE, pref.height);
 	}
 
 	/** True when the slot's sells have completed its target — CLOSED, or SELLING
@@ -369,6 +382,13 @@ public class OptimizerAllocationCard extends JPanel
 			// Fully sold — show "Sold", not "Selling"/"Closed".
 			text = "Sold";
 			bg = new Color(0x3A2A4A);
+		}
+		else if (a.state == SlotState.FILLED && a.sellListed)
+		{
+			// §10 — fully bought AND a live GE sell offer exists: the user is
+			// waiting on a buyer, so say "Selling" instead of the stale "Filled".
+			text = "Selling";
+			bg = new Color(0x4A3B17);
 		}
 		else
 		{
@@ -480,17 +500,35 @@ public class OptimizerAllocationCard extends JPanel
 		int target = Math.max(0, a.qty);
 		int bought = Math.min(sumQty(a.buys), target);
 		int sold   = Math.min(sumQty(a.sells), target);
-		StringBuilder sb = new StringBuilder("<html><font color='#888888'>")
-			.append(formatNumber(bought)).append(" / ").append(formatNumber(a.qty)).append(" bought");
-		if (sold > 0)
+		StringBuilder sb = new StringBuilder("<html><font color='#888888'>");
+		if (isSellPhase(a))
 		{
-			sb.append("  ·  ").append(formatNumber(sold)).append(" sold");
+			// Selling phase — sold/target is the number that matters now; keep
+			// it readable for partials ("200 / 1,400 sold").
+			sb.append(formatNumber(sold)).append(" / ").append(formatNumber(target)).append(" sold");
+		}
+		else
+		{
+			sb.append(formatNumber(bought)).append(" / ").append(formatNumber(a.qty)).append(" bought");
+			if (sold > 0)
+			{
+				sb.append("  ·  ").append(formatNumber(sold)).append(" sold");
+			}
 		}
 		sb.append("</font></html>");
 		JLabel l = new JLabel(sb.toString());
 		l.setFont(Fonts.SM);
 		l.setToolTipText("Buy/sell progress for this slot.");
 		return l;
+	}
+
+	/** §10 — true once the slot is in its SELL phase: a sell fill has landed
+	 *  (SELLING/CLOSED) or a live GE sell offer is listed on a bought slot. */
+	private static boolean isSellPhase(OptimizeResult.Allocation a)
+	{
+		return a.state == SlotState.SELLING
+			|| a.state == SlotState.CLOSED
+			|| (a.state == SlotState.FILLED && a.sellListed);
 	}
 
 	/**
@@ -503,7 +541,7 @@ public class OptimizerAllocationCard extends JPanel
 	{
 		int bought = sumQty(a.buys);
 		int sold   = sumQty(a.sells);
-		boolean selling = a.state == SlotState.SELLING || a.state == SlotState.CLOSED;
+		boolean selling = isSellPhase(a);
 		final Color fill = selling ? new Color(0x9B59B6) : new Color(0x00C27A);
 		// Both phases measure against the slot's TARGET qty: green = bought/qty
 		// while buying, purple = sold/qty while selling/closed. Using qty (not

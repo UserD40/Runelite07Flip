@@ -1461,7 +1461,20 @@ public class O7FlipPlugin extends Plugin
 			return;
 		}
 		apiClient.fetchAuthStatus(
-			status -> SwingUtilities.invokeLater(() -> panel.updateAuthStatus(status.authenticated, status.premium)),
+			status -> SwingUtilities.invokeLater(() ->
+			{
+				panel.updateAuthStatus(status.authenticated, status.premium);
+				// The startup session hydrate races this auth check: it bails on
+				// isPremium() before the tier is known and never retried, leaving
+				// activeSession null — so fills landing before the Plan tab was
+				// first opened attributed to nothing. Re-pull once premium is
+				// actually confirmed (no-op when a session is already loaded).
+				if (status.premium && activeSession == null
+					&& executor != null && !executor.isShutdown())
+				{
+					executor.execute(this::doHydrateOptimizerSession);
+				}
+			}),
 			() ->
 			{
 				// 503 / network failure — server is likely warming up after a deploy
@@ -2123,6 +2136,21 @@ public class O7FlipPlugin extends Plugin
 			&& offer.getItemId() == overlayQueueItemId)
 		{
 			clearOverlayQueue();
+		}
+
+		// SYNC_CONTRACT §10 — sell-listing signal for the active plan. A SELLING
+		// offer means the user has LISTED the leg's item; flag it immediately so
+		// the card (and the website, via the session POST) flips from "Filled" to
+		// "Selling" without waiting for the first sell fill. CANCELLED_SELL
+		// un-flags, but only when no other GE slot still has a live sell for the
+		// item (a 1400-unit position can be split across slots).
+		if (state == GrandExchangeOfferState.SELLING)
+		{
+			markPlanSellListed(offer.getItemId());
+		}
+		else if (state == GrandExchangeOfferState.CANCELLED_SELL)
+		{
+			clearPlanSellListedIfNoLiveSell(offer.getItemId());
 		}
 
 		// Record any newly-filled qty since we last looked at this slot. This
@@ -4210,11 +4238,15 @@ public class O7FlipPlugin extends Plugin
 		executor.execute(() -> apiClient.fetchOptimize(
 			capital, slots, risk, maxFillHours, members,
 			null, minProfitPct,
-			result -> SwingUtilities.invokeLater(() ->
+			result -> clientThread.invoke(() ->
 			{
-				panel.onOptimizeResult(result);
+				// Seed BEFORE rendering, and on the game thread (P3): the seed
+				// carries in-flight fill ledgers from the old plan onto the new
+				// allocations, so the cards render with progress intact — and the
+				// fold path can never race an EDT-side session swap.
 				seedActiveSessionFrom(result, capital, slots, risk, maxFillHours, members, minProfitPct);
 				scheduleSessionPost();
+				SwingUtilities.invokeLater(() -> panel.onOptimizeResult(result));
 			}),
 			upgradeUrl -> SwingUtilities.invokeLater(() -> panel.onOptimizePremiumRequired(upgradeUrl)),
 			reason -> SwingUtilities.invokeLater(() -> panel.onOptimizeError(reason))));
@@ -4343,6 +4375,12 @@ public class O7FlipPlugin extends Plugin
 			clientThread.invoke(() ->
 			{
 				activeSession = session;
+				// §5b — fold any trades that landed before this hydrate (the fill
+				// path no-ops while activeSession is null) back onto empty legs.
+				if (retroAttributeFills(session))
+				{
+					scheduleSessionPost();
+				}
 				// Arm the offline-completion scan too — covers enabling the plugin
 				// while already logged in (no LOGGED_IN transition fires then).
 				offlineReconcileArmed = true;
@@ -4430,6 +4468,7 @@ public class O7FlipPlugin extends Plugin
 	{
 		if (sessionBackgroundPollTask != null) sessionBackgroundPollTask.cancel(false);
 		if (sessionPollTask != null) sessionPollTask.cancel(false);
+		if (eagerDiscoveryTask != null) eagerDiscoveryTask.cancel(false);
 	}
 
 	/**
@@ -4438,6 +4477,33 @@ public class O7FlipPlugin extends Plugin
 	 * the same merge-safe GET so a web-built plan is discovered and in-client
 	 * fills keep attributing even with the tab closed.
 	 */
+	/** Eager-discovery burst task — see {@link #startEagerSessionDiscovery}. */
+	private volatile ScheduledFuture<?> eagerDiscoveryTask;
+
+	/**
+	 * Burst-polls the session endpoint (5s cadence, 2 minute cap) after the
+	 * user heads to the website optimiser, so a freshly built/reconfigured
+	 * plan lands in the panel within seconds instead of on the next 15s/45s
+	 * cycle. Bounded well under the 60/min/IP server cap; re-clicking just
+	 * restarts the window.
+	 */
+	public void startEagerSessionDiscovery()
+	{
+		if (executor == null || executor.isShutdown()) return;
+		if (eagerDiscoveryTask != null) eagerDiscoveryTask.cancel(false);
+		final long deadline = System.currentTimeMillis() + 120_000L;
+		eagerDiscoveryTask = executor.scheduleAtFixedRate(() ->
+		{
+			if (System.currentTimeMillis() > deadline)
+			{
+				ScheduledFuture<?> self = eagerDiscoveryTask;
+				if (self != null) self.cancel(false);
+				return;
+			}
+			doPollActiveSession();
+		}, 5, 5, TimeUnit.SECONDS);
+	}
+
 	private void doBackgroundPollActiveSession()
 	{
 		// Premium-only — skip the always-on session discovery for non-premium.
@@ -4473,6 +4539,10 @@ public class O7FlipPlugin extends Plugin
 				if (local == null)
 				{
 					activeSession = remote;
+					if (retroAttributeFills(remote))
+					{
+						scheduleSessionPost();
+					}
 					SwingUtilities.invokeLater(() -> panel.hydrateOptimizerSession(remote));
 					return;
 				}
@@ -4481,6 +4551,14 @@ public class O7FlipPlugin extends Plugin
 				// is by item_id; per-slot fill arrays are unioned by traded_at
 				// (de-duped against what we already have locally).
 				boolean changed = mergeRemoteFills(local, remote);
+				// §5b — heal legs that are STILL empty on both surfaces from the
+				// local GE history (covers fills lost before this poll cycle).
+				// Idempotent: a healed leg is non-empty and skipped next poll.
+				if (retroAttributeFills(local))
+				{
+					changed = true;
+					scheduleSessionPost();
+				}
 				if (changed)
 				{
 					SwingUtilities.invokeLater(() -> panel.hydrateOptimizerSession(local));
@@ -4513,6 +4591,12 @@ public class O7FlipPlugin extends Plugin
 				else
 				{
 					adoptServerStructure(activeSession, remote);
+				}
+				// §5b — Resync is the user's "make it right" button, so also heal
+				// any legs that are empty on both surfaces from local GE history.
+				if (retroAttributeFills(activeSession))
+				{
+					scheduleSessionPost();
 				}
 				final com.o7flip.model.OptimizerSession snap = activeSession;
 				SwingUtilities.invokeLater(() -> panel.hydrateOptimizerSession(snap));
@@ -4561,6 +4645,7 @@ public class O7FlipPlugin extends Plugin
 				l.buys                    = new java.util.ArrayList<>(r.buys);
 				l.sells                   = new java.util.ArrayList<>(r.sells);
 				l.state                   = r.state;
+				l.sellListed              = r.sellListed;   // §7 correction wins outright
 				l.overrideRev             = r.overrideRev;
 				l.overrideSource          = r.overrideSource;
 				l.appliedOverrideRev      = r.overrideRev;
@@ -4714,6 +4799,7 @@ public class O7FlipPlugin extends Plugin
 							r.sells = l.sells;
 						}
 						if (l.offerInstanceId != null) r.offerInstanceId = l.offerInstanceId;
+						r.sellListed              = l.sellListed || r.sellListed;
 						r.appliedOverrideRev      = Math.max(l.appliedOverrideRev, r.overrideRev);
 						r.pendingOfflineReconcile = l.pendingOfflineReconcile;
 						r.state = com.o7flip.model.SlotState.derive(r.qty, r.buys, r.sells);
@@ -4852,11 +4938,44 @@ public class O7FlipPlugin extends Plugin
 		});
 	}
 
-	/** Builds an OptimizerSession from a fresh /optimize response. */
+	/**
+	 * Builds an OptimizerSession from a fresh /optimize response. Runs on the
+	 * game thread (P3 — all activeSession mutations are game-thread-serialised).
+	 *
+	 * In-flight fill ledgers from the previous plan are CARRIED onto surviving
+	 * items (matched by item_id), mirroring {@link #adoptServerStructure}.
+	 * Without this, a Build/Reconfigure wiped the buys/sells of positions the
+	 * user was mid-flip on, and the debounced POST (newer generated_at, legs
+	 * without offer_instance_id) propagated the wipe to the server — the
+	 * "website says Filled, plugin says 0/N bought" divergence.
+	 */
 	private void seedActiveSessionFrom(com.o7flip.model.OptimizeResult result, long capital, int slots,
 	                                   String risk, int maxFillHours, Boolean members, Double minProfitPct)
 	{
 		if (result == null || result.allocations == null) return;
+		com.o7flip.model.OptimizerSession prev = activeSession;
+		if (prev != null && prev.slots != null)
+		{
+			java.util.Map<Integer, com.o7flip.model.OptimizeResult.Allocation> prevByItem = new java.util.HashMap<>();
+			for (com.o7flip.model.OptimizeResult.Allocation p : prev.slots)
+			{
+				if (p != null && p.itemId > 0) prevByItem.putIfAbsent(p.itemId, p);
+			}
+			for (com.o7flip.model.OptimizeResult.Allocation next : result.allocations)
+			{
+				if (next == null) continue;
+				com.o7flip.model.OptimizeResult.Allocation old = prevByItem.get(next.itemId);
+				if (old == null || (old.buys.isEmpty() && old.sells.isEmpty())) continue;
+				next.buys  = old.buys;
+				next.sells = old.sells;
+				if (old.offerInstanceId != null) next.offerInstanceId = old.offerInstanceId;
+				next.partial                 = old.partial;
+				next.sellListed              = old.sellListed;
+				next.appliedOverrideRev      = Math.max(old.appliedOverrideRev, next.overrideRev);
+				next.pendingOfflineReconcile = old.pendingOfflineReconcile;
+				next.state = com.o7flip.model.SlotState.derive(next.qty, next.buys, next.sells);
+			}
+		}
 		com.o7flip.model.OptimizerSession s = new com.o7flip.model.OptimizerSession();
 		s.inputs.capital      = capital;
 		s.inputs.slots        = slots;
@@ -4866,7 +4985,7 @@ public class O7FlipPlugin extends Plugin
 		s.inputs.minProfitPct = minProfitPct;
 		s.slots               = new java.util.ArrayList<>(result.allocations);
 		// Floor against the prior plan's stamp so a re-Build can't regress the version.
-		String prevGen = activeSession != null ? activeSession.generatedAt : null;
+		String prevGen = prev != null ? prev.generatedAt : null;
 		s.generatedAt         = nextGeneratedAt(prevGen, result.updatedAt);
 		activeSession         = s;
 	}
@@ -5017,6 +5136,7 @@ public class O7FlipPlugin extends Plugin
 		if (prevState != com.o7flip.model.SlotState.CLOSED
 			&& slot.state == com.o7flip.model.SlotState.CLOSED)
 		{
+			slot.sellListed = false;   // §10 — the listing resolved; flag is spent
 			appendCompletedPosition(slot);
 		}
 
@@ -5039,6 +5159,124 @@ public class O7FlipPlugin extends Plugin
 		pendingGeSellItemId   = itemId;
 		pendingGeSellPrice    = price;
 		pendingGeSellName     = name;
+	}
+
+	/**
+	 * SYNC_CONTRACT §10 — flags the plan leg for {@code itemId} as having a live
+	 * GE sell offer. Game thread only (fires from the offer-changed handler).
+	 * No-op when there is no plan, the item isn't in it, the leg is already
+	 * flagged, or the leg has fully closed.
+	 */
+	private void markPlanSellListed(int itemId)
+	{
+		com.o7flip.model.OptimizerSession s = activeSession;
+		if (s == null || s.slots == null || itemId <= 0) return;
+		boolean changed = false;
+		for (com.o7flip.model.OptimizeResult.Allocation a : s.slots)
+		{
+			if (a == null || a.itemId != itemId) continue;
+			if (a.sellListed || a.state == com.o7flip.model.SlotState.CLOSED) continue;
+			a.sellListed = true;
+			changed = true;
+		}
+		if (changed)
+		{
+			scheduleSessionPost();
+			final com.o7flip.model.OptimizerSession snap = s;
+			SwingUtilities.invokeLater(() -> panel.hydrateOptimizerSession(snap));
+		}
+	}
+
+	/**
+	 * SYNC_CONTRACT §10 — clears the sell-listed flag for {@code itemId} after a
+	 * sell cancellation, unless another GE slot still holds a live sell offer
+	 * for the item. Game thread only (reads {@code getGrandExchangeOffers()}).
+	 */
+	private void clearPlanSellListedIfNoLiveSell(int itemId)
+	{
+		com.o7flip.model.OptimizerSession s = activeSession;
+		if (s == null || s.slots == null || itemId <= 0) return;
+		GrandExchangeOffer[] offers = client.getGrandExchangeOffers();
+		if (offers != null)
+		{
+			for (GrandExchangeOffer o : offers)
+			{
+				if (o != null && o.getItemId() == itemId
+					&& o.getState() == GrandExchangeOfferState.SELLING)
+				{
+					return;   // still listed elsewhere
+				}
+			}
+		}
+		boolean changed = false;
+		for (com.o7flip.model.OptimizeResult.Allocation a : s.slots)
+		{
+			if (a == null || a.itemId != itemId || !a.sellListed) continue;
+			a.sellListed = false;
+			changed = true;
+		}
+		if (changed)
+		{
+			scheduleSessionPost();
+			final com.o7flip.model.OptimizerSession snap = s;
+			SwingUtilities.invokeLater(() -> panel.hydrateOptimizerSession(snap));
+		}
+	}
+
+	/**
+	 * Retro-attribution (§5b) — heals legs whose live fold was missed. A fill
+	 * that lands while {@code activeSession} is null (the startup-hydrate race,
+	 * trading before the Plan tab first opens) was previously lost forever:
+	 * nothing ever reconciled the GE trade history against the plan. This scans
+	 * {@code tradeHistory} for rows on an EMPTY leg's item recorded at/after the
+	 * plan's {@code generated_at} and folds them in exactly like live fills
+	 * (plan-capped, consolidated entry, leg-identity stamp).
+	 *
+	 * <p>Empty-leg only + generated_at anchor keeps it conservative: a leg the
+	 * plugin (or server) already tracks is never touched, and flips of the same
+	 * item that predate the plan can't double-count. Idempotent — after the
+	 * first heal the leg is non-empty and skipped. Game thread only (P3).
+	 *
+	 * @return true when any leg changed (caller should POST + re-render).
+	 */
+	private boolean retroAttributeFills(com.o7flip.model.OptimizerSession s)
+	{
+		if (s == null || s.slots == null) return false;
+		java.time.Instant gen = parseInstantOrNull(s.generatedAt);
+		if (gen == null) return false;   // no anchor — can't safely scope history
+		long genMs = gen.toEpochMilli();
+		java.util.List<TradeRecord> history = tradeHistory;
+		if (history == null || history.isEmpty()) return false;
+
+		boolean anyChange = false;
+		for (com.o7flip.model.OptimizeResult.Allocation slot : s.slots)
+		{
+			if (slot == null || slot.itemId <= 0 || slot.qty <= 0) continue;
+			if (!slot.buys.isEmpty() || !slot.sells.isEmpty()) continue;
+			boolean slotChanged = false;
+			for (TradeRecord t : history)   // chronological append order
+			{
+				if (t == null || t.itemId != slot.itemId || t.quantity <= 0) continue;
+				if (t.timestamp < genMs) continue;
+				int counted = cappedFillQty(t.isBuy, slot, t.quantity);
+				if (counted <= 0) continue;
+				String tradedAt = java.time.Instant.ofEpochMilli(t.timestamp).toString();
+				foldFill(t.isBuy ? slot.buys : slot.sells, counted, t.priceEach, tradedAt, !t.isBuy);
+				if (slot.offerInstanceId == null && t.offerInstanceId != null && t.offerInstanceId > 0)
+				{
+					slot.offerInstanceId = t.offerInstanceId;
+				}
+				slotChanged = true;
+			}
+			if (slotChanged)
+			{
+				slot.state = com.o7flip.model.SlotState.derive(slot.qty, slot.buys, slot.sells);
+				anyChange = true;
+				log.debug("[07Flip] Retro-attributed trade history to plan slot {} ({})",
+					slot.name, slot.itemId);
+			}
+		}
+		return anyChange;
 	}
 
 	/**
