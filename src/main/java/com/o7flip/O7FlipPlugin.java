@@ -282,6 +282,17 @@ public class O7FlipPlugin extends Plugin
 	 */
 	private final Map<Integer, long[]> slotRecordedFills = new HashMap<>();
 
+	/**
+	 * Offer epochs with a POST /tracker currently in flight. Guards against
+	 * firing a second POST for the same row while the first one's response
+	 * is still outstanding (terminal GE events can repeat within seconds —
+	 * login replays, world hops). Entries are removed in the response
+	 * callback; on success the row's {@code serverSynced} flag takes over as
+	 * the permanent re-POST suppressor. Game-thread only (events record on
+	 * the game thread; callbacks re-enter via {@code clientThread.invoke}).
+	 */
+	private final Set<Long> tradePostsInFlight = new HashSet<>();
+
 	/** Completed trade history (oldest first). Volatile reference swap. */
 	public volatile List<TradeRecord> tradeHistory = Collections.emptyList();
 
@@ -2309,12 +2320,40 @@ public class O7FlipPlugin extends Plugin
 				existingIdx = findReObservableActiveOfferRow(tradeHistory,
 					offer.getItemId(), isBuy, totalQtyForLookup, slot, currentQty, currentGp);
 			}
+			// SYNC_CONTRACT §5 — re-observing a TERMINAL offer (BOUGHT offer
+			// sitting uncollected across a relog where the slot baseline was
+			// lost) must reclaim the already-recorded row, not mint a fresh
+			// one. The reclaim above only matches partial rows; without this,
+			// every such re-observation appended a duplicate row with a new
+			// timestamp + epoch and re-POSTed it — the production "two buy
+			// records, same qty/price, fresh tradedAt" duplication.
+			if (existingIdx < 0
+				&& (state == GrandExchangeOfferState.BOUGHT
+					|| state == GrandExchangeOfferState.SOLD
+					|| state == GrandExchangeOfferState.CANCELLED_BUY
+					|| state == GrandExchangeOfferState.CANCELLED_SELL))
+			{
+				existingIdx = findRecordedTerminalOfferRow(tradeHistory,
+					offer.getItemId(), isBuy, totalQtyForLookup, slot, currentQty, currentGp);
+			}
 			if (existingIdx >= 0)
 			{
 				TradeRecord existing = tradeHistory.get(existingIdx);
-				// Stamp the existing row with our offerInstanceId so recordTrade
-				// merges subsequent fills into it via the exact-match path.
-				stampLegacyWithOfferInstanceId(existingIdx, offerInstanceId);
+				if (existing.offerInstanceId != null)
+				{
+					// Adopt the row's own offer epoch rather than re-stamping
+					// our freshly-minted one — keeps offerInstanceId (the §2
+					// leg key) and the epoch-derived tradedAt stable across
+					// restarts, which is what the server's dedup keys on.
+					offerInstanceId = existing.offerInstanceId;
+				}
+				else
+				{
+					// Legacy row (pre-epoch data): stamp it with our fresh
+					// offerInstanceId so recordTrade merges subsequent fills
+					// into it via the exact-match path.
+					stampLegacyWithOfferInstanceId(existingIdx, offerInstanceId);
+				}
 
 				// Account for the qty/gp the existing row already captured.
 				// If it holds >= the current cumulative, there's nothing new
@@ -2334,17 +2373,14 @@ public class O7FlipPlugin extends Plugin
 			}
 		}
 
-		// Timestamp the fill at the moment we observed it. Earlier versions
-		// back-dated the FIRST observation of a buy to 1 second before the
-		// EARLIEST existing trade of the same item, hoping to pair with a
-		// pre-existing phantom sell. In practice that arbitrarily reorders
-		// FIFO whenever the user places a fresh buy after a sell — the
-		// brand-new buy gets shoved before yesterday's matched buy, and
-		// already-realised flip profits silently change at the moment the
-		// new buy completes. That's the "Today jumped up after a buy" bug
-		// the user reported. A phantom flip from a pre-plugin offer is the
-		// better trade-off: it's visible to the user and bounded to the
-		// affected sell, vs invisibly rewriting old flip math.
+		// Observation time for the fill — used for slot attribution and the
+		// GP-drop overlay. NOTE: this is NOT what stamps the trade row's
+		// timestamp. SYNC_CONTRACT §5 requires a stable, offer-bound
+		// tradedAt on every /tracker POST, so recordTrade derives the row
+		// timestamp from the offer epoch (offerInstanceId / 10) — identical
+		// no matter when or how often the same offer is re-observed.
+		// (Earlier versions back-dated first observations to pair phantom
+		// sells; that reordered FIFO and was removed — see git history.)
 		long timestamp = System.currentTimeMillis();
 
 		recordTrade(offer, isBuy, partial, deltaQty, deltaGp, timestamp, offerInstanceId);
@@ -2403,6 +2439,7 @@ public class O7FlipPlugin extends Plugin
 			merged.timestamp       = existing.timestamp;
 			merged.partial         = partial;
 			merged.tradeId         = existing.tradeId;
+			merged.serverSynced    = existing.serverSynced;
 			merged.offerInstanceId = offerInstanceId;
 			merged.totalQuantity   = totalQty > 0 ? totalQty : existing.totalQuantity;
 			updated.set(existingIdx, merged);
@@ -2417,7 +2454,11 @@ public class O7FlipPlugin extends Plugin
 			trade.quantity        = deltaQty;
 			trade.totalGp         = deltaGp;
 			trade.priceEach       = fallbackPriceEach;
-			trade.timestamp       = timestamp;
+			// SYNC_CONTRACT §5 — the row timestamp (and therefore the POSTed
+			// tradedAt and the dedup fingerprint) is bound to the offer epoch,
+			// not the wall clock at observation. Re-observing the same offer
+			// can never produce a different timestamp.
+			trade.timestamp       = offerInstanceId / 10L;
 			trade.partial         = partial;
 			trade.offerInstanceId = offerInstanceId;
 			trade.totalQuantity   = totalQty > 0 ? totalQty : null;
@@ -2497,30 +2538,45 @@ public class O7FlipPlugin extends Plugin
 		boolean terminal = !partial
 			|| st == net.runelite.api.GrandExchangeOfferState.CANCELLED_BUY
 			|| st == net.runelite.api.GrandExchangeOfferState.CANCELLED_SELL;
+		// SYNC_CONTRACT §5b — a fill the server has already accepted (2xx) is
+		// never re-POSTed: serverSynced persists delivery, and the in-flight
+		// set suppresses a second POST racing the first one's response.
 		if (terminal
 			&& posted.quantity > 0
+			&& !posted.serverSynced
+			&& (posted.offerInstanceId == null || !tradePostsInFlight.contains(posted.offerInstanceId))
 			&& config.shareTradeData()
 			&& config.apiKey() != null
 			&& !config.apiKey().trim().isEmpty())
 		{
 			TradeRecord rowForServer = new TradeRecord();
-			rowForServer.itemId        = posted.itemId;
-			rowForServer.name          = posted.name;
-			rowForServer.isBuy         = posted.isBuy;
-			rowForServer.quantity      = posted.quantity;
-			rowForServer.totalGp       = posted.totalGp;
-			rowForServer.priceEach     = posted.quantity > 0 ? posted.totalGp / posted.quantity : posted.priceEach;
-			rowForServer.timestamp     = posted.timestamp;
-			rowForServer.partial       = posted.partial;
-			rowForServer.totalQuantity = posted.totalQuantity;
+			rowForServer.itemId          = posted.itemId;
+			rowForServer.name            = posted.name;
+			rowForServer.isBuy           = posted.isBuy;
+			rowForServer.quantity        = posted.quantity;
+			rowForServer.totalGp         = posted.totalGp;
+			rowForServer.priceEach       = posted.quantity > 0 ? posted.totalGp / posted.quantity : posted.priceEach;
+			rowForServer.timestamp       = posted.timestamp;
+			rowForServer.partial         = posted.partial;
+			rowForServer.totalQuantity   = posted.totalQuantity;
+			rowForServer.offerInstanceId = posted.offerInstanceId;
 			final Long postedOid = posted.offerInstanceId;
-			apiClient.postTradeRecord(rowForServer, tradeId ->
+			if (postedOid != null)
 			{
-				if (tradeId != null && postedOid != null)
+				tradePostsInFlight.add(postedOid);
+			}
+			apiClient.postTradeRecord(rowForServer, (delivered, tradeId) ->
+				clientThread.invoke(() ->
 				{
-					clientThread.invoke(() -> stampTradeIdOnLocalRow(postedOid, tradeId));
-				}
-			});
+					if (postedOid != null)
+					{
+						tradePostsInFlight.remove(postedOid);
+						if (delivered)
+						{
+							markRowSynced(postedOid, tradeId);
+						}
+					}
+				}));
 		}
 
 		// Close out the freeze when a sell fully consumes the buys for this
@@ -2627,6 +2683,7 @@ public class O7FlipPlugin extends Plugin
 		cleared.timestamp       = existing.timestamp;
 		cleared.partial         = false;
 		cleared.tradeId         = existing.tradeId;
+		cleared.serverSynced    = existing.serverSynced;
 		cleared.offerInstanceId = existing.offerInstanceId;
 		cleared.totalQuantity   = existing.totalQuantity;
 		updated.set(idx, cleared);
@@ -2635,19 +2692,20 @@ public class O7FlipPlugin extends Plugin
 	}
 
 	/**
-	 * Stamps the server-issued {@code trade_id} onto the local TradeRecord
-	 * identified by {@code offerInstanceId}. Called from the POST /tracker
-	 * response handler so newly-synced rows carry the canonical id
-	 * immediately, without waiting for the next /tracker/history sync to
-	 * reconcile by fingerprint.
+	 * Marks the local TradeRecord identified by {@code offerInstanceId} as
+	 * delivered to the server ({@code serverSynced=true} — SYNC_CONTRACT
+	 * §5b's permanent re-POST suppressor) and stamps the server-issued
+	 * {@code trade_id} when the response carried one ({@code tradeId} is
+	 * nullable: duplicates may come back without an id). Called from the
+	 * POST /tracker and /tracker/bulk response handlers.
 	 *
-	 * No-op if the row has fallen out of the rolling window, already has a
-	 * tradeId stamped, or the offerInstanceId never matched (which can
-	 * happen if a later merge built a new row before the POST returned).
-	 * Must be invoked on the client thread because tradeHistory is mutated
-	 * by reassignment from a single thread.
+	 * No-op if the row has fallen out of the rolling window, the
+	 * offerInstanceId never matched (a later merge built a new row before
+	 * the POST returned), or nothing would change. Must be invoked on the
+	 * client thread because tradeHistory is mutated by reassignment from a
+	 * single thread.
 	 */
-	private void stampTradeIdOnLocalRow(long offerInstanceId, long tradeId)
+	private void markRowSynced(long offerInstanceId, Long tradeId)
 	{
 		int idx = findMatchingOfferRow(tradeHistory, offerInstanceId);
 		if (idx < 0)
@@ -2655,7 +2713,8 @@ public class O7FlipPlugin extends Plugin
 			return;
 		}
 		TradeRecord existing = tradeHistory.get(idx);
-		if (existing.tradeId != null)
+		boolean stampId = tradeId != null && existing.tradeId == null;
+		if (existing.serverSynced && !stampId)
 		{
 			return;
 		}
@@ -2668,7 +2727,8 @@ public class O7FlipPlugin extends Plugin
 		stamped.priceEach       = existing.priceEach;
 		stamped.timestamp       = existing.timestamp;
 		stamped.partial         = existing.partial;
-		stamped.tradeId         = tradeId;
+		stamped.tradeId         = stampId ? tradeId : existing.tradeId;
+		stamped.serverSynced    = true;
 		stamped.offerInstanceId = existing.offerInstanceId;
 		stamped.totalQuantity   = existing.totalQuantity;
 		List<TradeRecord> updated = new ArrayList<>(tradeHistory);
@@ -2683,8 +2743,12 @@ public class O7FlipPlugin extends Plugin
 	 * (CANCELLED rows stay partial=true to mark them as partially filled),
 	 * then POSTs the finalised row to the server so the trade actually
 	 * syncs upstream. Gated by {@code shareTradeData} + a non-empty API key
-	 * exactly like {@link #recordTrade}'s server-submit path. The server's
-	 * fingerprint dedup means a duplicate POST (if any) is a safe no-op.
+	 * exactly like {@link #recordTrade}'s server-submit path.
+	 *
+	 * Terminal GE events repeat — every login replays the slot states, so
+	 * this runs many times for an offer that sits uncollected. SYNC_CONTRACT
+	 * §5b: once the server has accepted the row ({@code serverSynced}), or a
+	 * POST is already in flight for it, this is a local-only no-op.
 	 */
 	private void finaliseAndPostExistingRow(long offerInstanceId, GrandExchangeOfferState terminalState)
 	{
@@ -2714,6 +2778,7 @@ public class O7FlipPlugin extends Plugin
 			cleared.timestamp       = existing.timestamp;
 			cleared.partial         = false;
 			cleared.tradeId         = existing.tradeId;
+			cleared.serverSynced    = existing.serverSynced;
 			cleared.offerInstanceId = existing.offerInstanceId;
 			cleared.totalQuantity   = existing.totalQuantity;
 			List<TradeRecord> updated = new ArrayList<>(tradeHistory);
@@ -2723,28 +2788,44 @@ public class O7FlipPlugin extends Plugin
 			toPost = cleared;
 		}
 
+		if (toPost.serverSynced
+			|| (toPost.offerInstanceId != null && tradePostsInFlight.contains(toPost.offerInstanceId)))
+		{
+			return;
+		}
+
 		if (config.shareTradeData()
 			&& config.apiKey() != null
 			&& !config.apiKey().trim().isEmpty())
 		{
 			TradeRecord rowForServer = new TradeRecord();
-			rowForServer.itemId        = toPost.itemId;
-			rowForServer.name          = toPost.name;
-			rowForServer.isBuy         = toPost.isBuy;
-			rowForServer.quantity      = toPost.quantity;
-			rowForServer.totalGp       = toPost.totalGp;
-			rowForServer.priceEach     = toPost.priceEach;
-			rowForServer.timestamp     = toPost.timestamp;
-			rowForServer.partial       = toPost.partial;
-			rowForServer.totalQuantity = toPost.totalQuantity;
+			rowForServer.itemId          = toPost.itemId;
+			rowForServer.name            = toPost.name;
+			rowForServer.isBuy           = toPost.isBuy;
+			rowForServer.quantity        = toPost.quantity;
+			rowForServer.totalGp         = toPost.totalGp;
+			rowForServer.priceEach       = toPost.priceEach;
+			rowForServer.timestamp       = toPost.timestamp;
+			rowForServer.partial         = toPost.partial;
+			rowForServer.totalQuantity   = toPost.totalQuantity;
+			rowForServer.offerInstanceId = toPost.offerInstanceId;
 			final Long postedOid = toPost.offerInstanceId;
-			apiClient.postTradeRecord(rowForServer, tradeId ->
+			if (postedOid != null)
 			{
-				if (tradeId != null && postedOid != null)
+				tradePostsInFlight.add(postedOid);
+			}
+			apiClient.postTradeRecord(rowForServer, (delivered, tradeId) ->
+				clientThread.invoke(() ->
 				{
-					clientThread.invoke(() -> stampTradeIdOnLocalRow(postedOid, tradeId));
-				}
-			});
+					if (postedOid != null)
+					{
+						tradePostsInFlight.remove(postedOid);
+						if (delivered)
+						{
+							markRowSynced(postedOid, tradeId);
+						}
+					}
+				}));
 		}
 	}
 
@@ -2769,6 +2850,7 @@ public class O7FlipPlugin extends Plugin
 		stamped.timestamp       = legacy.timestamp;
 		stamped.partial         = legacy.partial;
 		stamped.tradeId         = legacy.tradeId;
+		stamped.serverSynced    = legacy.serverSynced;
 		stamped.offerInstanceId = offerInstanceId;
 		stamped.totalQuantity   = legacy.totalQuantity;
 		updated.set(idx, stamped);
@@ -2865,6 +2947,45 @@ public class O7FlipPlugin extends Plugin
 			// live offer (e.g. a cancelled partial from a prior flip in this slot).
 			if (t.quantity > currentQty) continue;
 			if (t.totalGp  > currentGp)  continue;
+			return i;
+		}
+		return -1;
+	}
+
+	/**
+	 * Terminal counterpart to {@link #findReObservableActiveOfferRow}: hunts
+	 * for a FULLY-RECORDED row representing the same TERMINAL offer we are
+	 * re-observing fresh (slot baseline lost across a relog while a BOUGHT/
+	 * SOLD offer sat uncollected in the slot). Only called when the observed
+	 * offer is itself in a terminal state.
+	 *
+	 * Deliberately stricter than the active-offer matcher: the fill ledger
+	 * must match the live observation EXACTLY (quantity AND gp), on top of
+	 * item, side, order size, and slot continuity. A terminal offer can never
+	 * gain fills, so anything less than exact equality is a different offer —
+	 * the exactness is what makes it safe to match non-partial rows here
+	 * (a completed prior flip re-listed identically would still have to land
+	 * the same slot, order size, fill count AND gp total to collide).
+	 */
+	static int findRecordedTerminalOfferRow(
+		List<TradeRecord> list, int itemId, boolean isBuy, int totalQuantity, int slot,
+		int currentQty, long currentGp)
+	{
+		if (totalQuantity <= 0)
+		{
+			return -1;
+		}
+		int searchDepth = Math.min(32, list.size());
+		for (int i = list.size() - 1, scanned = 0; i >= 0 && scanned < searchDepth; i--, scanned++)
+		{
+			TradeRecord t = list.get(i);
+			if (t.offerInstanceId == null) continue;          // need a locally-merged row
+			if (t.itemId != itemId)        continue;
+			if (t.isBuy != isBuy)          continue;
+			if (t.totalQuantity == null || t.totalQuantity != totalQuantity) continue;
+			if (t.offerInstanceId % 10 != slot) continue;     // offer-epoch slot continuity
+			if (t.quantity != currentQty) continue;           // exact-match only — see javadoc
+			if (t.totalGp  != currentGp)  continue;
 			return i;
 		}
 		return -1;
@@ -3505,34 +3626,59 @@ public class O7FlipPlugin extends Plugin
 		{
 			return;
 		}
-		List<TradeRecord> snapshot = tradeHistory;
-		if (snapshot == null || snapshot.isEmpty())
+		List<TradeRecord> all = tradeHistory;
+		if (all == null || all.isEmpty())
 		{
+			return;
+		}
+		// SYNC_CONTRACT §5b — only offer rows the server hasn't confirmed yet.
+		// Rows with serverSynced or a stamped tradeId are already delivered;
+		// re-sending them is exactly the duplicate pressure the contract bans.
+		List<TradeRecord> snapshot = new ArrayList<>();
+		for (TradeRecord t : all)
+		{
+			if (t != null && !t.serverSynced && t.tradeId == null)
+			{
+				snapshot.add(t);
+			}
+		}
+		if (snapshot.isEmpty())
+		{
+			log.debug("[07Flip] Bulk sync to server: all {} local rows already delivered", all.size());
 			return;
 		}
 		apiClient.postTradeRecordsBulk(snapshot, res ->
 		{
-			if (res == null) return;
+			if (res == null || !res.ok) return;
 			if (res.accepted > 0)
 			{
-				log.info("[07Flip] Bulk sync to server: +{} new, {} duplicates, {} rejected (of {} local)",
+				log.info("[07Flip] Bulk sync to server: +{} new, {} duplicates, {} rejected (of {} offered)",
 					res.accepted, res.duplicates, res.rejected, snapshot.size());
 			}
 			else
 			{
-				log.debug("[07Flip] Bulk sync to server: server already has all {} local rows",
+				log.debug("[07Flip] Bulk sync to server: server already has all {} offered rows",
 					snapshot.size());
 			}
-			if (!res.tradeIdsByOfferInstanceId.isEmpty())
+			clientThread.invoke(() ->
 			{
-				clientThread.invoke(() ->
+				for (Map.Entry<Long, Long> e : res.tradeIdsByOfferInstanceId.entrySet())
 				{
-					for (Map.Entry<Long, Long> e : res.tradeIdsByOfferInstanceId.entrySet())
+					markRowSynced(e.getKey(), e.getValue());
+				}
+				// A 2xx batch with no rejects means every offered row is now
+				// on the server — inserted or deduped both count as delivered.
+				if (res.rejected == 0)
+				{
+					for (TradeRecord t : snapshot)
 					{
-						stampTradeIdOnLocalRow(e.getKey(), e.getValue());
+						if (t.offerInstanceId != null)
+						{
+							markRowSynced(t.offerInstanceId, null);
+						}
 					}
-				});
-			}
+				}
+			});
 		});
 	}
 
@@ -4324,8 +4470,10 @@ public class O7FlipPlugin extends Plugin
 	// -------------------------------------------------------------------------
 	//
 	// Shared row between the website and the plugin. Last-write-wins. The
-	// plugin POSTs blindly on local changes (1s debounce) and polls GET every
-	// 30s while the Plan tab is open so web-side edits become visible.
+	// plugin POSTs blindly on local changes (1s debounce) and polls GET at
+	// 15s while the Plan tab is open OR the session has in-flight legs,
+	// falling back to 60s when idle (server ask: fast sync while anything
+	// is live; the rate cap is 60/min/IP so 4/min is comfortable).
 	//
 	// activeSession is the single source of truth on the plugin side; both
 	// the panel UI and the wire-format converter (sessionToJson) read from it.
@@ -4352,10 +4500,16 @@ public class O7FlipPlugin extends Plugin
 	/** Poll cadence WHILE the Plan tab is open. Server cap is 60/min/IP so a
 	 *  15s loop is comfortably under it (4 GET/min) while still feeling live. */
 	private static final long SESSION_POLL_INTERVAL_S  = 15L;
-	/** Background poll cadence regardless of tab — ~1.3 GET/min/user, trivial
-	 *  against the 60/min cap. Just enough to discover a web-built plan and keep
-	 *  attributing in-client fills to it. */
-	private static final long SESSION_BACKGROUND_POLL_INTERVAL_S = 45L;
+	/** Background poll BASE cadence regardless of tab. Every tick polls while
+	 *  the session has in-flight legs (live fills need fast cross-surface
+	 *  sync); when idle, only every {@link #SESSION_BACKGROUND_IDLE_DIVISOR}th
+	 *  tick fires, for an effective 60s cadence — just enough to discover a
+	 *  web-built plan. */
+	private static final long SESSION_BACKGROUND_POLL_INTERVAL_S = 15L;
+	/** Idle slowdown: with a 15s base tick, 4 → one GET per 60s. */
+	private static final int SESSION_BACKGROUND_IDLE_DIVISOR = 4;
+	/** Counts background poll ticks for the idle slowdown. Executor thread only. */
+	private int sessionBackgroundPollTick;
 
 	/** Startup GET — pulls whatever was last saved on either surface. */
 	private void doHydrateOptimizerSession()
@@ -4508,6 +4662,41 @@ public class O7FlipPlugin extends Plugin
 		}, 5, 5, TimeUnit.SECONDS);
 	}
 
+	/**
+	 * True when the synced session has at least one leg with live GE activity
+	 * still pending — BUYING (fills incoming), FILLED (sell to place), or
+	 * SELLING (sell fills incoming). PENDING legs aren't trading yet and
+	 * CLOSED legs are done; neither needs the fast poll. Reads the volatile
+	 * session reference off-thread; a rare concurrent structure swap during
+	 * iteration is treated as "live" so we never under-poll an active flip.
+	 */
+	private boolean sessionHasInFlightLegs()
+	{
+		com.o7flip.model.OptimizerSession s = activeSession;
+		if (s == null || s.slots == null)
+		{
+			return false;
+		}
+		try
+		{
+			for (com.o7flip.model.OptimizeResult.Allocation a : s.slots)
+			{
+				if (a == null) continue;
+				if (a.state == com.o7flip.model.SlotState.BUYING
+					|| a.state == com.o7flip.model.SlotState.FILLED
+					|| a.state == com.o7flip.model.SlotState.SELLING)
+				{
+					return true;
+				}
+			}
+		}
+		catch (Exception e)
+		{
+			return true;
+		}
+		return false;
+	}
+
 	private void doBackgroundPollActiveSession()
 	{
 		// Premium-only — skip the always-on session discovery for non-premium.
@@ -4516,6 +4705,14 @@ public class O7FlipPlugin extends Plugin
 		if (!panel.isShowing()) return;
 		ScheduledFuture<?> fast = sessionPollTask;
 		if (fast != null && !fast.isCancelled() && !fast.isDone())
+		{
+			return;
+		}
+		// Idle slowdown — the 15s base tick only fires every cycle while the
+		// session has in-flight legs; otherwise once per IDLE_DIVISOR ticks
+		// (effective 60s) to keep discovering web-built plans cheaply.
+		int tick = sessionBackgroundPollTick++;
+		if (!sessionHasInFlightLegs() && tick % SESSION_BACKGROUND_IDLE_DIVISOR != 0)
 		{
 			return;
 		}

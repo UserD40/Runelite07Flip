@@ -354,6 +354,12 @@ public class O7FlipApiClient
 			row.addProperty("total_gp",  t.totalGp);
 			row.addProperty("timestamp", t.timestamp);
 			row.addProperty("partial",   t.partial);
+			// SYNC_CONTRACT §5c — additive offer-epoch key so the server can
+			// dedupe on it as a backstop even if timestamps ever drift again.
+			if (t.offerInstanceId != null)
+			{
+				row.addProperty("offer_instance_id", t.offerInstanceId);
+			}
 			arr.add(row);
 			sentTrades.add(t);
 		}
@@ -486,25 +492,25 @@ public class O7FlipApiClient
 	}
 
 	/**
-	 * POSTs a single trade to {@code /tracker}. The callback fires with the
-	 * server-issued {@code trade_id} (nullable) so the caller can stamp the
-	 * local {@link TradeRecord} and avoid relying on fingerprint dedup on the
-	 * next /tracker/history sync. The callback receives null on:
+	 * POSTs a single trade to {@code /tracker}. The callback fires with
+	 * {@code (delivered, tradeId)}:
 	 * <ul>
-	 *   <li>HTTP failure (network, 4xx, 5xx)</li>
-	 *   <li>response body that parses but omits {@code trade_id} (e.g.,
-	 *       duplicate where the server's secondary lookup failed)</li>
-	 *   <li>parse error</li>
+	 *   <li>{@code delivered} — true on ANY 2xx, including the duplicate
+	 *       case where the server already had the row. SYNC_CONTRACT §5: a
+	 *       delivered fill must never be re-POSTed, so callers persist this
+	 *       (see {@code TradeRecord.serverSynced}).</li>
+	 *   <li>{@code tradeId} — the server-issued id, null when the response
+	 *       omits it (e.g. a duplicate where the secondary lookup failed) or
+	 *       on any failure. A null id with {@code delivered=true} is not a
+	 *       failure — the row reconciles on the next history sync.</li>
 	 * </ul>
-	 * A null id is not a failure — the row will reconcile on the next history
-	 * sync via fingerprint dedup as before. Callers may pass {@code null} for
-	 * {@code onTradeId} when they don't care to stamp.
+	 * Callers may pass {@code null} for {@code onResult}.
 	 */
-	public void postTradeRecord(TradeRecord trade, Consumer<Long> onTradeId)
+	public void postTradeRecord(TradeRecord trade, BiConsumer<Boolean, Long> onResult)
 	{
 		if (isRateLimited())
 		{
-			if (onTradeId != null) onTradeId.accept(null);
+			if (onResult != null) onResult.accept(false, null);
 			return;
 		}
 		JsonObject body = new JsonObject();
@@ -516,6 +522,11 @@ public class O7FlipApiClient
 		body.addProperty("total_gp",  trade.totalGp);
 		body.addProperty("timestamp", trade.timestamp);
 		body.addProperty("partial",   trade.partial);
+		// SYNC_CONTRACT §5c — additive offer-epoch key for server-side dedup.
+		if (trade.offerInstanceId != null)
+		{
+			body.addProperty("offer_instance_id", trade.offerInstanceId);
+		}
 
 		RequestBody requestBody = RequestBody.create(MEDIA_TYPE_JSON, gson.toJson(body));
 		Request.Builder builder = new Request.Builder()
@@ -533,7 +544,7 @@ public class O7FlipApiClient
 			public void onFailure(Call call, IOException e)
 			{
 				log.warn("[07Flip] postTradeRecord failed: {}", e.getMessage());
-				if (onTradeId != null) onTradeId.accept(null);
+				if (onResult != null) onResult.accept(false, null);
 			}
 
 			@Override
@@ -545,17 +556,22 @@ public class O7FlipApiClient
 					if (!response.isSuccessful() || response.body() == null)
 					{
 						log.warn("[07Flip] postTradeRecord HTTP {}", response.code());
-						if (onTradeId != null) onTradeId.accept(null);
+						if (onResult != null) onResult.accept(false, null);
 						return;
 					}
-					JsonObject root = gson.fromJson(response.body().string(), JsonObject.class);
-					Long tradeId = getLongOrNull(root, "trade_id");
-					if (onTradeId != null) onTradeId.accept(tradeId);
-				}
-				catch (Exception e)
-				{
-					log.warn("[07Flip] postTradeRecord parse error: {}", e.getMessage());
-					if (onTradeId != null) onTradeId.accept(null);
+					Long tradeId = null;
+					try
+					{
+						JsonObject root = gson.fromJson(response.body().string(), JsonObject.class);
+						tradeId = getLongOrNull(root, "trade_id");
+					}
+					catch (Exception parse)
+					{
+						// 2xx with an unparseable body — the server still has
+						// the row, so delivery stands; only the id is lost.
+						log.warn("[07Flip] postTradeRecord parse error: {}", parse.getMessage());
+					}
+					if (onResult != null) onResult.accept(true, tradeId);
 				}
 				finally
 				{
@@ -614,6 +630,8 @@ public class O7FlipApiClient
 					{
 						TradeRecord t = new TradeRecord();
 						t.tradeId   = getLongOrNull(obj, "trade_id");
+						// Came FROM the server, so by definition it has it.
+						t.serverSynced = true;
 						t.itemId    = getInt(obj, "item_id", 0);
 						t.name      = getString(obj, "name", "");
 						t.isBuy     = getBool(obj, "is_buy", false);

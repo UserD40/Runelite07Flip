@@ -62,6 +62,16 @@ public class TradeRecord
 	public Long offerInstanceId;
 
 	/**
+	 * True once the server has confirmed receipt of this row (any 2xx on
+	 * POST /tracker or /tracker/bulk — including the duplicate case, where
+	 * the server already had it). SYNC_CONTRACT §5: a delivered fill must
+	 * never be re-POSTed, so every server-submit path checks this flag
+	 * first. Persisted with the row; legacy JSON deserialises to false and
+	 * the row is re-offered once, where the server's dedup absorbs it.
+	 */
+	public boolean serverSynced;
+
+	/**
 	 * Total quantity the user originally set on this offer (not what filled).
 	 * Captured at first observation from {@code GrandExchangeOffer.getTotalQuantity()}
 	 * so the row can render a progress bar and "filled / total" counter the

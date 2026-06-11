@@ -61,13 +61,17 @@ public class DecantItemPanel extends JPanel
 		setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
 		setAlignmentX(Component.LEFT_ALIGNMENT);
 
+		// The /decanting response doesn't always carry item_id, so resolve the
+		// buy-dose variant locally — the icon, click routing and GE-buy queue
+		// all use the dose the strategy says to buy.
 		int dose   = item.buyDose > 0 ? item.buyDose : 4;
-		int iconId = ItemIds.forPotion(item.potionName, dose);
-		if (iconId == 0 && item.itemId > 0)
+		int resolved = ItemIds.forPotion(item.potionName, dose);
+		if (resolved == 0 && item.itemId > 0)
 		{
-			iconId = item.itemId;
+			resolved = item.itemId;
 		}
-		JLabel iconLabel = FlipItemPanel.buildIcon(iconId, itemManager);
+		final int buyDoseItemId = resolved;
+		JLabel iconLabel = FlipItemPanel.buildIcon(buyDoseItemId, itemManager);
 
 		JLabel nameLabel = new JLabel(item.potionName);
 		nameLabel.setFont(Fonts.BOLD);
@@ -107,7 +111,7 @@ public class DecantItemPanel extends JPanel
 		add(textPanel, BorderLayout.CENTER);
 		add(roiLabel,  BorderLayout.EAST);
 
-		ClickRouter.attach(this, plugin, item.itemId, item.potionName);
+		ClickRouter.attach(this, plugin, buyDoseItemId, item.potionName);
 
 		addMouseListener(new MouseAdapter()
 		{
@@ -131,9 +135,9 @@ public class DecantItemPanel extends JPanel
 				// strategy spans multiple doses at different prices) so we
 				// pass 0 — the GE search auto-fills with the item, but the
 				// user enters their own price.
-				if (SwingUtilities.isRightMouseButton(e) && !e.isShiftDown() && plugin != null && item.itemId > 0)
+				if (SwingUtilities.isRightMouseButton(e) && !e.isShiftDown() && plugin != null && buyDoseItemId > 0)
 				{
-					plugin.queueGeBuy(item.itemId, 0L, item.potionName);
+					plugin.queueGeBuy(buyDoseItemId, 0L, item.potionName);
 				}
 			}
 		});
