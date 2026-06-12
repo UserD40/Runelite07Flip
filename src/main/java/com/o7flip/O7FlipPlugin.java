@@ -1105,13 +1105,30 @@ public class O7FlipPlugin extends Plugin
 		{
 			return;
 		}
+		// Still picking an item — the setup screen renders "Choose an item..."
+		// until a search result (buy) or inventory item (sell) is actually
+		// selected. Firing before that resolves placeholder widget icons to
+		// bogus item ids and opens the tab mid-search. The rendered text is
+		// the same ground-truth approach as isSellSetupVisible.
+		if (widgetTreeHasText(setup, "choose an item"))
+		{
+			return;
+		}
 		int itemId = resolveItemIdFromSetupWidget();
 		if (itemId <= 0 || itemId == autoOpenInsightsItemId)
 		{
 			return;
 		}
-		autoOpenInsightsItemId = itemId;
+		// Unobtainable/placeholder ids have an item definition literally named
+		// "null" — never a real selection. Don't latch, so the genuine pick a
+		// tick later still fires; this also keeps junk ids from burning
+		// rate-limit budget on doomed /v2/item fetches.
 		String name = client.getItemDefinition(itemId).getName();
+		if (name == null || name.isEmpty() || "null".equalsIgnoreCase(name))
+		{
+			return;
+		}
+		autoOpenInsightsItemId = itemId;
 		log.debug("[07Flip] offer setup detected — auto-opening Item tab for {} ({})", name, itemId);
 		openInsights(itemId, name);
 	}

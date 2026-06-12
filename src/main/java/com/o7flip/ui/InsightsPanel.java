@@ -489,7 +489,9 @@ public class InsightsPanel extends JPanel
 		{
 			final int id = currentItemId;
 			final String nm = currentItemName;
-			JButton retry = new JButton("Retry" + (nm != null && !nm.isEmpty() ? " — " + nm : ""));
+			// Unobtainable item defs are literally named "null" — never show that.
+			boolean hasName = nm != null && !nm.isEmpty() && !"null".equalsIgnoreCase(nm);
+			JButton retry = new JButton("Retry" + (hasName ? " — " + nm : ""));
 			retry.setFont(Fonts.SM_BOLD);
 			retry.setForeground(Color.WHITE);
 			retry.setBackground(new Color(0x2A2A2A));
