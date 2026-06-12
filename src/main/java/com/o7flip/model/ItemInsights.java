@@ -51,6 +51,10 @@ public class ItemInsights
 	public Alerts  alerts;
 	public Projection projection;   // null for free users or ineligible items
 	public Frozen  frozen;          // null when the requesting user has no freeze for this item
+	public Indicators indicators;   // premium-only, null when free
+	public Liquidity  liquidity;    // premium-only, null when free
+	public Quality    quality;      // premium-only, null when free
+	public Risk       risk;         // premium-only, null when free
 
 	/**
 	 * Buy / sell price points for the last 24h, aligned to the same time
@@ -62,6 +66,17 @@ public class ItemInsights
 	public Long[]  sparkline24hBuy;
 	public Long[]  sparkline24hSell;
 	public String  sparkline24hStart;
+
+	// Longer-horizon series, same null-on-gap convention as the 24h arrays.
+	// 7d = 4-hour buckets (42 points), 30d = daily points (30). Empty arrays
+	// when the server doesn't supply them — the chart period toggle only
+	// offers periods whose arrays actually have data.
+	public Long[]  sparkline7dBuy;
+	public Long[]  sparkline7dSell;
+	public String  sparkline7dStart;
+	public Long[]  sparkline30dBuy;
+	public Long[]  sparkline30dSell;
+	public String  sparkline30dStart;
 
 	public boolean premiumLocked;
 	public String  upgradeUrl;
@@ -98,6 +113,8 @@ public class ItemInsights
 		public long   low90d;
 		public Double position90dPct;
 		public Double drawdownPctFrom90d;
+		public Integer daysSince90dLow;
+		public Integer daysSince90dHigh;
 	}
 
 	public static class Score
@@ -142,5 +159,59 @@ public class ItemInsights
 		public long   buy;
 		public long   sell;
 		public String frozenAt;
+	}
+
+	/**
+	 * Daily-timeframe technical indicators from the server's precomputed
+	 * indicator table (the same data behind the website's Technical
+	 * Screener). Every field is individually nullable — the panel renders
+	 * only the rows it has values for.
+	 */
+	public static class Indicators
+	{
+		public Double  rsi14;
+		public Double  macdHist;
+		public String  macdCross;      // "bullish" | "bearish" | null
+		public Double  bbPositionPct;  // 0–100 position within Bollinger bands
+		public Double  volSurge;       // current vs baseline volume ratio
+		public Long    ma7d;
+		public Long    ma30d;
+		public String  maCross;        // "bullish" | "bearish" | null — 7d vs 30d
+		public Double  pct1h;
+		public Double  pct24h;
+		public Double  pct7d;
+		public Double  pct30d;
+	}
+
+	/** Buy/sell throughput split and fill-speed proxy for the last hour/24h. */
+	public static class Liquidity
+	{
+		public Integer hourlyBuyVolume;       // instant buys (wiki lowPriceVolume)
+		public Integer hourlySellVolume;      // instant sells (wiki highPriceVolume)
+		public Double  volumeImbalancePct;    // + = buy pressure, − = sell pressure
+		public Integer crossedHours24h;       // hours of last 24 with inverted margin
+		public Double  estHoursToFillLimit;   // volume-throughput proxy, not a queue model
+	}
+
+	/** Flip-quality stats derived from the last 24h of hourly aggregates. */
+	public static class Quality
+	{
+		public Long    avgMargin24h;          // mean hourly margin, pre-tax
+		public Long    avgProfit24h;          // post-tax at avg prices
+		public Integer marginConsistency;     // 0–100, 100 = rock-steady hourly margin
+		public Long    limitCycleProfit;      // per 4h GE buy-limit cycle, volume-capped
+		public Long    estGpPerHour;          // limitCycleProfit / 4, volume-capped
+	}
+
+	/**
+	 * Bot-dump / unusual-volume flags. {@code dumpScore} is only computed
+	 * for items in the server's warmed candidate set — null means "not
+	 * scored right now", which the panel renders as a dash, never as 0.
+	 */
+	public static class Risk
+	{
+		public Integer dumpScore;             // 0–100 | null (outside warmed set)
+		public boolean activeDump;
+		public boolean unusualVolume;         // volume surge ≥ 3× baseline
 	}
 }

@@ -180,6 +180,12 @@ public class O7FlipPlugin extends Plugin
 	// re-arms. Game-thread only.
 	private int sellSetupArmedItemId = -1;
 
+	// Last item id the auto-open-Item-tab detector has already opened the
+	// Insights view for. Latched per setup instance so the user can switch
+	// tabs afterwards without the detector fighting them every tick; reset
+	// when the setup screen closes. Game-thread only.
+	private int autoOpenInsightsItemId = -1;
+
 	// -------------------------------------------------------------------------
 	// Long-lived right-click queue used by the movable GE price overlay.
 	// Outlives the per-phase pendingGe* fields above so the overlay can show the
@@ -888,6 +894,11 @@ public class O7FlipPlugin extends Plugin
 		// arm an explicit queue. Idempotent per-setup-instance.
 		detectAndArmSellSetup();
 
+		// Auto-open the Item tab for whatever item is on the setup screen —
+		// buy and sell flows alike — so the panel shows the full detail view
+		// of the item the user is about to trade.
+		detectAutoOpenItemInsights();
+
 		if (pendingGeBuyItemId == -1)
 		{
 			return;
@@ -1057,6 +1068,52 @@ public class O7FlipPlugin extends Plugin
 				pendingGeInputPrice = freshSell;
 			});
 		});
+	}
+
+	/**
+	 * Game-tick detector that auto-opens the Item tab for whatever item the
+	 * user has on the GE offer setup screen — both the buy flow (item picked
+	 * from search) and the sell flow (item clicked from the inventory side).
+	 * Polled on the game tick rather than reacting to
+	 * {@code GE_OFFERS_SETUP_BUILD} for the same reliability reasons as
+	 * {@link #detectAndArmSellSetup}: the script fires multiple times for
+	 * buys and sometimes not at all for inventory-click sells, while the
+	 * setup widget itself is the ground truth.
+	 *
+	 * Only fires while the plugin sidebar is actually visible — the point is
+	 * to enrich a panel the user is already looking at, not to yank the
+	 * sidebar open mid-trade. If the user opens the panel while the setup
+	 * screen is still up, the next tick picks it up.
+	 *
+	 * Idempotency: {@link #autoOpenInsightsItemId} latches the current item
+	 * so the user can navigate to another tab afterwards without the
+	 * detector dragging them back every tick. The latch clears when the
+	 * setup screen closes, letting the next offer re-trigger.
+	 *
+	 * Must run on the game thread.
+	 */
+	private void detectAutoOpenItemInsights()
+	{
+		Widget setup = client.getWidget(InterfaceID.GeOffers.SETUP);
+		if (setup == null || setup.isHidden())
+		{
+			// Setup closed — reset latch so the next offer re-triggers.
+			autoOpenInsightsItemId = -1;
+			return;
+		}
+		if (!config.autoOpenItemTab() || !config.showInsights() || panel == null || !panel.isShowing())
+		{
+			return;
+		}
+		int itemId = resolveItemIdFromSetupWidget();
+		if (itemId <= 0 || itemId == autoOpenInsightsItemId)
+		{
+			return;
+		}
+		autoOpenInsightsItemId = itemId;
+		String name = client.getItemDefinition(itemId).getName();
+		log.debug("[07Flip] offer setup detected — auto-opening Item tab for {} ({})", name, itemId);
+		openInsights(itemId, name);
 	}
 
 	/**
@@ -1395,6 +1452,13 @@ public class O7FlipPlugin extends Plugin
 		{
 			configManager.setConfiguration("o7flip", "openTabReorderDialog", false);
 			SwingUtilities.invokeLater(this::openTabReorderDialog);
+			return;
+		}
+		// Item-tab section visibility toggles ("itemTab*") — re-render the
+		// loaded item in place so the change applies without re-clicking it.
+		if (key.startsWith("itemTab"))
+		{
+			SwingUtilities.invokeLater(() -> panel.refreshInsightsSections());
 			return;
 		}
 		// Only rebuild the entire tab structure when a key that actually

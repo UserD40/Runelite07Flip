@@ -953,7 +953,62 @@ public class O7FlipApiClient
 			r.low90d             = getLong(rng, "low_90d",  0L);
 			r.position90dPct     = getDoubleOrNull(rng, "position_90d_pct");
 			r.drawdownPctFrom90d = getDoubleOrNull(rng, "drawdown_pct_from_90d");
+			r.daysSince90dLow    = getIntOrNull(rng, "days_since_90d_low");
+			r.daysSince90dHigh   = getIntOrNull(rng, "days_since_90d_high");
 			out.ranges = r;
+		}
+
+		JsonObject ind = optObject(root, "indicators");
+		if (ind != null)
+		{
+			ItemInsights.Indicators i = new ItemInsights.Indicators();
+			i.rsi14         = getDoubleOrNull(ind, "rsi_14");
+			i.macdHist      = getDoubleOrNull(ind, "macd_hist");
+			i.macdCross     = getStringOrNull(ind, "macd_cross");
+			i.bbPositionPct = getDoubleOrNull(ind, "bb_position_pct");
+			i.volSurge      = getDoubleOrNull(ind, "vol_surge");
+			i.ma7d          = getLongOrNull(ind, "ma_7d");
+			i.ma30d         = getLongOrNull(ind, "ma_30d");
+			i.maCross       = getStringOrNull(ind, "ma_cross");
+			i.pct1h         = getDoubleOrNull(ind, "pct_1h");
+			i.pct24h        = getDoubleOrNull(ind, "pct_24h");
+			i.pct7d         = getDoubleOrNull(ind, "pct_7d");
+			i.pct30d        = getDoubleOrNull(ind, "pct_30d");
+			out.indicators = i;
+		}
+
+		JsonObject liq = optObject(root, "liquidity");
+		if (liq != null)
+		{
+			ItemInsights.Liquidity l = new ItemInsights.Liquidity();
+			l.hourlyBuyVolume     = getIntOrNull(liq, "hourly_buy_volume");
+			l.hourlySellVolume    = getIntOrNull(liq, "hourly_sell_volume");
+			l.volumeImbalancePct  = getDoubleOrNull(liq, "volume_imbalance_pct");
+			l.crossedHours24h     = getIntOrNull(liq, "crossed_hours_24h");
+			l.estHoursToFillLimit = getDoubleOrNull(liq, "est_hours_to_fill_limit");
+			out.liquidity = l;
+		}
+
+		JsonObject qual = optObject(root, "quality");
+		if (qual != null)
+		{
+			ItemInsights.Quality q = new ItemInsights.Quality();
+			q.avgMargin24h      = getLongOrNull(qual, "avg_margin_24h");
+			q.avgProfit24h      = getLongOrNull(qual, "avg_profit_24h");
+			q.marginConsistency = getIntOrNull(qual, "margin_consistency");
+			q.limitCycleProfit  = getLongOrNull(qual, "limit_cycle_profit");
+			q.estGpPerHour      = getLongOrNull(qual, "est_gp_per_hour");
+			out.quality = q;
+		}
+
+		JsonObject risk = optObject(root, "risk");
+		if (risk != null)
+		{
+			ItemInsights.Risk rk = new ItemInsights.Risk();
+			rk.dumpScore     = getIntOrNull(risk, "dump_score");
+			rk.activeDump    = getBool(risk, "active_dump", false);
+			rk.unusualVolume = getBool(risk, "unusual_volume", false);
+			out.risk = rk;
 		}
 
 		JsonObject sc = optObject(root, "score");
@@ -1000,6 +1055,12 @@ public class O7FlipApiClient
 		out.sparkline24hBuy   = parseNullableLongArray(root, "sparkline_24h_buy");
 		out.sparkline24hSell  = parseNullableLongArray(root, "sparkline_24h_sell");
 		out.sparkline24hStart = getString(root, "sparkline_24h_start", "");
+		out.sparkline7dBuy    = parseNullableLongArray(root, "sparkline_7d_buy");
+		out.sparkline7dSell   = parseNullableLongArray(root, "sparkline_7d_sell");
+		out.sparkline7dStart  = getString(root, "sparkline_7d_start", "");
+		out.sparkline30dBuy   = parseNullableLongArray(root, "sparkline_30d_buy");
+		out.sparkline30dSell  = parseNullableLongArray(root, "sparkline_30d_sell");
+		out.sparkline30dStart = getString(root, "sparkline_30d_start", "");
 
 		return out;
 	}
@@ -3627,5 +3688,11 @@ public class O7FlipApiClient
 	{
 		JsonElement el = obj.get(key);
 		return (el == null || el.isJsonNull()) ? null : el.getAsLong();
+	}
+
+	private String getStringOrNull(JsonObject obj, String key)
+	{
+		JsonElement el = obj.get(key);
+		return (el == null || el.isJsonNull()) ? null : el.getAsString();
 	}
 }

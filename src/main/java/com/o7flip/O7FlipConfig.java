@@ -51,37 +51,44 @@ public interface O7FlipConfig extends Config
 	String tabsSection = "tabs";
 
 	@ConfigSection(
+		name = "Item tab",
+		description = "Show or hide individual sections of the Item insights tab.",
+		position = 2
+	)
+	String itemTabSection = "itemtab";
+
+	@ConfigSection(
 		name = "GE offers",
 		description = "Helpers for setting up buy and sell offers at the Grand Exchange.",
-		position = 2
+		position = 3
 	)
 	String geSection = "ge";
 
 	@ConfigSection(
 		name = "GE price overlay",
 		description = "The movable 07Flip overlay shown on the GE offer setup screen.",
-		position = 3
+		position = 4
 	)
 	String geOverlaySection = "geoverlay";
 
 	@ConfigSection(
 		name = "Inventory",
 		description = "Helpers shown on items in your inventory.",
-		position = 4
+		position = 5
 	)
 	String inventorySection = "inventory";
 
 	@ConfigSection(
 		name = "GP drop animation",
 		description = "The fading +X gp / -X gp drop shown when a flip completes — position, font and colours.",
-		position = 5
+		position = 6
 	)
 	String gpDropSection = "gpdrop";
 
 	@ConfigSection(
 		name = "Trade tracker",
 		description = "Options for the local trade history and sharing it with 07flip.com.",
-		position = 6
+		position = 7
 	)
 	String trackerSection = "tracker";
 
@@ -600,6 +607,20 @@ public interface O7FlipConfig extends Config
 		return 3;
 	}
 
+	@ConfigItem(
+		keyName = "autoOpenItemTab",
+		name = "Open Item tab on offer setup",
+		description = "<html>When you pick an item on the GE offer setup screen — buying after a search, or "
+			+ "selling from your inventory — automatically open the plugin's Item tab showing that item's "
+			+ "full detail view.<br>Only happens while the 07Flip sidebar is open.</html>",
+		section = geSection,
+		position = 3
+	)
+	default boolean autoOpenItemTab()
+	{
+		return true;
+	}
+
 	// ── GP drop animation ──────────────────────────────────────────────────
 
 	/** Typeface options for the GP drop text. Mapped to actual fonts in
@@ -756,5 +777,155 @@ public interface O7FlipConfig extends Config
 	default boolean shareTradeData()
 	{
 		return false;
+	}
+
+	// ── Item tab section visibility ─────────────────────────────────────────
+	// One toggle per section of the Item insights tab, all default-on. The
+	// item header (icon, name, favourite star) is always shown. Premium-only
+	// sections still require premium — hiding/showing here only affects what
+	// renders out of the data the user's tier already has.
+
+	@ConfigItem(
+		keyName = "itemTabLivePrices",
+		name = "Live prices",
+		description = "Show the live buy/sell/margin/tax/profit/ROI section on the Item tab.",
+		section = itemTabSection,
+		position = 0
+	)
+	default boolean itemTabLivePrices()
+	{
+		return true;
+	}
+
+	@ConfigItem(
+		keyName = "itemTabChart",
+		name = "Price chart",
+		description = "Show the buy/sell price chart (with the 24h / 7d / 30d toggle) on the Item tab.",
+		section = itemTabSection,
+		position = 1
+	)
+	default boolean itemTabChart()
+	{
+		return true;
+	}
+
+	@ConfigItem(
+		keyName = "itemTabPriceRange",
+		name = "Price range",
+		description = "Show the 24h / 7d / 90d price range section on the Item tab.",
+		section = itemTabSection,
+		position = 2
+	)
+	default boolean itemTabPriceRange()
+	{
+		return true;
+	}
+
+	@ConfigItem(
+		keyName = "itemTabRecommended",
+		name = "07Flip recommended",
+		description = "Show the 07Flip recommended buy/sell prices section on the Item tab (premium).",
+		section = itemTabSection,
+		position = 3
+	)
+	default boolean itemTabRecommended()
+	{
+		return true;
+	}
+
+	@ConfigItem(
+		keyName = "itemTabScore",
+		name = "07Flip score",
+		description = "Show the 07Flip confidence / tier / signal section on the Item tab.",
+		section = itemTabSection,
+		position = 4
+	)
+	default boolean itemTabScore()
+	{
+		return true;
+	}
+
+	@ConfigItem(
+		keyName = "itemTabIndicators",
+		name = "Technical indicators",
+		description = "Show the RSI / MACD / moving averages / % change section on the Item tab (premium).",
+		section = itemTabSection,
+		position = 5
+	)
+	default boolean itemTabIndicators()
+	{
+		return true;
+	}
+
+	@ConfigItem(
+		keyName = "itemTabQuality",
+		name = "Flip quality",
+		description = "Show the average margin / consistency / GP-per-hour section on the Item tab (premium).",
+		section = itemTabSection,
+		position = 6
+	)
+	default boolean itemTabQuality()
+	{
+		return true;
+	}
+
+	@ConfigItem(
+		keyName = "itemTabLiquidity",
+		name = "Liquidity",
+		description = "Show the buy/sell volume split, imbalance, and fill-time section on the Item tab (premium).",
+		section = itemTabSection,
+		position = 7
+	)
+	default boolean itemTabLiquidity()
+	{
+		return true;
+	}
+
+	@ConfigItem(
+		keyName = "itemTabRisk",
+		name = "Risk",
+		description = "Show the dump score / unusual volume section on the Item tab (premium).",
+		section = itemTabSection,
+		position = 8
+	)
+	default boolean itemTabRisk()
+	{
+		return true;
+	}
+
+	@ConfigItem(
+		keyName = "itemTabProjection",
+		name = "Projection",
+		description = "Show the 30-day / 3-month projection bands on the Item tab (premium).",
+		section = itemTabSection,
+		position = 9
+	)
+	default boolean itemTabProjection()
+	{
+		return true;
+	}
+
+	@ConfigItem(
+		keyName = "itemTabVolume",
+		name = "Volume",
+		description = "Show the hourly / daily trade volume section on the Item tab.",
+		section = itemTabSection,
+		position = 10
+	)
+	default boolean itemTabVolume()
+	{
+		return true;
+	}
+
+	@ConfigItem(
+		keyName = "itemTabAlerts",
+		name = "Alerts",
+		description = "Show the merch alert / spike / dip section on the Item tab.",
+		section = itemTabSection,
+		position = 11
+	)
+	default boolean itemTabAlerts()
+	{
+		return true;
 	}
 }

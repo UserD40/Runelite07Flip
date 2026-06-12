@@ -3679,7 +3679,7 @@ public class O7FlipPanel extends PluginPanel
 	{
 		if (insightsPanel == null && insightsHost != null)
 		{
-			insightsPanel = new com.o7flip.ui.InsightsPanel(itemManager, plugin);
+			insightsPanel = new com.o7flip.ui.InsightsPanel(itemManager, plugin, config);
 			insightsHost.add(insightsPanel);
 			// If the user had an item loaded before this panel was torn down
 			// (e.g. by an auth-refresh rebuilding the tabs), restore it so
@@ -3752,6 +3752,19 @@ public class O7FlipPanel extends PluginPanel
 		if (p != null)
 		{
 			p.show(insights);
+		}
+	}
+
+	/**
+	 * Re-renders the Item tab's loaded item with the current section-visibility
+	 * config. Called by the plugin when an "Item tab" toggle changes so the
+	 * panel updates live, without the user re-clicking the item.
+	 */
+	public void refreshInsightsSections()
+	{
+		if (insightsPanel != null)
+		{
+			insightsPanel.refreshSectionVisibility();
 		}
 	}
 
