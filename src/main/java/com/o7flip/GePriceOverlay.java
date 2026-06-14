@@ -135,30 +135,41 @@ public class GePriceOverlay extends Overlay
 		}
 
 		TrackedItemData data = plugin.trackedItems.get(currentItemId);
-
-		// Buy = lower side (price to place a buy offer at).
-		// Sell = higher side (price to place a sell offer at).
-		Long buyPrice  = data != null ? firstNonNull(data.flipBuyPrice,  data.spikeBuyPrice, data.dumpBuyPrice) : null;
-		Long sellPrice = data != null ? firstNonNull(data.flipSellPrice, data.dumpSellPrice) : null;
 		String displayName = data != null ? data.name : null;
+		boolean isPremium = plugin.panel != null && plugin.panel.isPremium();
 
-		// Fall back to the dedicated /recommended-prices endpoint for items
-		// that aren't in the current Flips/Spikes/Dumps lists. Async — first
-		// hover triggers a fetch and the next render gets cached values.
-		if (buyPrice == null || sellPrice == null)
+		// Buy/Sell from the SAME /v2/item source the Item panel and the GE
+		// auto-fill use, so the overlay never shows a different "recommended"
+		// number than what gets typed. Premium → 07Flip rec; free → live market
+		// (rec is a paid feature). Falls back to the live market prices already
+		// on hand from a tracked list until /v2/item is cached.
+		Long buyPrice  = null;
+		Long sellPrice = null;
+		com.o7flip.model.ItemInsights ins = plugin.getOverlayInsights(currentItemId);
+		if (ins != null && ins.current != null)
 		{
-			com.o7flip.model.RecommendedPrices rp = plugin.getRecommendedPrices(currentItemId);
-			if (rp != null && rp.hasPrices())
+			if (displayName == null)
 			{
-				if (buyPrice == null)
-				{
-					buyPrice = rp.recBuyPrice;
-				}
-				if (sellPrice == null)
-				{
-					sellPrice = rp.recSellPrice;
-				}
+				displayName = ins.name;
 			}
+			if (isPremium)
+			{
+				if (ins.current.recBuy != null && ins.current.recBuy > 0)   buyPrice  = ins.current.recBuy;
+				if (ins.current.recSell != null && ins.current.recSell > 0) sellPrice = ins.current.recSell;
+			}
+			else
+			{
+				if (ins.current.buyPrice > 0)  buyPrice  = ins.current.buyPrice;
+				if (ins.current.sellPrice > 0) sellPrice = ins.current.sellPrice;
+			}
+		}
+		if (buyPrice == null && data != null)
+		{
+			buyPrice = firstNonNull(data.flipBuyPrice, data.spikeBuyPrice, data.dumpBuyPrice);
+		}
+		if (sellPrice == null && data != null)
+		{
+			sellPrice = firstNonNull(data.flipSellPrice, data.dumpSellPrice);
 		}
 
 		// Frozen sell pins 07Flip's rec_sell at buy time so the projected margin
@@ -167,7 +178,6 @@ public class GePriceOverlay extends Overlay
 		// the user doesn't leave gp on the table (matches the sell-box auto-fill,
 		// which uses max(frozen, live)). Premium-only: the freeze is a paid
 		// feature, so free users always see the live market sell price.
-		boolean isPremium = plugin.panel != null && plugin.panel.isPremium();
 		Long frozenSell = isPremium ? plugin.getFrozenSell(currentItemId) : null;
 		Long liveSell   = sellPrice;
 		boolean sellIsFrozen = false;
