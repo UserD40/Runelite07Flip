@@ -59,14 +59,6 @@ public class ActiveOfferRow extends JPanel
 	private static final Color SELL_COL  = new Color(0x00C27A);
 	private static final Color BAR_TRACK = new Color(0x3A3A3A);
 
-	// Fixed width reserved for the right-hand column (qty counter, and on the
-	// completed-trade row a profit label too). Both ActiveOfferRow and
-	// TradeRecordPanel reserve the SAME width so the progress bar keeps an
-	// identical width as a row moves from in-flight → completed. Sized to fit
-	// the widest qty counter (e.g. "11000 / 11000" for high buy-limit items).
-	// MUST stay in sync with TradeRecordPanel.RIGHT_COL_W.
-	static final int RIGHT_COL_W = 86;
-
 	public ActiveOfferRow(ActiveOfferSnapshot offer, ItemManager itemManager, boolean odd, O7FlipPlugin plugin)
 	{
 		Color bg = odd ? ODD_BG : ColorScheme.DARK_GRAY_COLOR;
@@ -104,9 +96,14 @@ public class ActiveOfferRow extends JPanel
 		JLabel qtyLabel = new JLabel(offer.quantitySold + " / " + offer.totalQuantity, SwingConstants.RIGHT);
 		qtyLabel.setFont(Fonts.SM_BOLD);
 		qtyLabel.setForeground(fullyFilled ? SELL_COL : Color.LIGHT_GRAY);
-		// Reserve a fixed right-column width so the bar lines up with the
-		// completed-trade row (which also carries a profit label).
-		qtyLabel.setPreferredSize(new Dimension(RIGHT_COL_W, qtyLabel.getPreferredSize().height));
+		// Reserve the width of the FULLY-FILLED counter ("total / total") so the
+		// bar keeps a constant width as the sold count gains digits while the
+		// offer fills (e.g. 5 → 570 → 2000), instead of shrinking. Only as wide
+		// as this row's quantity actually needs — no global padding that would
+		// crowd the item name.
+		String fullCounter = offer.totalQuantity + " / " + offer.totalQuantity;
+		int qtyW = qtyLabel.getFontMetrics(Fonts.SM_BOLD).stringWidth(fullCounter) + 2;
+		qtyLabel.setPreferredSize(new Dimension(qtyW, qtyLabel.getPreferredSize().height));
 
 		JPanel textCol = new JPanel();
 		textCol.setLayout(new BoxLayout(textCol, BoxLayout.Y_AXIS));

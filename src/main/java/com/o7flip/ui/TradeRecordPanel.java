@@ -68,11 +68,6 @@ public class TradeRecordPanel extends JPanel
 	private static final Color BAR_TRACK  = new Color(0x3A3A3A);
 	private static final Color MUTED      = new Color(0x888888);
 
-	// Fixed right-column width, kept identical to ActiveOfferRow.RIGHT_COL_W so
-	// the progress bar doesn't shift/resize when a row moves from in-flight
-	// (Active, qty only) to completed (Recent, qty + profit label).
-	private static final int RIGHT_COL_W = ActiveOfferRow.RIGHT_COL_W;
-
 	private static final SimpleDateFormat DATE_FMT = new SimpleDateFormat("d MMM");
 
 	public TradeRecordPanel(TradeRecord trade, ItemManager itemManager, boolean odd)
@@ -198,10 +193,17 @@ public class TradeRecordPanel extends JPanel
 			rightCol.add(phantomLabel);
 		}
 
-		// Reserve the shared fixed width so the progress bar above lines up with
-		// the Active row's bar (which has no profit label and would otherwise be
-		// wider). Done after children are added so the height is correct.
-		rightCol.setPreferredSize(new Dimension(RIGHT_COL_W, rightCol.getPreferredSize().height));
+		// Reserve the wider of the fully-filled counter ("total / total") and the
+		// profit label, so the bar matches the Active row's bar (which reserves
+		// the same full counter) and never shifts as fill digits grow. Only as
+		// wide as this row's content needs — keeps the item name room. Done after
+		// children are added so the height is correct.
+		int colW = qtyLabel.getFontMetrics(Fonts.SM_BOLD).stringWidth(total + " / " + total);
+		if (matchedProfit != null)
+		{
+			colW = Math.max(colW, qtyLabel.getFontMetrics(Fonts.SM_BOLD).stringWidth(formatProfit(matchedProfit)));
+		}
+		rightCol.setPreferredSize(new Dimension(colW + 2, rightCol.getPreferredSize().height));
 
 		add(iconLabel, BorderLayout.WEST);
 		add(textCol,   BorderLayout.CENTER);
