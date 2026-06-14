@@ -59,6 +59,14 @@ public class ActiveOfferRow extends JPanel
 	private static final Color SELL_COL  = new Color(0x00C27A);
 	private static final Color BAR_TRACK = new Color(0x3A3A3A);
 
+	// Fixed width reserved for the right-hand column (qty counter, and on the
+	// completed-trade row a profit label too). Both ActiveOfferRow and
+	// TradeRecordPanel reserve the SAME width so the progress bar keeps an
+	// identical width as a row moves from in-flight → completed. Sized to fit
+	// the widest qty counter (e.g. "11000 / 11000" for high buy-limit items).
+	// MUST stay in sync with TradeRecordPanel.RIGHT_COL_W.
+	static final int RIGHT_COL_W = 86;
+
 	public ActiveOfferRow(ActiveOfferSnapshot offer, ItemManager itemManager, boolean odd, O7FlipPlugin plugin)
 	{
 		Color bg = odd ? ODD_BG : ColorScheme.DARK_GRAY_COLOR;
@@ -84,12 +92,21 @@ public class ActiveOfferRow extends JPanel
 		typeLabel.setForeground(sideCol);
 		typeLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
 
-		ProgressBar bar = new ProgressBar(offer.quantitySold, offer.totalQuantity, sideCol);
+		// Bar turns green once the offer is fully filled, matching the qty
+		// counter and the completed-trade row — a finished buy reads as "done",
+		// not as an in-progress blue.
+		boolean fullyFilled = offer.totalQuantity > 0 && offer.quantitySold >= offer.totalQuantity;
+		Color barCol = fullyFilled ? SELL_COL : sideCol;
+
+		ProgressBar bar = new ProgressBar(offer.quantitySold, offer.totalQuantity, barCol);
 		bar.setAlignmentX(Component.LEFT_ALIGNMENT);
 
 		JLabel qtyLabel = new JLabel(offer.quantitySold + " / " + offer.totalQuantity, SwingConstants.RIGHT);
 		qtyLabel.setFont(Fonts.SM_BOLD);
-		qtyLabel.setForeground(offer.quantitySold >= offer.totalQuantity ? SELL_COL : Color.LIGHT_GRAY);
+		qtyLabel.setForeground(fullyFilled ? SELL_COL : Color.LIGHT_GRAY);
+		// Reserve a fixed right-column width so the bar lines up with the
+		// completed-trade row (which also carries a profit label).
+		qtyLabel.setPreferredSize(new Dimension(RIGHT_COL_W, qtyLabel.getPreferredSize().height));
 
 		JPanel textCol = new JPanel();
 		textCol.setLayout(new BoxLayout(textCol, BoxLayout.Y_AXIS));
