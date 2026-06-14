@@ -143,10 +143,12 @@ public class O7FlipPanel extends PluginPanel
 		{"oversoldDip",      "Oversold"},
 		{"momentumRecovery", "Momentum"},
 		{"lowVolatility",    "Low Volatility"},
+		{"bandFlip",         "Bulk Margin"},
 	};
 	private static final boolean[] PREMIUM_PRESET = {
-		false, false, false, false,                // free
-		true,  true,  true,  true,  true,  true,  true,  // premium
+		false, false, false, false,                       // free
+		true,  true,  true,  true,  true,  true,  true,   // premium
+		true,                                             // bandFlip (Bulk Margin)
 	};
 
 	// -------------------------------------------------------------------------
@@ -818,6 +820,11 @@ public class O7FlipPanel extends PluginPanel
 
 	public String getFlipsSortKey()
 	{
+		// Bulk Margin (bandFlip) rows carry ~0 live profit/roi/score, so the
+		// standard sort keys are meaningless for it — always rank by the
+		// server's band_profit headline (the margin × 4h-buy-limit figure the
+		// preset is built around) regardless of the dropdown selection.
+		if ("bandFlip".equals(getSelectedPreset())) return "bandProfit";
 		// Selected from the Sort dropdown in the Flips filter panel. Default
 		// (index 0) is flip07Score so the headline ranking matches the
 		// server's primary signal. Pseudo-keys like "buyPriceDesc" are

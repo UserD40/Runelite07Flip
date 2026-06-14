@@ -3512,6 +3512,13 @@ public class O7FlipApiClient
 		// Volume fields — null on rows where server doesn't echo them.
 		item.hourlyVolume    = getIntOrNull(obj, "hourly_volume");
 		item.dailyVolume     = getIntOrNull(obj, "daily_volume");
+		// Band ("Bulk Margin") fields — present only on ?preset=bandFlip rows.
+		item.bandProfit         = getLongOrNull(obj, "band_profit");
+		item.bandMargin         = getLongOrNull(obj, "band_margin");
+		item.bandFloor          = getLongOrNull(obj, "band_floor");
+		item.bandCeiling        = getLongOrNull(obj, "band_ceiling");
+		item.bandMarginPct      = getDouble(obj, "band_margin_pct", 0);
+		item.bandVolumeCoverage = getIntOrNull(obj, "band_volume_coverage");
 		return item;
 	}
 

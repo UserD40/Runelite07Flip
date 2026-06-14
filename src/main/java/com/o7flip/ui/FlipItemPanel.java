@@ -73,6 +73,11 @@ public class FlipItemPanel extends JPanel
 		final boolean isPremium = plugin != null && plugin.panel != null && plugin.panel.isPremium();
 		final boolean showRecPrices = isPremium;
 
+		// "Bulk Margin" (bandFlip) rows: the live buy/sell/profit are ~0 because
+		// these are patient range flips, not instant spreads. Render the band_*
+		// fields instead — Buy = floor, Sell = ceiling, profit = band_profit.
+		final boolean band = flip.isBand();
+
 		setLayout(new BorderLayout(8, 0));
 		setBackground(bg);
 		setBorder(new EmptyBorder(8, 10, 8, 10));
@@ -119,8 +124,11 @@ public class FlipItemPanel extends JPanel
 		}
 
 		// ── BUY (red) ─────────────────────────────────────────────────────────
-		String buyHtml = "<html><b>Buy:</b>  " + formatGpCompact(flip.buyPrice);
-		if (showRecPrices && flip.recBuyPrice != null)
+		// Band rows: Buy = band_floor (the dependable 14-day p10), not the live
+		// bid — that's the price this preset says to actually buy at.
+		final long buyShown = band ? flip.bandFloor : flip.buyPrice;
+		String buyHtml = "<html><b>Buy:</b>  " + formatGpCompact(buyShown);
+		if (!band && showRecPrices && flip.recBuyPrice != null)
 		{
 			buyHtml += "  <font color='#888888'>· Rec " + formatGpCompact(flip.recBuyPrice) + "</font>";
 		}
@@ -130,10 +138,18 @@ public class FlipItemPanel extends JPanel
 		buyLabel.setForeground(new Color(0xFF7070));
 
 		StringBuilder buyTip = new StringBuilder("<html><b>").append(escapeHtml(flip.name)).append("</b><br>");
-		buyTip.append("Market buy: <font color='#FF7070'>").append(formatGp(flip.buyPrice)).append("</font><br>");
-		if (flip.recBuyPrice != null)
+		if (band)
 		{
-			buyTip.append("07Flip rec: <font color='#FF981F'>").append(formatGp(flip.recBuyPrice)).append("</font><br>");
+			buyTip.append("Dependable buy <font color='#888888'>(14-day floor)</font>: <font color='#FF7070'>")
+				.append(formatGp(flip.bandFloor)).append("</font><br>");
+		}
+		else
+		{
+			buyTip.append("Market buy: <font color='#FF7070'>").append(formatGp(flip.buyPrice)).append("</font><br>");
+			if (flip.recBuyPrice != null)
+			{
+				buyTip.append("07Flip rec: <font color='#FF981F'>").append(formatGp(flip.recBuyPrice)).append("</font><br>");
+			}
 		}
 		buyTip.append("<font color='#666666'>Right-click anywhere to queue a Buy on the GE · Click for insights · Shift+click or double-click to open on 07flip.com</font></html>");
 		buyLabel.setToolTipText(buyTip.toString());
@@ -151,12 +167,17 @@ public class FlipItemPanel extends JPanel
 		// market BUY price (the low/bid) — what a flipper sets their buy offer
 		// to. Previously this fell back to the sell-side price, which wrongly
 		// queued the buy at the high/ask.
-		final long buyTarget = (showRecPrices && flip.recBuyPrice != null && flip.recBuyPrice > 0)
-			? flip.recBuyPrice : flip.buyPrice;
+		// Band rows queue the buy at the dependable floor, not the live bid.
+		final long buyTarget = band
+			? flip.bandFloor
+			: ((showRecPrices && flip.recBuyPrice != null && flip.recBuyPrice > 0)
+				? flip.recBuyPrice : flip.buyPrice);
 
 		// ── SELL (green) ──────────────────────────────────────────────────────
-		String sellHtml = "<html><b>Sell:</b>  " + formatGpCompact(flip.sellPrice);
-		if (showRecPrices && flip.recSellPrice != null)
+		// Band rows: Sell = band_ceiling (the dependable 14-day p90).
+		final long sellShown = band ? flip.bandCeiling : flip.sellPrice;
+		String sellHtml = "<html><b>Sell:</b>  " + formatGpCompact(sellShown);
+		if (!band && showRecPrices && flip.recSellPrice != null)
 		{
 			sellHtml += "  <font color='#888888'>· Rec " + formatGpCompact(flip.recSellPrice) + "</font>";
 		}
@@ -166,10 +187,18 @@ public class FlipItemPanel extends JPanel
 		sellLabel.setForeground(GREEN);
 
 		StringBuilder sellTip = new StringBuilder("<html><b>").append(escapeHtml(flip.name)).append("</b><br>");
-		sellTip.append("Market sell: <font color='#00C27A'>").append(formatGp(flip.sellPrice)).append("</font><br>");
-		if (flip.recSellPrice != null)
+		if (band)
 		{
-			sellTip.append("07Flip rec: <font color='#FF981F'>").append(formatGp(flip.recSellPrice)).append("</font><br>");
+			sellTip.append("Dependable sell <font color='#888888'>(14-day ceiling)</font>: <font color='#00C27A'>")
+				.append(formatGp(flip.bandCeiling)).append("</font><br>");
+		}
+		else
+		{
+			sellTip.append("Market sell: <font color='#00C27A'>").append(formatGp(flip.sellPrice)).append("</font><br>");
+			if (flip.recSellPrice != null)
+			{
+				sellTip.append("07Flip rec: <font color='#FF981F'>").append(formatGp(flip.recSellPrice)).append("</font><br>");
+			}
 		}
 		sellTip.append("<font color='#666666'>Right-click anywhere to queue a Buy on the GE · Click for insights · Shift+click or double-click to open on 07flip.com</font></html>");
 		sellLabel.setToolTipText(sellTip.toString());
@@ -185,42 +214,78 @@ public class FlipItemPanel extends JPanel
 		// affordable qty are surfaced via hover tooltip so the row never
 		// truncates regardless of price magnitude.
 		// Profit only — limit lives in its own label below so it can carry
-		// its own '4-hour buy limit' tooltip.
-		// formatGpCompact already carries the minus sign for negatives, so only
-		// prepend "+" for non-negative values (avoids the "+-97" double sign),
-		// and colour red when the margin is negative.
-		String profitColor = flip.profit >= 0 ? "#00C27A" : "#E85050";
-		String profitSign  = flip.profit >= 0 ? "+" : "";
-		JLabel profitLabel = new JLabel("<html><font color='" + profitColor + "'>"
-			+ profitSign + formatGpCompact(flip.profit) + "</font></html>");
-		profitLabel.setFont(Fonts.SM);
-		profitLabel.setForeground(flip.profit >= 0 ? GREEN : new Color(0xE85050));
-
+		// its own '4-hour buy limit' tooltip. Bulk Margin rows show band_profit
+		// (the 4h-cycle figure) instead of the ~0 live margin.
+		JLabel profitLabel;
 		StringBuilder tip = new StringBuilder("<html><b>");
 		tip.append(escapeHtml(flip.name)).append("</b><br>");
-		tip.append("Market margin: <font color='#00C27A'>+").append(formatGp(flip.profit)).append("</font>");
-		tip.append("  (").append(String.format("%.2f", flip.roiPct)).append("% ROI)<br>");
-		if (flip.recProfit != null && flip.recProfit > 0)
+		if (band)
 		{
-			double recRoi = (flip.recBuyPrice != null && flip.recBuyPrice > 0)
-				? 100.0 * flip.recProfit / flip.recBuyPrice
-				: 0.0;
-			tip.append("07Flip margin: <font color='#FF981F'>+").append(formatGp(flip.recProfit)).append("</font>");
-			tip.append("  (").append(String.format("%.2f", recRoi)).append("%)<br>");
+			// Headline = band_profit (margin × 4h buy limit), with the per-item
+			// margin + % alongside so the row carries both the cycle profit and
+			// the dependable spread it comes from.
+			long bp = flip.bandProfit != null ? flip.bandProfit : 0L;
+			long bm = flip.bandMargin != null ? flip.bandMargin : 0L;
+			profitLabel = new JLabel("<html><font color='#00C27A'><b>+" + formatGpCompact(bp) + "</b></font>"
+				+ "  <font color='#888888'>· " + formatGpCompact(bm) + "/ea ("
+				+ String.format("%.1f", flip.bandMarginPct) + "%)</font></html>");
+			profitLabel.setForeground(GREEN);
+
+			tip.append("Cycle profit <font color='#888888'>(margin × 4h limit)</font>: ")
+				.append("<font color='#00C27A'>+").append(formatGp(bp)).append("</font><br>");
+			tip.append("Margin / item: <font color='#00C27A'>+").append(formatGp(bm)).append("</font>")
+				.append("  (").append(String.format("%.1f", flip.bandMarginPct)).append("%)<br>");
+			if (flip.buyLimit > 0)
+			{
+				tip.append("GE buy limit: ").append(formatGp(flip.buyLimit))
+					.append(" <font color='#888888'>(per 4 hours)</font><br>");
+			}
+			if (flip.dailyVolume != null && flip.dailyVolume > 0)
+			{
+				tip.append("Daily volume: ").append(formatGp(flip.dailyVolume)).append("<br>");
+			}
+			if (flip.bandVolumeCoverage != null)
+			{
+				tip.append("Traded ").append(flip.bandVolumeCoverage)
+					.append("% <font color='#888888'>of window hours</font><br>");
+			}
 		}
-		if (flip.buyLimit > 0)
+		else
 		{
-			tip.append("GE buy limit: ").append(flip.buyLimit)
-				.append(" <font color='#888888'>(resets every 4 hours)</font><br>");
+			// formatGpCompact already carries the minus sign for negatives, so only
+			// prepend "+" for non-negative values (avoids the "+-97" double sign),
+			// and colour red when the margin is negative.
+			String profitColor = flip.profit >= 0 ? "#00C27A" : "#E85050";
+			String profitSign  = flip.profit >= 0 ? "+" : "";
+			profitLabel = new JLabel("<html><font color='" + profitColor + "'>"
+				+ profitSign + formatGpCompact(flip.profit) + "</font></html>");
+			profitLabel.setForeground(flip.profit >= 0 ? GREEN : new Color(0xE85050));
+
+			tip.append("Market margin: <font color='#00C27A'>+").append(formatGp(flip.profit)).append("</font>");
+			tip.append("  (").append(String.format("%.2f", flip.roiPct)).append("% ROI)<br>");
+			if (flip.recProfit != null && flip.recProfit > 0)
+			{
+				double recRoi = (flip.recBuyPrice != null && flip.recBuyPrice > 0)
+					? 100.0 * flip.recProfit / flip.recBuyPrice
+					: 0.0;
+				tip.append("07Flip margin: <font color='#FF981F'>+").append(formatGp(flip.recProfit)).append("</font>");
+				tip.append("  (").append(String.format("%.2f", recRoi)).append("%)<br>");
+			}
+			if (flip.buyLimit > 0)
+			{
+				tip.append("GE buy limit: ").append(flip.buyLimit)
+					.append(" <font color='#888888'>(resets every 4 hours)</font><br>");
+			}
+			if (flip.affordableQty != null && flip.affordableQty > 0)
+			{
+				tip.append("Affordable: ").append(flip.affordableQty).append("<br>");
+			}
+			if (flip.flip07Score != null)
+			{
+				tip.append("07Flip Score: ").append(flip.flip07Score).append("/100<br>");
+			}
 		}
-		if (flip.affordableQty != null && flip.affordableQty > 0)
-		{
-			tip.append("Affordable: ").append(flip.affordableQty).append("<br>");
-		}
-		if (flip.flip07Score != null)
-		{
-			tip.append("07Flip Score: ").append(flip.flip07Score).append("/100<br>");
-		}
+		profitLabel.setFont(Fonts.SM);
 		tip.append("</html>");
 		profitLabel.setToolTipText(tip.toString());
 

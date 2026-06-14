@@ -56,4 +56,26 @@ public class FlipItem
 	// to add them to /flips response; once that ships these light up.
 	public Integer hourlyVolume;
 	public Integer dailyVolume;
+
+	// ── Band ("Bulk Margin") fields ────────────────────────────────────────
+	// Present ONLY on rows returned by ?preset=bandFlip. For these patient
+	// range flips the LIVE buy/sell/profit above are ~0 (near-zero instant
+	// spread) and must NOT be shown — render from these instead:
+	//   Buy  = bandFloor    (14-day p10 dependable buy)
+	//   Sell = bandCeiling  (14-day p90 dependable sell)
+	//   Margin = bandMargin (after-tax gp/item)  ·  bandMarginPct (% of floor)
+	//   Profit / rank = bandProfit (after-tax over one 4h buy-limit cycle)
+	// bandFloor doubles as the presence flag — null on every other preset.
+	public Long bandProfit;
+	public Long bandMargin;
+	public Long bandFloor;
+	public Long bandCeiling;
+	public double bandMarginPct;
+	public Integer bandVolumeCoverage;
+
+	/** True when this row carries band ("Bulk Margin") data. */
+	public boolean isBand()
+	{
+		return bandFloor != null;
+	}
 }
