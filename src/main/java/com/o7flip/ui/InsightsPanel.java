@@ -84,6 +84,12 @@ public class InsightsPanel extends JPanel
 	// showLoading so a stale item can never overpaint an in-flight load.
 	private ItemInsights lastShown;
 
+	// Selected chart period index, persisted across re-renders of the SAME
+	// item so a section-visibility refresh (or any other in-place rebuild)
+	// doesn't snap the chart back to the default period. -1 means "use the
+	// default" (24h when present), and is reset whenever a new item loads.
+	private int desiredChartPeriodIdx = -1;
+
 	// Star toggle state — tracked separately from the rebuilt subtree so we
 	// can repaint without a full panel rerender when the favourite state
 	// flips. {@link #currentItemId} reflects whatever Insights last rendered;
@@ -344,6 +350,19 @@ public class InsightsPanel extends JPanel
 			showLoadFailed();
 			return;
 		}
+		// A re-render of the item already on screen (e.g. a section-visibility
+		// toggle) should feel in-place: keep the user's scroll position and the
+		// chart period they picked. A genuinely new item resets both — fresh
+		// items belong at the top, on the default period.
+		boolean sameItem = lastShown != null && lastShown.itemId == ins.itemId;
+		javax.swing.JViewport vp = (javax.swing.JViewport)
+			SwingUtilities.getAncestorOfClass(javax.swing.JViewport.class, this);
+		final java.awt.Point savedScroll = (sameItem && vp != null) ? vp.getViewPosition() : null;
+		if (!sameItem)
+		{
+			desiredChartPeriodIdx = -1;
+		}
+
 		removeAll();
 		inEmptyState = false;
 		inFailedState = false;
@@ -460,6 +479,19 @@ public class InsightsPanel extends JPanel
 
 		revalidate();
 		repaint();
+
+		// Restore the scroll position captured above, once layout has settled.
+		// Clamp so it never overshoots a now-shorter view (e.g. a section was
+		// just hidden).
+		if (savedScroll != null && vp != null)
+		{
+			SwingUtilities.invokeLater(() ->
+			{
+				int maxY = Math.max(0, vp.getView().getHeight() - vp.getExtentSize().height);
+				savedScroll.y = Math.min(savedScroll.y, maxY);
+				vp.setViewPosition(savedScroll);
+			});
+		}
 	}
 
 	/**
@@ -593,6 +625,9 @@ public class InsightsPanel extends JPanel
 		starLabel.setFont(starLabel.getFont().deriveFont(20f));
 		starLabel.setBorder(new EmptyBorder(0, 8, 0, 0));
 		starLabel.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+		// Favourite toggle owns its clicks — keep the tree router off it so a
+		// star click doesn't also schedule an openInsights reload.
+		ClickRouter.markNoRoute(starLabel);
 		paintStar();
 		starLabel.addMouseListener(new MouseAdapter()
 		{
@@ -1061,11 +1096,18 @@ public class InsightsPanel extends JPanel
 		return (buy != null && buy.length > 0) || (sell != null && sell.length > 0);
 	}
 
+	/** Period chosen as the default when the user hasn't picked one for this item. */
+	private static final String DEFAULT_CHART_PERIOD = "24h";
+
 	/**
-	 * Buy/sell price chart with a 24h / 7d / 30d period toggle. Only periods
-	 * whose arrays actually contain data get a chip, so a server that doesn't
-	 * send the longer series yet degrades to the bare 24h chart with no
-	 * toggle row at all.
+	 * Buy/sell price chart with a 2h / 4h / 24h / 7d / 30d period toggle. Only
+	 * periods whose arrays actually contain data get a chip, so a server that
+	 * doesn't send a given series yet simply omits it — a server sending only
+	 * 24h degrades to the bare 24h chart with no toggle row at all. The shorter
+	 * 2h/4h windows give higher-velocity items the resolution an hourly 24h
+	 * view can't. The default shown is {@value #DEFAULT_CHART_PERIOD} (or the
+	 * first available), and the user's pick is remembered across in-place
+	 * re-renders of the same item via {@link #desiredChartPeriodIdx}.
 	 */
 	private JPanel buildChartSection(ItemInsights ins)
 	{
@@ -1076,6 +1118,14 @@ public class InsightsPanel extends JPanel
 		panel.setAlignmentX(Component.LEFT_ALIGNMENT);
 
 		final List<ChartPeriod> periods = new ArrayList<>();
+		if (hasSeries(ins.sparkline2hBuy, ins.sparkline2hSell))
+		{
+			periods.add(new ChartPeriod("2h", ins.sparkline2hBuy, ins.sparkline2hSell, "−2h"));
+		}
+		if (hasSeries(ins.sparkline4hBuy, ins.sparkline4hSell))
+		{
+			periods.add(new ChartPeriod("4h", ins.sparkline4hBuy, ins.sparkline4hSell, "−4h"));
+		}
 		if (hasSeries(ins.sparkline24hBuy, ins.sparkline24hSell))
 		{
 			periods.add(new ChartPeriod("24h", ins.sparkline24hBuy, ins.sparkline24hSell, "−24h"));
@@ -1116,7 +1166,7 @@ public class InsightsPanel extends JPanel
 		final List<JLabel> chips = new ArrayList<>();
 		if (periods.size() > 1)
 		{
-			JPanel chipRow = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.RIGHT, 8, 0));
+			JPanel chipRow = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.RIGHT, 6, 0));
 			chipRow.setBackground(SECTION_BG);
 			for (int i = 0; i < periods.size(); i++)
 			{
@@ -1124,6 +1174,10 @@ public class InsightsPanel extends JPanel
 				JLabel chip = new JLabel(periods.get(i).label);
 				chip.setFont(Fonts.SM_BOLD);
 				chip.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+				// The chip owns its click — keep the tree router off it so a
+				// period switch doesn't also schedule an openInsights reload
+				// (which was resetting the user's scroll on every chip press).
+				ClickRouter.markNoRoute(chip);
 				chip.addMouseListener(new MouseAdapter()
 				{
 					@Override
@@ -1140,7 +1194,10 @@ public class InsightsPanel extends JPanel
 		}
 
 		panel.add(chartHolder);
-		selectChartPeriod(periods, chips, 0, chartHolder);
+		// Start on the user's remembered period for this item, else the default.
+		int startIdx = (desiredChartPeriodIdx >= 0 && desiredChartPeriodIdx < periods.size())
+			? desiredChartPeriodIdx : defaultPeriodIndex(periods);
+		selectChartPeriod(periods, chips, startIdx, chartHolder);
 
 		// Tiny inline legend so users know which colour is which without a tooltip.
 		JPanel legend = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 8, 0));
@@ -1154,9 +1211,23 @@ public class InsightsPanel extends JPanel
 		return panel;
 	}
 
-	/** Swaps the chart to the chosen period and repaints the chip highlight. */
-	private static void selectChartPeriod(List<ChartPeriod> periods, List<JLabel> chips, int idx, JPanel chartHolder)
+	/** Index of the default period ({@value #DEFAULT_CHART_PERIOD}) if present, else 0. */
+	private static int defaultPeriodIndex(List<ChartPeriod> periods)
 	{
+		for (int i = 0; i < periods.size(); i++)
+		{
+			if (DEFAULT_CHART_PERIOD.equals(periods.get(i).label))
+			{
+				return i;
+			}
+		}
+		return 0;
+	}
+
+	/** Swaps the chart to the chosen period, remembers it, and repaints the chip highlight. */
+	private void selectChartPeriod(List<ChartPeriod> periods, List<JLabel> chips, int idx, JPanel chartHolder)
+	{
+		desiredChartPeriodIdx = idx;
 		ChartPeriod p = periods.get(idx);
 		chartHolder.removeAll();
 		chartHolder.add(new BuySellSparkline(p.buy, p.sell, 80, p.axisStart, "now"), BorderLayout.CENTER);

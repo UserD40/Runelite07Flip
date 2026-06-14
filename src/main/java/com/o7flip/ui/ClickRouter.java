@@ -212,16 +212,54 @@ public final class ClickRouter
 		});
 	}
 
+	/** Client-property key marking a component (and its subtree) as off-limits to routing. */
+	private static final String NO_ROUTE_PROP = "o7flip.noRoute";
+
+	/**
+	 * Marks a component so {@link #attachToTree} skips it and everything under
+	 * it. Use on interactive controls embedded in an otherwise click-to-route
+	 * panel — chart period chips, the favourite star — whose own click action
+	 * would otherwise fire <em>alongside</em> a routed {@code openInsights}
+	 * (Swing delivers a click to every listener on a component; one listener
+	 * calling {@code consume()} does not stop the others). The stray route
+	 * reload was what reset the Item tab's scroll on every chip click.
+	 */
+	public static void markNoRoute(javax.swing.JComponent c)
+	{
+		if (c != null)
+		{
+			c.putClientProperty(NO_ROUTE_PROP, Boolean.TRUE);
+		}
+	}
+
+	private static boolean isInteractiveControl(Component c)
+	{
+		// Buttons always carry their own action — routing them is never wanted.
+		if (c instanceof javax.swing.AbstractButton)
+		{
+			return true;
+		}
+		if (c instanceof javax.swing.JComponent)
+		{
+			return Boolean.TRUE.equals(((javax.swing.JComponent) c).getClientProperty(NO_ROUTE_PROP));
+		}
+		return false;
+	}
+
 	/**
 	 * Walks a container tree and wires {@link #attachClickOnly} to every
 	 * component — root + every descendant. Used by the Item Insights panel
 	 * so the navigation gestures work no matter where in the panel the user
 	 * clicks (sections / labels / sparklines all otherwise capture their own
 	 * mouse events and would block a panel-level listener).
+	 *
+	 * Components flagged via {@link #markNoRoute} (and any {@link
+	 * javax.swing.AbstractButton}) are skipped along with their subtrees, so
+	 * their own click handlers run without a competing route reload.
 	 */
 	public static void attachToTree(Component root, O7FlipPlugin plugin, int itemId, String fallbackName)
 	{
-		if (root == null) return;
+		if (root == null || isInteractiveControl(root)) return;
 		attachClickOnly(root, plugin, itemId, fallbackName);
 		if (root instanceof java.awt.Container)
 		{

@@ -1052,6 +1052,12 @@ public class O7FlipApiClient
 			out.frozen = f;
 		}
 
+		out.sparkline2hBuy    = parseNullableLongArray(root, "sparkline_2h_buy");
+		out.sparkline2hSell   = parseNullableLongArray(root, "sparkline_2h_sell");
+		out.sparkline2hStart  = getString(root, "sparkline_2h_start", "");
+		out.sparkline4hBuy    = parseNullableLongArray(root, "sparkline_4h_buy");
+		out.sparkline4hSell   = parseNullableLongArray(root, "sparkline_4h_sell");
+		out.sparkline4hStart  = getString(root, "sparkline_4h_start", "");
 		out.sparkline24hBuy   = parseNullableLongArray(root, "sparkline_24h_buy");
 		out.sparkline24hSell  = parseNullableLongArray(root, "sparkline_24h_sell");
 		out.sparkline24hStart = getString(root, "sparkline_24h_start", "");

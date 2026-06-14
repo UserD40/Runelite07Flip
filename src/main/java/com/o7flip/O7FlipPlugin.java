@@ -1129,6 +1129,19 @@ public class O7FlipPlugin extends Plugin
 			return;
 		}
 		autoOpenInsightsItemId = itemId;
+		// The latch resets whenever the setup widget momentarily hides — e.g.
+		// the custom-price chatbox opening — so a still-open offer for the same
+		// item would otherwise re-resolve and re-open here every few ticks.
+		// Each re-open runs openInsights → a loading-state rebuild → fetch →
+		// render, which throws the user's scroll position back to the top
+		// mid-read. If the Item tab is already showing this exact item, the
+		// re-open is pure churn: skip it (latch is already set above so we
+		// won't reconsider until a different item appears).
+		com.o7flip.model.ItemInsights shown = currentInsights;
+		if (shown != null && shown.itemId == itemId)
+		{
+			return;
+		}
 		log.debug("[07Flip] offer setup detected — auto-opening Item tab for {} ({})", name, itemId);
 		openInsights(itemId, name);
 	}

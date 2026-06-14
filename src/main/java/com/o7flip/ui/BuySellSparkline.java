@@ -34,6 +34,9 @@ import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.RenderingHints;
 import java.awt.Stroke;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
+import java.awt.event.MouseMotionAdapter;
 
 /**
  * Two-line price sparkline shared by the Insights tab and the Alerts feed.
@@ -80,11 +83,20 @@ public class BuySellSparkline extends JPanel
 	/** Pixel padding inside the plot area so the line doesn't graze the top/bottom edges. */
 	private static final int PLOT_PAD = 4;
 
+	/** Crosshair colour for the hover readout. */
+	private static final Color HOVER_LINE = new Color(0xB0B0B0);
+	/** Background of the hover price tooltip box. */
+	private static final Color HOVER_BOX  = new Color(0x10, 0x10, 0x10, 0xE0);
+	private static final Color HOVER_BORD = new Color(0x505050);
+
 	private final Long[] buy;
 	private final Long[] sell;
 	private final int    height;
 	private final String xStartLabel;
 	private final String xEndLabel;
+
+	/** Current mouse x within the component, or -1 when not hovering. */
+	private int hoverX = -1;
 
 	public BuySellSparkline(Long[] buy, Long[] sell)
 	{
@@ -107,6 +119,28 @@ public class BuySellSparkline extends JPanel
 		setPreferredSize(new Dimension(0, height));
 		setMaximumSize(new Dimension(Integer.MAX_VALUE, height));
 		setMinimumSize(new Dimension(50, height));
+
+		// Hover readout: track the cursor x and repaint so the crosshair +
+		// price box follow it. Clearing on exit removes the overlay. Motion
+		// listeners don't interfere with the click routing attached elsewhere.
+		addMouseMotionListener(new MouseMotionAdapter()
+		{
+			@Override
+			public void mouseMoved(MouseEvent e)
+			{
+				hoverX = e.getX();
+				repaint();
+			}
+		});
+		addMouseListener(new MouseAdapter()
+		{
+			@Override
+			public void mouseExited(MouseEvent e)
+			{
+				hoverX = -1;
+				repaint();
+			}
+		});
 	}
 
 	@Override
@@ -156,11 +190,115 @@ public class BuySellSparkline extends JPanel
 			drawSeries(g2, buy,  n, plotX, plotW, plotY, plotH, min, max, BUY_COL);
 			drawSeries(g2, sell, n, plotX, plotW, plotY, plotH, min, max, SELL_COL);
 			g2.setStroke(prev);
+
+			paintHover(g2, plotX, plotY, plotW, plotH, min, max, n);
 		}
 		finally
 		{
 			g2.dispose();
 		}
+	}
+
+	/**
+	 * Draws the hover crosshair and a small price box for the data point under
+	 * the cursor. Snaps to the nearest bucket so the readout matches a real
+	 * sample rather than an interpolated pixel. No-op when not hovering, or when
+	 * the cursor is outside the plot area (e.g. over the Y-axis labels).
+	 */
+	private void paintHover(Graphics2D g2, int plotX, int plotY, int plotW, int plotH, long min, long max, int n)
+	{
+		if (hoverX < 0 || n < 2 || plotW < 2)
+		{
+			return;
+		}
+		// Ignore hovering left of the plot (Y labels) or past the right edge.
+		if (hoverX < plotX - 2 || hoverX > plotX + plotW + 2)
+		{
+			return;
+		}
+
+		double rel = (hoverX - plotX) / (double) (plotW - 1);
+		rel = Math.max(0.0, Math.min(1.0, rel));
+		int idx = (int) Math.round(rel * (n - 1));
+		int snappedX = plotX + (int) Math.round((double) idx / (n - 1) * (plotW - 1));
+
+		Long buyAt  = valueAt(buy, idx);
+		Long sellAt = valueAt(sell, idx);
+		if (buyAt == null && sellAt == null)
+		{
+			return;   // gap on both series here — nothing meaningful to show
+		}
+
+		// Vertical crosshair.
+		g2.setColor(HOVER_LINE);
+		g2.setStroke(new BasicStroke(1f));
+		g2.drawLine(snappedX, plotY, snappedX, plotY + plotH);
+
+		// Marker dots at the actual sample heights.
+		if (buyAt != null)
+		{
+			int y = plotY + (int) Math.round((1.0 - (buyAt - min) / (double) (max - min)) * plotH);
+			g2.setColor(BUY_COL);
+			g2.fillOval(snappedX - 3, y - 3, 6, 6);
+		}
+		if (sellAt != null)
+		{
+			int y = plotY + (int) Math.round((1.0 - (sellAt - min) / (double) (max - min)) * plotH);
+			g2.setColor(SELL_COL);
+			g2.fillOval(snappedX - 3, y - 3, 6, 6);
+		}
+
+		// Price box. Two short lines, colour-coded, in a dark rounded panel that
+		// flips to the left of the crosshair when it would overflow the right.
+		g2.setFont(Fonts.SM);
+		FontMetrics fm = g2.getFontMetrics();
+		String buyText  = buyAt  != null ? "Buy "  + String.format("%,d", buyAt)  : null;
+		String sellText = sellAt != null ? "Sell " + String.format("%,d", sellAt) : null;
+		int textW = 0;
+		if (buyText  != null) textW = Math.max(textW, fm.stringWidth(buyText));
+		if (sellText != null) textW = Math.max(textW, fm.stringWidth(sellText));
+		int lines = (buyText != null ? 1 : 0) + (sellText != null ? 1 : 0);
+		int lineH = fm.getHeight();
+		int padX = 6, padY = 4;
+		int boxW = textW + padX * 2;
+		int boxH = lines * lineH + padY * 2;
+
+		int boxX = snappedX + 8;
+		if (boxX + boxW > plotX + plotW)
+		{
+			boxX = snappedX - 8 - boxW;   // flip to the left
+		}
+		boxX = Math.max(plotX, Math.min(boxX, plotX + plotW - boxW));
+		int boxY = plotY + 2;
+
+		g2.setColor(HOVER_BOX);
+		g2.fillRoundRect(boxX, boxY, boxW, boxH, 6, 6);
+		g2.setColor(HOVER_BORD);
+		g2.drawRoundRect(boxX, boxY, boxW, boxH, 6, 6);
+
+		int textY = boxY + padY + fm.getAscent();
+		if (buyText != null)
+		{
+			g2.setColor(BUY_COL);
+			g2.drawString(buyText, boxX + padX, textY);
+			textY += lineH;
+		}
+		if (sellText != null)
+		{
+			g2.setColor(SELL_COL);
+			g2.drawString(sellText, boxX + padX, textY);
+		}
+	}
+
+	/** Value at index if it's a real (non-null, positive) sample, else null. */
+	private static Long valueAt(Long[] series, int idx)
+	{
+		if (series == null || idx < 0 || idx >= series.length)
+		{
+			return null;
+		}
+		Long v = series[idx];
+		return (v == null || v <= 0) ? null : v;
 	}
 
 	/**

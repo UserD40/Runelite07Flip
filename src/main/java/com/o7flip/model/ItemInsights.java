@@ -67,6 +67,16 @@ public class ItemInsights
 	public Long[]  sparkline24hSell;
 	public String  sparkline24hStart;
 
+	// Shorter, higher-resolution windows for high-velocity items — fine-grained
+	// (sub-hourly) buckets the hourly 24h series can't show. Same null-on-gap
+	// convention. Empty arrays when the server doesn't supply them.
+	public Long[]  sparkline2hBuy;
+	public Long[]  sparkline2hSell;
+	public String  sparkline2hStart;
+	public Long[]  sparkline4hBuy;
+	public Long[]  sparkline4hSell;
+	public String  sparkline4hStart;
+
 	// Longer-horizon series, same null-on-gap convention as the 24h arrays.
 	// 7d = 4-hour buckets (42 points), 30d = daily points (30). Empty arrays
 	// when the server doesn't supply them — the chart period toggle only
