@@ -383,6 +383,14 @@ public class InsightsPanel extends JPanel
 		add(buildHeader(ins.itemId, ins.name, ins.members, ins.buyLimit, ins.highAlch, ins.lowAlch, headerBuyTarget));
 		add(Box.createVerticalStrut(8));
 
+		// Per-item "Set price alert" action — only when a key is present (the
+		// alert is account-scoped on the server). Hidden for keyless users.
+		if (plugin != null && plugin.hasApiKeyPublic())
+		{
+			add(buildAlertButton(ins));
+			add(Box.createVerticalStrut(8));
+		}
+
 		if (sectionVisible(O7FlipConfig::itemTabLivePrices))
 		{
 			add(buildLivePrices(ins));
@@ -576,6 +584,41 @@ public class InsightsPanel extends JPanel
 		{
 			show(lastShown);
 		}
+	}
+
+	/** Slim "Set price alert" button row — opens the create dialog for this item. */
+	private JPanel buildAlertButton(ItemInsights ins)
+	{
+		JPanel wrap = new JPanel(new BorderLayout());
+		wrap.setBackground(SECTION_BG);
+		wrap.setBorder(new EmptyBorder(0, 10, 0, 10));
+		wrap.setAlignmentX(Component.LEFT_ALIGNMENT);
+		wrap.setMaximumSize(new Dimension(Integer.MAX_VALUE, 32));
+
+		JButton btn = new JButton("🔔 Set price alert");
+		btn.setFont(Fonts.SM_BOLD);
+		btn.setForeground(Color.WHITE);
+		btn.setBackground(new Color(0x2A2A2A));
+		btn.setFocusPainted(false);
+		btn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+		btn.setBorder(BorderFactory.createCompoundBorder(
+			BorderFactory.createLineBorder(new Color(0x555555), 1),
+			new EmptyBorder(5, 12, 5, 12)));
+
+		final int itemId  = ins.itemId;
+		final String name = ins.name;
+		final long buy  = ins.current != null ? ins.current.buyPrice  : 0L;
+		final long sell = ins.current != null ? ins.current.sellPrice : 0L;
+		btn.addActionListener(e ->
+		{
+			if (plugin != null)
+			{
+				plugin.openPriceAlertDialog(itemId, name, buy, sell);
+			}
+		});
+
+		wrap.add(btn, BorderLayout.CENTER);
+		return wrap;
 	}
 
 	// ── Sections ────────────────────────────────────────────────────────────
@@ -1081,13 +1124,34 @@ public class InsightsPanel extends JPanel
 		final Long[] buy;
 		final Long[] sell;
 		final String axisStart;
+		final long   startEpochMs;     // bucket[0] time, -1 if unknown
+		final int    intervalMinutes;  // minutes per bucket
 
-		ChartPeriod(String label, Long[] buy, Long[] sell, String axisStart)
+		ChartPeriod(String label, Long[] buy, Long[] sell, String axisStart, String startIso, int intervalMinutes)
 		{
-			this.label     = label;
-			this.buy       = buy;
-			this.sell      = sell;
-			this.axisStart = axisStart;
+			this.label           = label;
+			this.buy             = buy;
+			this.sell            = sell;
+			this.axisStart       = axisStart;
+			this.startEpochMs     = parseIsoToEpochMs(startIso);
+			this.intervalMinutes = intervalMinutes;
+		}
+	}
+
+	/** ISO-8601 → epoch millis, or -1 on null/unparseable (hover timestamp then hidden). */
+	private static long parseIsoToEpochMs(String iso)
+	{
+		if (iso == null || iso.isEmpty())
+		{
+			return -1L;
+		}
+		try
+		{
+			return java.time.Instant.parse(iso).toEpochMilli();
+		}
+		catch (Exception e)
+		{
+			return -1L;
 		}
 	}
 
@@ -1117,26 +1181,28 @@ public class InsightsPanel extends JPanel
 		panel.setBorder(new EmptyBorder(8, 10, 8, 10));
 		panel.setAlignmentX(Component.LEFT_ALIGNMENT);
 
+		// Bucket interval per period (minutes), used to label the hover timestamp:
+		// 2h/4h = 5-min, 24h = hourly, 7d = 4-hour, 30d = daily.
 		final List<ChartPeriod> periods = new ArrayList<>();
 		if (hasSeries(ins.sparkline2hBuy, ins.sparkline2hSell))
 		{
-			periods.add(new ChartPeriod("2h", ins.sparkline2hBuy, ins.sparkline2hSell, "−2h"));
+			periods.add(new ChartPeriod("2h", ins.sparkline2hBuy, ins.sparkline2hSell, "−2h", ins.sparkline2hStart, 5));
 		}
 		if (hasSeries(ins.sparkline4hBuy, ins.sparkline4hSell))
 		{
-			periods.add(new ChartPeriod("4h", ins.sparkline4hBuy, ins.sparkline4hSell, "−4h"));
+			periods.add(new ChartPeriod("4h", ins.sparkline4hBuy, ins.sparkline4hSell, "−4h", ins.sparkline4hStart, 5));
 		}
 		if (hasSeries(ins.sparkline24hBuy, ins.sparkline24hSell))
 		{
-			periods.add(new ChartPeriod("24h", ins.sparkline24hBuy, ins.sparkline24hSell, "−24h"));
+			periods.add(new ChartPeriod("24h", ins.sparkline24hBuy, ins.sparkline24hSell, "−24h", ins.sparkline24hStart, 60));
 		}
 		if (hasSeries(ins.sparkline7dBuy, ins.sparkline7dSell))
 		{
-			periods.add(new ChartPeriod("7d", ins.sparkline7dBuy, ins.sparkline7dSell, "−7d"));
+			periods.add(new ChartPeriod("7d", ins.sparkline7dBuy, ins.sparkline7dSell, "−7d", ins.sparkline7dStart, 240));
 		}
 		if (hasSeries(ins.sparkline30dBuy, ins.sparkline30dSell))
 		{
-			periods.add(new ChartPeriod("30d", ins.sparkline30dBuy, ins.sparkline30dSell, "−30d"));
+			periods.add(new ChartPeriod("30d", ins.sparkline30dBuy, ins.sparkline30dSell, "−30d", ins.sparkline30dStart, 1440));
 		}
 
 		JPanel headerRow = new JPanel(new BorderLayout());
@@ -1211,9 +1277,21 @@ public class InsightsPanel extends JPanel
 		return panel;
 	}
 
-	/** Index of the default period ({@value #DEFAULT_CHART_PERIOD}) if present, else 0. */
-	private static int defaultPeriodIndex(List<ChartPeriod> periods)
+	/**
+	 * Index of the period to show by default: the user's configured preference
+	 * if that period has data for this item, else {@value #DEFAULT_CHART_PERIOD},
+	 * else the first available.
+	 */
+	private int defaultPeriodIndex(List<ChartPeriod> periods)
 	{
+		String pref = config != null ? config.defaultChartPeriod().chartLabel() : DEFAULT_CHART_PERIOD;
+		for (int i = 0; i < periods.size(); i++)
+		{
+			if (pref.equals(periods.get(i).label))
+			{
+				return i;
+			}
+		}
 		for (int i = 0; i < periods.size(); i++)
 		{
 			if (DEFAULT_CHART_PERIOD.equals(periods.get(i).label))
@@ -1230,7 +1308,7 @@ public class InsightsPanel extends JPanel
 		desiredChartPeriodIdx = idx;
 		ChartPeriod p = periods.get(idx);
 		chartHolder.removeAll();
-		chartHolder.add(new BuySellSparkline(p.buy, p.sell, 80, p.axisStart, "now"), BorderLayout.CENTER);
+		chartHolder.add(new BuySellSparkline(p.buy, p.sell, 80, p.axisStart, "now", p.startEpochMs, p.intervalMinutes), BorderLayout.CENTER);
 		for (int i = 0; i < chips.size(); i++)
 		{
 			chips.get(i).setForeground(i == idx ? HEADER_COL : new Color(0x777777));

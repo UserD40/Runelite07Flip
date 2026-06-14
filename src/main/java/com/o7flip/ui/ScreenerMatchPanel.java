@@ -112,6 +112,47 @@ public class ScreenerMatchPanel extends JPanel
 			textPanel.add(priceRow);
 		}
 
+		// Band Flip engine row — the recurring price band + how often it's recurred.
+		if (m.bandFloor != null || m.bandCeiling != null || m.bandRecurrence != null || m.bandMarginPct != null)
+		{
+			JLabel bandRow = mkRow(buildBandRow(m), bg);
+			bandRow.setToolTipText("<html><b>Band Flip</b><br>"
+				+ "Floor – ceiling: the recurring price band to flip within.<br>"
+				+ "×N seen: how many times the band has recurred.<br>"
+				+ "%: band margin (ceiling vs floor).</html>");
+			textPanel.add(Box.createVerticalStrut(4));
+			textPanel.add(bandRow);
+		}
+
+		// Event Recovery engine rows — entry signal (how far it fell / how close
+		// to the floor) then the thesis (where it's headed / how long).
+		boolean hasRecovery = m.drawdownPct != null || m.recoveryTarget != null
+			|| m.recoveryFromFloor != null || (m.recoveryWindow != null && !m.recoveryWindow.isEmpty());
+		if (hasRecovery)
+		{
+			String entry = buildRecoveryEntryRow(m);
+			if (!"<html></html>".equals(entry))
+			{
+				JLabel r = mkRow(entry, bg);
+				r.setToolTipText("<html><b>Event Recovery — entry</b><br>"
+					+ "Drawdown: how far price fell below the event-period peak.<br>"
+					+ "Off floor: current price ÷ 90-day low — 1.0× sits on the floor "
+					+ "(earliest, cheapest entry); higher means it has already recovered some.</html>");
+				textPanel.add(Box.createVerticalStrut(4));
+				textPanel.add(r);
+			}
+			String thesis = buildRecoveryThesisRow(m);
+			if (!"<html></html>".equals(thesis))
+			{
+				JLabel r = mkRow(thesis, bg);
+				r.setToolTipText("<html><b>Event Recovery — thesis</b><br>"
+					+ "Target: estimated recovery sell price.<br>"
+					+ "Window: expected time to recover.</html>");
+				textPanel.add(Box.createVerticalStrut(3));
+				textPanel.add(r);
+			}
+		}
+
 		// Always render the % changes row when we have any of the three —
 		// it's the headline TA signal for screener views.
 		if (m.pct1d != null || m.pct7d != null || m.pct30d != null)
@@ -248,6 +289,89 @@ public class ScreenerMatchPanel extends JPanel
 		}
 		sb.append("</html>");
 		return sb.toString();
+	}
+
+	/** "Band 45.9K – 48.4K · 67× seen · 3.3%" for the Band Flip screener. */
+	private static String buildBandRow(ScreenerMatch m)
+	{
+		StringBuilder sb = new StringBuilder("<html>");
+		boolean first = true;
+		if (m.bandFloor != null && m.bandCeiling != null)
+		{
+			sb.append("<font color='#888888'>Band </font>")
+				.append("<font color='#DDDDDD'>")
+				.append(FlipItemPanel.formatGpCompact(m.bandFloor)).append(" – ")
+				.append(FlipItemPanel.formatGpCompact(m.bandCeiling)).append("</font>");
+			first = false;
+		}
+		if (m.bandRecurrence != null)
+		{
+			if (!first) sb.append("  <font color='#555555'>·</font>  ");
+			sb.append("<font color='#DDDDDD'>").append(m.bandRecurrence).append("×</font>")
+				.append("<font color='#888888'> seen</font>");
+			first = false;
+		}
+		if (m.bandMarginPct != null)
+		{
+			if (!first) sb.append("  <font color='#555555'>·</font>  ");
+			sb.append("<font color='#00C27A'>").append(String.format("%.1f", m.bandMarginPct)).append("%</font>");
+		}
+		sb.append("</html>");
+		return sb.toString();
+	}
+
+	/** "Drawdown 74.9% · 1.32× off floor" — the entry signal. */
+	private static String buildRecoveryEntryRow(ScreenerMatch m)
+	{
+		StringBuilder sb = new StringBuilder("<html>");
+		boolean first = true;
+		if (m.drawdownPct != null)
+		{
+			sb.append("<font color='#888888'>Drawdown </font>")
+				.append("<font color='#E85050'>").append(String.format("%.1f", m.drawdownPct)).append("%</font>");
+			first = false;
+		}
+		if (m.recoveryFromFloor != null)
+		{
+			if (!first) sb.append("  <font color='#555555'>·</font>  ");
+			// Closer to 1.0× = earlier/cheaper entry → greener.
+			double v = m.recoveryFromFloor;
+			String col = v <= 1.3 ? "#00C27A" : (v <= 2.2 ? "#E8A838" : "#888888");
+			sb.append("<font color='").append(col).append("'>")
+				.append(String.format("%.2f", v)).append("×</font>")
+				.append("<font color='#888888'> off floor</font>");
+		}
+		sb.append("</html>");
+		return sb.toString();
+	}
+
+	/** "Target 16.8M · 2–5 weeks" — the upside thesis. */
+	private static String buildRecoveryThesisRow(ScreenerMatch m)
+	{
+		StringBuilder sb = new StringBuilder("<html>");
+		boolean first = true;
+		if (m.recoveryTarget != null)
+		{
+			sb.append("<font color='#888888'>Target </font>")
+				.append("<font color='#00C27A'>").append(FlipItemPanel.formatGpCompact(m.recoveryTarget)).append("</font>");
+			first = false;
+		}
+		if (m.recoveryWindow != null && !m.recoveryWindow.isEmpty())
+		{
+			if (!first) sb.append("  <font color='#555555'>·</font>  ");
+			sb.append("<font color='#DDDDDD'>").append(escapeHtml(m.recoveryWindow)).append("</font>");
+		}
+		sb.append("</html>");
+		return sb.toString();
+	}
+
+	private static String escapeHtml(String s)
+	{
+		if (s == null)
+		{
+			return "";
+		}
+		return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
 	}
 
 	private static String buildPctRow(ScreenerMatch m)

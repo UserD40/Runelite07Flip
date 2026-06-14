@@ -386,6 +386,16 @@ public class O7FlipPanel extends PluginPanel
 	private JPanel tabletsListPanel;
 	private JPanel favouritesListPanel;
 	private JPanel screenersListPanel;
+	private JPanel newsListPanel;
+	private JPanel newsTabCard;        // CardLayout: "list" / "detail"
+	private JPanel newsDetailPanel;
+	private com.o7flip.model.NewsItem activeNewsItem;
+	private java.util.List<com.o7flip.model.NewsItem> newsItems = new ArrayList<>();
+	private JPanel watchListPanel;
+	private java.util.List<com.o7flip.model.PriceAlert> priceAlerts = new ArrayList<>();
+	// Alerts tab sub-nav: card switcher + the two toggle pills (Alerts / Watch).
+	private JPanel alertsTabCard;
+	private JButton[] alertsSubNavBtns;
 	private JLabel highAlchCostLabel;
 	private JPanel barrowsListPanel;
 	private JPanel barrowsDetailPanel;
@@ -3196,6 +3206,7 @@ public class O7FlipPanel extends PluginPanel
 			case "Screener":
 			case "Decant":
 			case "Plan":
+			case "News":
 				return subFeatureEnabled(name);
 			default:          return false;
 		}
@@ -3223,7 +3234,7 @@ public class O7FlipPanel extends PluginPanel
 	 */
 	public static final List<String> MOVABLE_POOL = java.util.Arrays.asList(
 		"Moons", "Barrows", "Dumps", "Alerts",
-		"Dips", "Favs", "Alch", "Tablets", "Screener", "Decant", "Plan"
+		"Dips", "Favs", "Alch", "Tablets", "Screener", "Decant", "Plan", "News"
 	);
 
 	/** Default top-row pick when {@code topRowTabs} is empty. */
@@ -3300,6 +3311,7 @@ public class O7FlipPanel extends PluginPanel
 			case "Screener":return config.showScreeners();
 			case "Decant":  return config.showDecant();
 			case "Plan":    return hasApiKey();   // optimizer is premium-only; signing in is the gate
+			case "News":    return config.showNews();   // free, no auth required
 			default:        return false;
 		}
 	}
@@ -3354,6 +3366,7 @@ public class O7FlipPanel extends PluginPanel
 		JPanel favouritesContent = buildFavouritesTab();
 		JPanel screenersContent  = buildScreenersTab();
 		JPanel planContent       = buildPlanTab();
+		JPanel newsContent       = buildNewsTab();
 
 		// Premium gate: the recommended-price feeds and the optimiser are
 		// premium features, so for non-premium users these tabs show an upsell
@@ -3379,7 +3392,7 @@ public class O7FlipPanel extends PluginPanel
 
 		JPanel otherContent      = buildOtherTab(decantContent, dipsContent,
 			highAlchContent, tabletsContent, favouritesContent, screenersContent,
-			planContent,
+			planContent, newsContent,
 			moonContent, barrowsContent, dumpsContent, alertsContent);
 		JPanel myFlipsContent  = buildMyFlipsTab();
 
@@ -3405,6 +3418,7 @@ public class O7FlipPanel extends PluginPanel
 		contentByName.put("Favs",    favouritesContent);
 		contentByName.put("Screener",screenersContent);
 		contentByName.put("Plan",    planContent);
+		contentByName.put("News",    newsContent);
 		// Spikes intentionally not registered: feature retired from the panel
 		// per design feedback. The buildSpikesTab() call above still runs to
 		// initialise listPanel state used by sortFlips/filtered fallbacks.
@@ -4041,6 +4055,49 @@ public class O7FlipPanel extends PluginPanel
 			}
 		}
 		return false;
+	}
+
+	// Tab the user was on before the GE offer screen auto-switched them to the
+	// Item tab. Restored when the GE screen closes. EDT-only.
+	private String tabBeforeGeAutoOpen = null;
+
+	/**
+	 * Called by the GE auto-open detector just before it switches to the Item
+	 * tab. Remembers the current tab so we can return to it when the GE offer
+	 * screen closes. Records once per GE session, and never records "Item"
+	 * itself (so re-entering insights mid-session doesn't lose the origin).
+	 */
+	public void markGeAutoOpen()
+	{
+		if (tabBeforeGeAutoOpen != null)
+		{
+			return;
+		}
+		String cur = currentSelectedTabName();
+		if (cur != null && !"Item".equals(cur))
+		{
+			tabBeforeGeAutoOpen = cur;
+		}
+	}
+
+	/**
+	 * Called when both GE offer screens have closed. Returns to the tab the
+	 * user was on before the auto-open — but only if the Item tab is still
+	 * selected, so a deliberate navigation away while the offer was open is
+	 * never overridden.
+	 */
+	public void restoreTabAfterGeAutoOpen()
+	{
+		if (tabBeforeGeAutoOpen == null)
+		{
+			return;
+		}
+		String target = tabBeforeGeAutoOpen;
+		tabBeforeGeAutoOpen = null;
+		if ("Item".equals(currentSelectedTabName()))
+		{
+			selectTab(target);
+		}
 	}
 
 	public void rebuildTabs()
@@ -4948,9 +5005,62 @@ public class O7FlipPanel extends PluginPanel
 					}),
 					decantListPanel, buildPageBar(decantPageLabel, decantPrev, decantNext));
 
-			default: // Merch / Price Alerts
+			default: // Alerts tab: "Alerts" (merch feed) + "Watch" (user price alerts) sub-views
+			{
+				// Merch-feed view (the original Alerts content, with its sort bar).
 				alertsListPanel = listPanel();
-				return assembleTab(buildAlertsSortBar(), alertsListPanel, null);
+				JPanel merchView = assembleTab(buildAlertsSortBar(), alertsListPanel, null);
+
+				// Watch view — the user's own price alerts.
+				watchListPanel = listPanel();
+				JPanel watchView = assembleTab(null, watchListPanel, null);
+				renderWatch();
+
+				alertsTabCard = new JPanel(new CardLayout());
+				alertsTabCard.add(merchView, "alerts");
+				alertsTabCard.add(watchView, "watch");
+
+				// Sub-nav toggle pinned above the card.
+				JButton alertsBtn = pillButton("Alerts");
+				JButton watchBtn  = pillButton("Watch");
+				alertsSubNavBtns = new JButton[]{alertsBtn, watchBtn};
+				applySortStyle(alertsBtn, true);
+				applySortStyle(watchBtn, false);
+				alertsBtn.addActionListener(e -> selectAlertsSubView("alerts"));
+				watchBtn.addActionListener(e -> selectAlertsSubView("watch"));
+
+				JPanel subNav = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 4));
+				subNav.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+				subNav.setBorder(new MatteBorder(0, 0, 1, 0, new Color(0x3A3A3A)));
+				subNav.add(alertsBtn);
+				subNav.add(watchBtn);
+
+				JPanel wrap = new JPanel(new BorderLayout());
+				wrap.setBackground(ColorScheme.DARK_GRAY_COLOR);
+				wrap.add(subNav, BorderLayout.NORTH);
+				wrap.add(alertsTabCard, BorderLayout.CENTER);
+				return wrap;
+			}
+		}
+	}
+
+	/** Switches the Alerts tab between the merch feed and the user's Watch list. */
+	private void selectAlertsSubView(String which)
+	{
+		if (alertsTabCard == null)
+		{
+			return;
+		}
+		((CardLayout) alertsTabCard.getLayout()).show(alertsTabCard, which);
+		if (alertsSubNavBtns != null && alertsSubNavBtns.length == 2)
+		{
+			applySortStyle(alertsSubNavBtns[0], "alerts".equals(which));
+			applySortStyle(alertsSubNavBtns[1], "watch".equals(which));
+		}
+		// Lazily refresh the user's price alerts when they open the Watch view.
+		if ("watch".equals(which) && plugin != null)
+		{
+			plugin.onWatchTabSelected();
 		}
 	}
 
@@ -5227,6 +5337,355 @@ public class O7FlipPanel extends PluginPanel
 	{
 		favouritesListPanel = listPanel();
 		return assembleTab(null, favouritesListPanel, null);
+	}
+
+	/**
+	 * News sub-tab — a master/detail pair behind a {@link CardLayout}: a list
+	 * of article cards, and a per-article detail view showing the relevant
+	 * items plus a link to the full post on 07flip.com.
+	 */
+	private JPanel buildNewsTab()
+	{
+		newsListPanel = listPanel();
+		JPanel listView = assembleTab(null, newsListPanel, null);
+
+		newsDetailPanel = listPanel();
+		JButton back = pillButton("← Back to news");
+		back.setBackground(new Color(0x2A2A2A));
+		back.setForeground(new Color(0xAAAAAA));
+		back.addActionListener(e -> showNewsList());
+
+		JPanel detailHeader = new JPanel(new BorderLayout());
+		detailHeader.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+		detailHeader.setBorder(new EmptyBorder(6, 8, 6, 8));
+		detailHeader.add(back, BorderLayout.WEST);
+
+		ListWrapperPanel detailWrapper = new ListWrapperPanel(newsDetailPanel);
+		detailWrapper.setBackground(ColorScheme.DARK_GRAY_COLOR);
+		JScrollPane detailSp = new JScrollPane(detailWrapper);
+		detailSp.setBorder(BorderFactory.createEmptyBorder());
+		detailSp.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
+		detailSp.getViewport().setBackground(ColorScheme.DARK_GRAY_COLOR);
+		detailSp.getVerticalScrollBar().setPreferredSize(new Dimension(6, 0));
+
+		JPanel detailView = new JPanel(new BorderLayout());
+		detailView.setBackground(ColorScheme.DARK_GRAY_COLOR);
+		detailView.add(detailHeader, BorderLayout.NORTH);
+		detailView.add(detailSp,     BorderLayout.CENTER);
+
+		newsTabCard = new JPanel(new CardLayout());
+		newsTabCard.add(listView,   "list");
+		newsTabCard.add(detailView, "detail");
+
+		renderNews();   // restore cached list across a tab rebuild
+		// Restore the open article if the tab was rebuilt mid-read.
+		if (activeNewsItem != null)
+		{
+			renderNewsDetail(activeNewsItem);
+			((CardLayout) newsTabCard.getLayout()).show(newsTabCard, "detail");
+		}
+		return newsTabCard;
+	}
+
+	/** Pushes a fresh news feed into the News tab. Called from the plugin (EDT). */
+	public void updateNews(java.util.List<com.o7flip.model.NewsItem> items)
+	{
+		newsItems = items != null ? items : new ArrayList<>();
+		renderNews();
+	}
+
+	private void showNewsList()
+	{
+		activeNewsItem = null;
+		if (newsTabCard != null)
+		{
+			((CardLayout) newsTabCard.getLayout()).show(newsTabCard, "list");
+		}
+	}
+
+	private void showNewsDetail(com.o7flip.model.NewsItem n)
+	{
+		activeNewsItem = n;
+		renderNewsDetail(n);
+		if (newsTabCard != null)
+		{
+			((CardLayout) newsTabCard.getLayout()).show(newsTabCard, "detail");
+		}
+	}
+
+	private void renderNews()
+	{
+		if (newsListPanel == null)
+		{
+			return;
+		}
+		newsListPanel.removeAll();
+		if (newsItems.isEmpty())
+		{
+			newsListPanel.add(emptyLabel("No news yet",
+				"Game-update posts and market-moving news will appear here."));
+		}
+		else
+		{
+			newsListPanel.add(Box.createVerticalStrut(4));
+			int rendered = 0;
+			for (int i = 0; i < newsItems.size(); i++)
+			{
+				final com.o7flip.model.NewsItem n = newsItems.get(i);
+				if (n == null)
+				{
+					continue;
+				}
+				newsListPanel.add(new com.o7flip.ui.NewsItemPanel(n, rendered % 2 != 0, () -> showNewsDetail(n)));
+				newsListPanel.add(Box.createVerticalStrut(6));
+				rendered++;
+			}
+		}
+		newsListPanel.revalidate();
+		newsListPanel.repaint();
+	}
+
+	/** Detail view for one article: title, date, full summary, relevant items, and a link to the post. */
+	private void renderNewsDetail(com.o7flip.model.NewsItem n)
+	{
+		if (newsDetailPanel == null || n == null)
+		{
+			return;
+		}
+		newsDetailPanel.removeAll();
+
+		JLabel title = new JLabel("<html><div style='width:250px'>"
+			+ com.o7flip.ui.NewsItemPanel.escapeHtml(n.title) + "</div></html>");
+		title.setFont(Fonts.BOLD);
+		title.setForeground(Color.WHITE);
+		title.setAlignmentX(Component.LEFT_ALIGNMENT);
+		title.setBorder(new EmptyBorder(10, 10, 0, 10));
+		title.setMaximumSize(new Dimension(Integer.MAX_VALUE, Short.MAX_VALUE));
+		newsDetailPanel.add(title);
+
+		String meta = com.o7flip.ui.NewsItemPanel.relativeTime(n.publishedAt);
+		if (n.category != null && !n.category.isEmpty())
+		{
+			meta = com.o7flip.ui.NewsItemPanel.capitalise(n.category) + (meta.isEmpty() ? "" : "  ·  " + meta);
+		}
+		if (!meta.isEmpty())
+		{
+			JLabel metaLabel = new JLabel(meta);
+			metaLabel.setFont(Fonts.SM);
+			metaLabel.setForeground(new Color(0x888888));
+			metaLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
+			metaLabel.setBorder(new EmptyBorder(2, 10, 0, 10));
+			newsDetailPanel.add(metaLabel);
+		}
+
+		if (n.summary != null && !n.summary.isEmpty())
+		{
+			JLabel summary = new JLabel("<html><div style='width:250px'>"
+				+ com.o7flip.ui.NewsItemPanel.escapeHtml(n.summary) + "</div></html>");
+			summary.setFont(Fonts.SM);
+			summary.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
+			summary.setAlignmentX(Component.LEFT_ALIGNMENT);
+			summary.setBorder(new EmptyBorder(8, 10, 0, 10));
+			summary.setMaximumSize(new Dimension(Integer.MAX_VALUE, Short.MAX_VALUE));
+			newsDetailPanel.add(summary);
+		}
+
+		// Relevant items — clickable rows into each item's insights.
+		if (n.items != null && !n.items.isEmpty())
+		{
+			JLabel itemsHeader = new JLabel("Relevant items");
+			itemsHeader.setFont(Fonts.SM_BOLD);
+			itemsHeader.setForeground(new Color(0xC4A052));
+			itemsHeader.setAlignmentX(Component.LEFT_ALIGNMENT);
+			itemsHeader.setBorder(new EmptyBorder(12, 10, 4, 10));
+			itemsHeader.setMaximumSize(new Dimension(Integer.MAX_VALUE, itemsHeader.getPreferredSize().height));
+			newsDetailPanel.add(itemsHeader);
+
+			for (com.o7flip.model.NewsItem.Related r : n.items)
+			{
+				if (r == null || r.itemId <= 0)
+				{
+					continue;
+				}
+				newsDetailPanel.add(buildNewsItemRow(r));
+				newsDetailPanel.add(Box.createVerticalStrut(4));
+			}
+		}
+
+		// Link to the full post.
+		if (n.url != null && !n.url.isEmpty())
+		{
+			JButton openPost = pillButton("See the whole news post →");
+			openPost.setBackground(ORANGE);
+			openPost.setForeground(Color.BLACK);
+			openPost.setAlignmentX(Component.LEFT_ALIGNMENT);
+			openPost.addActionListener(e -> net.runelite.client.util.LinkBrowser.browse(n.url));
+			JPanel wrap = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
+			wrap.setBackground(ColorScheme.DARK_GRAY_COLOR);
+			wrap.setAlignmentX(Component.LEFT_ALIGNMENT);
+			wrap.setBorder(new EmptyBorder(14, 10, 10, 10));
+			wrap.setMaximumSize(new Dimension(Integer.MAX_VALUE, openPost.getPreferredSize().height + 24));
+			wrap.add(openPost);
+			newsDetailPanel.add(wrap);
+		}
+
+		newsDetailPanel.revalidate();
+		newsDetailPanel.repaint();
+	}
+
+	/** A single clickable item row in the news detail view (icon + name → insights). */
+	private JPanel buildNewsItemRow(com.o7flip.model.NewsItem.Related r)
+	{
+		JPanel row = new JPanel(new BorderLayout(8, 0));
+		row.setBackground(new Color(0x1F1F1F));
+		row.setBorder(new EmptyBorder(6, 10, 6, 10));
+		row.setAlignmentX(Component.LEFT_ALIGNMENT);
+		row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 40));
+		row.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+
+		JLabel icon = com.o7flip.ui.FlipItemPanel.buildIcon(r.itemId, itemManager);
+		JLabel name = new JLabel(r.name != null && !r.name.isEmpty() ? r.name : "Item " + r.itemId);
+		name.setFont(Fonts.BOLD);
+		name.setForeground(Color.WHITE);
+
+		row.add(icon, BorderLayout.WEST);
+		row.add(name, BorderLayout.CENTER);
+
+		com.o7flip.ui.ClickRouter.attachInsightsOnly(row,  plugin, r.itemId, r.name);
+		com.o7flip.ui.ClickRouter.attachInsightsOnly(name, plugin, r.itemId, r.name);
+
+		final Color base = new Color(0x1F1F1F);
+		final Color hover = new Color(0x2A2A2A);
+		row.addMouseListener(new java.awt.event.MouseAdapter()
+		{
+			@Override
+			public void mouseEntered(java.awt.event.MouseEvent e)
+			{
+				row.setBackground(hover);
+			}
+			@Override
+			public void mouseExited(java.awt.event.MouseEvent e)
+			{
+				row.setBackground(base);
+			}
+		});
+		return row;
+	}
+
+	/** Pushes the user's price alerts into the Watch sub-view. Called from the plugin (EDT). */
+	public void updatePriceAlerts(java.util.List<com.o7flip.model.PriceAlert> alerts)
+	{
+		priceAlerts = alerts != null ? alerts : new ArrayList<>();
+		renderWatch();
+	}
+
+	private void renderWatch()
+	{
+		if (watchListPanel == null)
+		{
+			return;
+		}
+		watchListPanel.removeAll();
+		if (!hasApiKey())
+		{
+			watchListPanel.add(emptyLabel("API key required",
+				"Paste your 07flip.com API key in the plugin config to use price alerts."));
+		}
+		else if (priceAlerts.isEmpty())
+		{
+			watchListPanel.add(emptyLabel("No price alerts",
+				"Open an item, then tap 'Set price alert' to watch a target price."));
+		}
+		else
+		{
+			for (int i = 0; i < priceAlerts.size(); i++)
+			{
+				com.o7flip.model.PriceAlert a = priceAlerts.get(i);
+				if (a == null)
+				{
+					continue;
+				}
+				watchListPanel.add(new com.o7flip.ui.WatchAlertPanel(a, itemManager, i % 2 != 0, plugin));
+				watchListPanel.add(sep());
+			}
+		}
+		watchListPanel.revalidate();
+		watchListPanel.repaint();
+	}
+
+	/**
+	 * "Create price alert" dialog, opened from the Item panel's button. Lets
+	 * the user pick a side (buy/sell), a direction (above/below) and a target
+	 * price (seeded with the current sell), then POSTs via the plugin.
+	 */
+	public void openPriceAlertDialog(int itemId, String name, long currentBuy, long currentSell)
+	{
+		if (plugin == null || itemId <= 0)
+		{
+			return;
+		}
+
+		String[] sides = {"Sell", "Buy"};
+		String[] directions = {"above", "below"};
+		javax.swing.JComboBox<String> sideBox = new javax.swing.JComboBox<>(sides);
+		javax.swing.JComboBox<String> dirBox  = new javax.swing.JComboBox<>(directions);
+		long seed = currentSell > 0 ? currentSell : currentBuy;
+		javax.swing.JTextField targetField = new javax.swing.JTextField(seed > 0 ? String.valueOf(seed) : "", 12);
+
+		JPanel form = new JPanel(new java.awt.GridLayout(0, 2, 6, 6));
+		form.add(new JLabel("Item:"));
+		form.add(new JLabel("<html><b>" + (name != null ? name : "Item " + itemId) + "</b></html>"));
+		form.add(new JLabel("Alert when the"));
+		form.add(sideBox);
+		form.add(new JLabel("price goes"));
+		form.add(dirBox);
+		form.add(new JLabel("target price (gp):"));
+		form.add(targetField);
+		form.add(new JLabel("<html><font color='#888888'>Whole numbers only — no commas or 'gp'.</font></html>"));
+		form.add(new JLabel(""));
+		if (!isPremium)
+		{
+			form.add(new JLabel("<html><font color='#888888'>Free accounts can keep up to 5 active alerts.</font></html>"));
+			form.add(new JLabel(""));
+		}
+
+		int choice = javax.swing.JOptionPane.showConfirmDialog(this, form,
+			"Set price alert", javax.swing.JOptionPane.OK_CANCEL_OPTION,
+			javax.swing.JOptionPane.PLAIN_MESSAGE);
+		if (choice != javax.swing.JOptionPane.OK_OPTION)
+		{
+			return;
+		}
+
+		long target;
+		try
+		{
+			target = Long.parseLong(targetField.getText().trim().replace(",", ""));
+		}
+		catch (NumberFormatException ex)
+		{
+			javax.swing.JOptionPane.showMessageDialog(this,
+				"The target price must be a whole number.", "Set price alert",
+				javax.swing.JOptionPane.WARNING_MESSAGE);
+			return;
+		}
+		if (target <= 0)
+		{
+			javax.swing.JOptionPane.showMessageDialog(this,
+				"The target price must be greater than zero.", "Set price alert",
+				javax.swing.JOptionPane.WARNING_MESSAGE);
+			return;
+		}
+
+		String side = ((String) sideBox.getSelectedItem()).toLowerCase();
+		String direction = (String) dirBox.getSelectedItem();
+		plugin.createPriceAlert(itemId, side, direction, target,
+			() -> javax.swing.JOptionPane.showMessageDialog(this,
+				"Alert created — manage it under Alerts → Watch.", "Set price alert",
+				javax.swing.JOptionPane.INFORMATION_MESSAGE),
+			() -> javax.swing.JOptionPane.showMessageDialog(this,
+				"Couldn't create the alert — try again in a moment.", "Set price alert",
+				javax.swing.JOptionPane.WARNING_MESSAGE));
 	}
 
 	/**
@@ -6048,7 +6507,7 @@ public class O7FlipPanel extends PluginPanel
 	private JPanel buildOtherTab(JPanel decantContent, JPanel dipsContent,
 	                             JPanel highAlchContent, JPanel tabletsContent,
 	                             JPanel favouritesContent, JPanel screenersContent,
-	                             JPanel planContent,
+	                             JPanel planContent, JPanel newsContent,
 	                             JPanel moonContent, JPanel barrowsContent,
 	                             JPanel dumpsContent, JPanel alertsContent)
 	{
@@ -6072,6 +6531,7 @@ public class O7FlipPanel extends PluginPanel
 		byName.put("Favs",    favouritesContent);
 		byName.put("Screener",screenersContent);
 		byName.put("Plan",    planContent);
+		byName.put("News",    newsContent);
 		byName.put("Moons",   moonContent);
 		byName.put("Barrows", barrowsContent);
 		byName.put("Dumps",   dumpsContent);

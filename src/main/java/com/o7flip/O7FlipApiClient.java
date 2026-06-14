@@ -40,6 +40,8 @@ import com.o7flip.model.HighAlchItem;
 import com.o7flip.model.ItemInsights;
 import com.o7flip.model.MoonItem;
 import com.o7flip.model.MoonSet;
+import com.o7flip.model.NewsItem;
+import com.o7flip.model.PriceAlert;
 import com.o7flip.model.OptimizeResult;
 import com.o7flip.model.RecommendedPrices;
 import com.o7flip.model.ScreenerMatch;
@@ -2645,6 +2647,17 @@ public class O7FlipApiClient
 		m.profit       = getLongOrNull(obj,   "profit");
 		m.roiPct       = getDoubleOrNull(obj, "roi_pct");
 		m.flip07Score  = getIntOrNull(obj,    "flip07_score");
+		// Band Flip engine fields (null on other presets).
+		m.bandFloor      = getLongOrNull(obj,   "band_floor");
+		m.bandCeiling    = getLongOrNull(obj,   "band_ceiling");
+		m.bandRecurrence = getIntOrNull(obj,    "band_recurrence");
+		m.bandMarginPct  = getDoubleOrNull(obj, "band_margin_pct");
+		// Event Recovery engine fields. recovery_window is a bucketed string
+		// label (en dash, render verbatim); recovery_from_floor is a float ratio.
+		m.drawdownPct       = getDoubleOrNull(obj, "drawdown_pct");
+		m.recoveryTarget    = getLongOrNull(obj,   "recovery_target");
+		m.recoveryWindow    = getStringOrNull(obj, "recovery_window");
+		m.recoveryFromFloor = getDoubleOrNull(obj, "recovery_from_floor");
 		return m;
 	}
 
@@ -2852,6 +2865,253 @@ public class O7FlipApiClient
 				parsePagedResponse(response, "alerts", O7FlipApiClient.this::parseAlertItem, callback);
 			}
 		});
+	}
+
+	/**
+	 * News feed — OSRS game-update / blog posts with the server's AI summary
+	 * and any items the post is expected to move. Open to everyone (no key
+	 * required); routes through {@link #fetch} for 429 backoff protection.
+	 * Callback gets an empty list on any failure.
+	 */
+	public void fetchNews(Consumer<List<NewsItem>> callback)
+	{
+		fetch(BASE_URL + "/v2/news?limit=30", new Callback()
+		{
+			@Override
+			public void onFailure(Call call, IOException e)
+			{
+				log.warn("[07Flip] fetchNews failed: {}", e.getMessage());
+				callback.accept(new ArrayList<>());
+			}
+
+			@Override
+			public void onResponse(Call call, Response response) throws IOException
+			{
+				try
+				{
+					if (response.code() == 429)
+					{
+						markRateLimited(response);
+					}
+					if (!response.isSuccessful() || response.body() == null)
+					{
+						log.warn("[07Flip] fetchNews HTTP {}", response.code());
+						callback.accept(new ArrayList<>());
+						return;
+					}
+					JsonObject root = gson.fromJson(response.body().string(), JsonObject.class);
+					callback.accept(parseArray(root, "news", O7FlipApiClient.this::parseNewsItem));
+				}
+				catch (Exception e)
+				{
+					log.warn("[07Flip] fetchNews parse error: {}", e.getMessage());
+					callback.accept(new ArrayList<>());
+				}
+				finally
+				{
+					response.close();
+				}
+			}
+		});
+	}
+
+	private NewsItem parseNewsItem(JsonObject o)
+	{
+		NewsItem n = new NewsItem();
+		n.id          = getStringOrNull(o, "id");
+		n.title       = getString(o, "title", "");
+		n.summary     = getString(o, "summary", "");
+		n.url         = getString(o, "url", "");
+		n.category    = getStringOrNull(o, "category");
+		n.publishedAt = getString(o, "published_at", "");
+		if (o.has("items") && o.get("items").isJsonArray())
+		{
+			n.items = new ArrayList<>();
+			JsonArray arr = o.getAsJsonArray("items");
+			for (int i = 0; i < arr.size(); i++)
+			{
+				JsonElement el = arr.get(i);
+				if (el == null || !el.isJsonObject())
+				{
+					continue;
+				}
+				JsonObject io = el.getAsJsonObject();
+				NewsItem.Related r = new NewsItem.Related();
+				r.itemId = getInt(io, "item_id", 0);
+				r.name   = getString(io, "name", "");
+				if (r.itemId > 0)
+				{
+					n.items.add(r);
+				}
+			}
+		}
+		return n;
+	}
+
+	/**
+	 * User-created price alerts (the "Watch" tab). All three operations are
+	 * per-user and require an API key; no key → empty list / failure callback
+	 * without hitting the network.
+	 */
+	public void fetchPriceAlerts(Consumer<List<PriceAlert>> callback)
+	{
+		String key = sanitizedApiKey();
+		if (key == null)
+		{
+			callback.accept(new ArrayList<>());
+			return;
+		}
+		fetch(BASE_URL + "/v2/price-alerts", new Callback()
+		{
+			@Override
+			public void onFailure(Call call, IOException e)
+			{
+				log.warn("[07Flip] fetchPriceAlerts failed: {}", e.getMessage());
+				callback.accept(new ArrayList<>());
+			}
+
+			@Override
+			public void onResponse(Call call, Response response) throws IOException
+			{
+				try
+				{
+					if (response.code() == 429)
+					{
+						markRateLimited(response);
+					}
+					if (!response.isSuccessful() || response.body() == null)
+					{
+						log.warn("[07Flip] fetchPriceAlerts HTTP {}", response.code());
+						callback.accept(new ArrayList<>());
+						return;
+					}
+					JsonObject root = gson.fromJson(response.body().string(), JsonObject.class);
+					callback.accept(parseArray(root, "alerts", O7FlipApiClient.this::parsePriceAlert));
+				}
+				catch (Exception e)
+				{
+					log.warn("[07Flip] fetchPriceAlerts parse error: {}", e.getMessage());
+					callback.accept(new ArrayList<>());
+				}
+				finally
+				{
+					response.close();
+				}
+			}
+		});
+	}
+
+	public void createPriceAlert(int itemId, String side, String direction, long targetPrice, Consumer<Boolean> onResult)
+	{
+		String key = sanitizedApiKey();
+		if (key == null)
+		{
+			onResult.accept(false);
+			return;
+		}
+		if (isRateLimited())
+		{
+			onResult.accept(false);
+			return;
+		}
+		JsonObject body = new JsonObject();
+		body.addProperty("item_id", itemId);
+		body.addProperty("side", side);
+		body.addProperty("direction", direction);
+		body.addProperty("target_price", targetPrice);
+		RequestBody requestBody = RequestBody.create(MEDIA_TYPE_JSON, gson.toJson(body));
+		Request.Builder builder = new Request.Builder()
+			.url(BASE_URL + "/v2/price-alerts")
+			.post(requestBody)
+			.header("User-Agent", USER_AGENT)
+			.header("Authorization", "Bearer " + key);
+		okHttpClient.newCall(builder.build()).enqueue(new Callback()
+		{
+			@Override
+			public void onFailure(Call call, IOException e)
+			{
+				log.warn("[07Flip] createPriceAlert failed: {}", e.getMessage());
+				onResult.accept(false);
+			}
+
+			@Override
+			public void onResponse(Call call, Response response) throws IOException
+			{
+				int code = response.code();
+				if (code == 429)
+				{
+					markRateLimited(response);
+				}
+				boolean ok = response.isSuccessful();
+				if (!ok)
+				{
+					log.warn("[07Flip] createPriceAlert HTTP {}", code);
+				}
+				response.close();
+				onResult.accept(ok);
+			}
+		});
+	}
+
+	public void deletePriceAlert(String id, Consumer<Boolean> onResult)
+	{
+		String key = sanitizedApiKey();
+		if (key == null || id == null || id.isEmpty())
+		{
+			onResult.accept(false);
+			return;
+		}
+		if (isRateLimited())
+		{
+			onResult.accept(false);
+			return;
+		}
+		Request.Builder builder = new Request.Builder()
+			.url(BASE_URL + "/v2/price-alerts/" + id)
+			.delete()
+			.header("User-Agent", USER_AGENT)
+			.header("Authorization", "Bearer " + key);
+		okHttpClient.newCall(builder.build()).enqueue(new Callback()
+		{
+			@Override
+			public void onFailure(Call call, IOException e)
+			{
+				log.warn("[07Flip] deletePriceAlert failed: {}", e.getMessage());
+				onResult.accept(false);
+			}
+
+			@Override
+			public void onResponse(Call call, Response response) throws IOException
+			{
+				int code = response.code();
+				if (code == 429)
+				{
+					markRateLimited(response);
+				}
+				boolean ok = response.isSuccessful();
+				if (!ok)
+				{
+					log.warn("[07Flip] deletePriceAlert HTTP {}", code);
+				}
+				response.close();
+				onResult.accept(ok);
+			}
+		});
+	}
+
+	private PriceAlert parsePriceAlert(JsonObject o)
+	{
+		PriceAlert a = new PriceAlert();
+		a.id           = getStringOrNull(o, "id");
+		a.itemId       = getInt(o, "item_id", 0);
+		a.name         = getString(o, "name", "");
+		a.side         = getString(o, "side", "sell");
+		a.direction    = getString(o, "direction", "above");
+		a.targetPrice  = getLong(o, "target_price", 0L);
+		a.currentPrice = getLongOrNull(o, "current_price");
+		a.createdAt    = getString(o, "created_at", "");
+		a.triggered    = getBool(o, "triggered", false);
+		return a;
 	}
 
 	// -------------------------------------------------------------------------

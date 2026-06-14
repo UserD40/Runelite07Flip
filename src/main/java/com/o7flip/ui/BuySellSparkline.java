@@ -83,6 +83,13 @@ public class BuySellSparkline extends JPanel
 	/** Pixel padding inside the plot area so the line doesn't graze the top/bottom edges. */
 	private static final int PLOT_PAD = 4;
 
+	private static final java.time.format.DateTimeFormatter TIME_FMT =
+		java.time.format.DateTimeFormatter.ofPattern("HH:mm");
+	private static final java.time.format.DateTimeFormatter DATETIME_FMT =
+		java.time.format.DateTimeFormatter.ofPattern("d MMM HH:mm");
+	private static final java.time.format.DateTimeFormatter DATE_FMT =
+		java.time.format.DateTimeFormatter.ofPattern("d MMM");
+
 	/** Crosshair colour for the hover readout. */
 	private static final Color HOVER_LINE = new Color(0xB0B0B0);
 	/** Background of the hover price tooltip box. */
@@ -94,6 +101,11 @@ public class BuySellSparkline extends JPanel
 	private final int    height;
 	private final String xStartLabel;
 	private final String xEndLabel;
+
+	/** Epoch ms of bucket[0], or -1 when unknown (no hover timestamp shown). */
+	private final long startEpochMs;
+	/** Minutes between consecutive buckets, or 0 when unknown. */
+	private final int  intervalMinutes;
 
 	/** Current mouse x within the component, or -1 when not hovering. */
 	private int hoverX = -1;
@@ -110,11 +122,19 @@ public class BuySellSparkline extends JPanel
 
 	public BuySellSparkline(Long[] buy, Long[] sell, int height, String xStartLabel, String xEndLabel)
 	{
-		this.buy         = buy  != null ? buy  : new Long[0];
-		this.sell        = sell != null ? sell : new Long[0];
-		this.height      = height;
-		this.xStartLabel = xStartLabel != null ? xStartLabel : "";
-		this.xEndLabel   = xEndLabel   != null ? xEndLabel   : "";
+		this(buy, sell, height, xStartLabel, xEndLabel, -1L, 0);
+	}
+
+	public BuySellSparkline(Long[] buy, Long[] sell, int height, String xStartLabel, String xEndLabel,
+	                        long startEpochMs, int intervalMinutes)
+	{
+		this.buy             = buy  != null ? buy  : new Long[0];
+		this.sell            = sell != null ? sell : new Long[0];
+		this.height          = height;
+		this.xStartLabel     = xStartLabel != null ? xStartLabel : "";
+		this.xEndLabel       = xEndLabel   != null ? xEndLabel   : "";
+		this.startEpochMs    = startEpochMs;
+		this.intervalMinutes = intervalMinutes;
 		setOpaque(false);
 		setPreferredSize(new Dimension(0, height));
 		setMaximumSize(new Dimension(Integer.MAX_VALUE, height));
@@ -248,16 +268,19 @@ public class BuySellSparkline extends JPanel
 			g2.fillOval(snappedX - 3, y - 3, 6, 6);
 		}
 
-		// Price box. Two short lines, colour-coded, in a dark rounded panel that
-		// flips to the left of the crosshair when it would overflow the right.
+		// Price box. Up to three short lines — a faint timestamp, then the
+		// colour-coded Buy / Sell prices — in a dark rounded panel that flips to
+		// the left of the crosshair when it would overflow the right edge.
 		g2.setFont(Fonts.SM);
 		FontMetrics fm = g2.getFontMetrics();
+		String timeText = hoverTimeLabel(idx);
 		String buyText  = buyAt  != null ? "Buy "  + String.format("%,d", buyAt)  : null;
 		String sellText = sellAt != null ? "Sell " + String.format("%,d", sellAt) : null;
 		int textW = 0;
+		if (timeText != null) textW = Math.max(textW, fm.stringWidth(timeText));
 		if (buyText  != null) textW = Math.max(textW, fm.stringWidth(buyText));
 		if (sellText != null) textW = Math.max(textW, fm.stringWidth(sellText));
-		int lines = (buyText != null ? 1 : 0) + (sellText != null ? 1 : 0);
+		int lines = (timeText != null ? 1 : 0) + (buyText != null ? 1 : 0) + (sellText != null ? 1 : 0);
 		int lineH = fm.getHeight();
 		int padX = 6, padY = 4;
 		int boxW = textW + padX * 2;
@@ -277,17 +300,56 @@ public class BuySellSparkline extends JPanel
 		g2.drawRoundRect(boxX, boxY, boxW, boxH, 6, 6);
 
 		int textY = boxY + padY + fm.getAscent();
-		if (buyText != null)
+		if (timeText != null)
 		{
-			g2.setColor(BUY_COL);
-			g2.drawString(buyText, boxX + padX, textY);
+			g2.setColor(GRAY_LBL);
+			g2.drawString(timeText, boxX + padX, textY);
 			textY += lineH;
 		}
+		// Sell above Buy — matches the chart (sell line sits above the buy line)
+		// and the rest of the plugin's price ordering.
 		if (sellText != null)
 		{
 			g2.setColor(SELL_COL);
 			g2.drawString(sellText, boxX + padX, textY);
+			textY += lineH;
 		}
+		if (buyText != null)
+		{
+			g2.setColor(BUY_COL);
+			g2.drawString(buyText, boxX + padX, textY);
+		}
+	}
+
+	/**
+	 * Local-time label for the hovered bucket, computed from {@code bucket[0]}'s
+	 * timestamp plus {@code idx × interval}. Format scales with the bucket size:
+	 * "HH:mm" for intraday buckets, "d MMM HH:mm" for multi-hour (7d), "d MMM"
+	 * for daily (30d). Returns null when the timing isn't known.
+	 */
+	private String hoverTimeLabel(int idx)
+	{
+		if (startEpochMs <= 0 || intervalMinutes <= 0)
+		{
+			return null;
+		}
+		long t = startEpochMs + (long) idx * intervalMinutes * 60_000L;
+		java.time.ZonedDateTime zdt = java.time.Instant.ofEpochMilli(t)
+			.atZone(java.time.ZoneId.systemDefault());
+		java.time.format.DateTimeFormatter fmt;
+		if (intervalMinutes <= 60)
+		{
+			fmt = TIME_FMT;
+		}
+		else if (intervalMinutes < 1440)
+		{
+			fmt = DATETIME_FMT;
+		}
+		else
+		{
+			fmt = DATE_FMT;
+		}
+		return zdt.format(fmt);
 	}
 
 	/** Value at index if it's a real (non-null, positive) sample, else null. */

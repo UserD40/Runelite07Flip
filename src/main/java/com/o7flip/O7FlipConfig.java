@@ -390,6 +390,19 @@ public interface O7FlipConfig extends Config
 	}
 
 	@ConfigItem(
+		keyName = "showNews",
+		name = "",
+		description = "",
+		section = tabsSection,
+		position = 14,
+		hidden = true
+	)
+	default boolean showNews()
+	{
+		return true;
+	}
+
+	@ConfigItem(
 		keyName = "highAlchFireStaff",
 		name = "",
 		description = "",
@@ -927,5 +940,49 @@ public interface O7FlipConfig extends Config
 	default boolean itemTabAlerts()
 	{
 		return true;
+	}
+
+	/** Default Buy/Sell chart period that loads on the Item tab. */
+	enum DefaultChartPeriod
+	{
+		TWO_HOUR("2 hours", "2h"),
+		FOUR_HOUR("4 hours", "4h"),
+		DAY("24 hours", "24h"),
+		WEEK("7 days", "7d"),
+		MONTH("30 days", "30d");
+
+		private final String label;
+		private final String chartLabel;
+
+		DefaultChartPeriod(String label, String chartLabel)
+		{
+			this.label      = label;
+			this.chartLabel = chartLabel;
+		}
+
+		/** The chip label this maps to ("2h", "24h", …). */
+		public String chartLabel()
+		{
+			return chartLabel;
+		}
+
+		@Override
+		public String toString()
+		{
+			return label;
+		}
+	}
+
+	@ConfigItem(
+		keyName = "defaultChartPeriod",
+		name = "Default chart timeframe",
+		description = "Which Buy/Sell chart period loads by default on the Item tab. "
+			+ "Falls back to 24h when the chosen period has no data for an item.",
+		section = itemTabSection,
+		position = 12
+	)
+	default DefaultChartPeriod defaultChartPeriod()
+	{
+		return DefaultChartPeriod.DAY;
 	}
 }

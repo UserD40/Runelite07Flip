@@ -50,4 +50,16 @@ public class ScreenerMatch
 	public Long    profit;
 	public Double  roiPct;
 	public Integer flip07Score;
+
+	// Engine-specific fields for the Band Flip screener (null on other presets).
+	public Long    bandFloor;
+	public Long    bandCeiling;
+	public Integer bandRecurrence;
+	public Double  bandMarginPct;
+
+	// Engine-specific fields for the Event Recovery screener (null on others).
+	public Double  drawdownPct;        // % below the event-period peak (50–95)
+	public Long    recoveryTarget;     // suggested sell (gp) — the upside thesis
+	public String  recoveryWindow;     // bucketed label, e.g. "2–5 weeks" (en dash)
+	public Double  recoveryFromFloor;  // current ÷ 90d-low; 1.0 = on the floor (best entry)
 }

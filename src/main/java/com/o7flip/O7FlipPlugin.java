@@ -180,11 +180,21 @@ public class O7FlipPlugin extends Plugin
 	// re-arms. Game-thread only.
 	private int sellSetupArmedItemId = -1;
 
+	// Buy-side counterpart: last item id we've armed the implicit-BUY auto-fill
+	// for on a manually-opened buy setup (one not initiated by a panel
+	// right-click). Same reset/re-arm semantics. Game-thread only.
+	private int buySetupArmedItemId = -1;
+
 	// Last item id the auto-open-Item-tab detector has already opened the
 	// Insights view for. Latched per setup instance so the user can switch
 	// tabs afterwards without the detector fighting them every tick; reset
 	// when the setup screen closes. Game-thread only.
 	private int autoOpenInsightsItemId = -1;
+
+	// True once the GE auto-open has switched the panel to the Item tab this
+	// GE session, so we know to restore the user's previous tab when the GE
+	// offer screen closes. Game-thread only.
+	private boolean geAutoOpenedTab = false;
 
 	// -------------------------------------------------------------------------
 	// Long-lived right-click queue used by the movable GE price overlay.
@@ -653,6 +663,57 @@ public class O7FlipPlugin extends Plugin
 	}
 
 	/**
+	 * Best buy price for the implicit-buy auto-fill. Premium → 07Flip
+	 * recommended buy; free → live market buy (wiki low). Returns -1 when
+	 * nothing is known so the caller leaves the field for manual entry.
+	 * Buy-side analogue of {@link #computeAutoSellPrice} (no frozen concept —
+	 * freezes apply only to the sell target).
+	 */
+	long computeAutoBuyPrice(int itemId)
+	{
+		boolean premium = panel != null && panel.isPremium();
+		if (!premium)
+		{
+			Long liveBuy = lookupLiveBuy(itemId);
+			return (liveBuy != null && liveBuy > 0) ? liveBuy : -1L;
+		}
+		Long recBuy = lookupLiveRecBuy(itemId);
+		return (recBuy != null && recBuy > 0) ? recBuy : -1L;
+	}
+
+	/** Live market buy price (wiki low) from the loaded flips list, or null. */
+	private Long lookupLiveBuy(int itemId)
+	{
+		for (FlipItem f : lastFlips)
+		{
+			if (f.itemId == itemId && f.buyPrice > 0)
+			{
+				return f.buyPrice;
+			}
+		}
+		return null;
+	}
+
+	private Long lookupLiveRecBuy(int itemId)
+	{
+		// Flips list first — cheapest source, already on-hand.
+		for (FlipItem f : lastFlips)
+		{
+			if (f.itemId == itemId && f.recBuyPrice != null && f.recBuyPrice > 0)
+			{
+				return f.recBuyPrice;
+			}
+		}
+		// Fall back to the /recommended-prices cache populated by the GE overlay.
+		com.o7flip.model.RecommendedPrices rp = recPriceCache.get(itemId);
+		if (rp != null && rp.recBuyPrice != null && rp.recBuyPrice > 0)
+		{
+			return rp.recBuyPrice;
+		}
+		return null;
+	}
+
+	/**
 	 * On-demand fetch for the implicit-sell flow. Delegates to the shared
 	 * rec-prices fetcher whose completion callback now also drives the
 	 * sell-arming check, so this single call kicks off (or piggybacks on)
@@ -689,6 +750,34 @@ public class O7FlipPlugin extends Plugin
 			return;
 		}
 		long auto = computeAutoSellPrice(itemId);
+		if (auto > 0)
+		{
+			pendingGeInputPrice = auto;
+		}
+	}
+
+	/**
+	 * Buy counterpart to {@link #armSellPriceIfStillRelevant}: re-arms the buy
+	 * auto-fill once a rec-prices fetch lands, if the user is still on a buy
+	 * setup for the same item. No-op on a sell screen, a different item, or
+	 * while an explicit panel-queued buy owns the price.
+	 */
+	private void armBuyPriceIfStillRelevant(int itemId)
+	{
+		Widget setup = client.getWidget(InterfaceID.GeOffers.SETUP);
+		if (!isBuySetupVisible(setup))
+		{
+			return;
+		}
+		if (resolveItemIdFromSetupWidget() != itemId)
+		{
+			return;
+		}
+		if (pendingGeSetPrice != -1 || pendingGeBuyItemId != -1)
+		{
+			return;
+		}
+		long auto = computeAutoBuyPrice(itemId);
 		if (auto > 0)
 		{
 			pendingGeInputPrice = auto;
@@ -894,6 +983,11 @@ public class O7FlipPlugin extends Plugin
 		// arm an explicit queue. Idempotent per-setup-instance.
 		detectAndArmSellSetup();
 
+		// Same again for buys the user opens manually (searching the item in the
+		// GE itself rather than right-clicking a panel row) — auto-fill the
+		// 07Flip recommended buy so the price field isn't left on the GE default.
+		detectAndArmBuySetup();
+
 		// Auto-open the Item tab for whatever item is on the setup screen —
 		// buy and sell flows alike — so the panel shows the full detail view
 		// of the item the user is about to trade.
@@ -1071,50 +1165,181 @@ public class O7FlipPlugin extends Plugin
 	}
 
 	/**
+	 * Buy-side counterpart to {@link #detectAndArmSellSetup}. Fires when the
+	 * user opens a BUY setup they did <em>not</em> initiate from a panel
+	 * right-click — e.g. they searched the item directly in the GE. Without
+	 * this, manual buys got no auto-fill at all (only sells had a poller and
+	 * only panel-queued buys armed a price), so the price field was left on
+	 * Jagex's own guide price instead of the 07Flip recommended buy.
+	 *
+	 * Arms {@link #pendingGeInputPrice} with the recommended buy (premium) or
+	 * the live market buy (free). Deliberately yields to an in-flight
+	 * panel-queued buy ({@code pendingGeSetPrice}/{@code pendingGeBuyItemId}
+	 * set) so the two never race on the same item — the explicit queue wins.
+	 *
+	 * Idempotency via {@link #buySetupArmedItemId}, mirroring the sell latch.
+	 * Must run on the game thread.
+	 */
+	private void detectAndArmBuySetup()
+	{
+		Widget setup = client.getWidget(InterfaceID.GeOffers.SETUP);
+		if (setup == null || setup.isHidden())
+		{
+			buySetupArmedItemId = -1;
+			return;
+		}
+		if (!isBuySetupVisible(setup))
+		{
+			return;
+		}
+		// An explicit panel-queued buy owns the price for its item — don't fight it.
+		if (pendingGeSetPrice != -1 || pendingGeBuyItemId != -1)
+		{
+			return;
+		}
+		// Still on "Choose an item..." — placeholder icons resolve to junk ids.
+		if (widgetTreeHasText(setup, "choose an item"))
+		{
+			return;
+		}
+		int itemId = resolveItemIdFromSetupWidget();
+		if (itemId <= 0 || itemId == buySetupArmedItemId)
+		{
+			return;
+		}
+		buySetupArmedItemId = itemId;
+
+		long auto = computeAutoBuyPrice(itemId);
+		if (auto > 0)
+		{
+			pendingGeInputPrice = auto;
+			log.debug("[07Flip] buy-setup detector: armed buy price {} for itemId {}", auto, itemId);
+		}
+		if (panel != null && panel.isPremium())
+		{
+			if (auto <= 0)
+			{
+				// No cached rec yet — the rec-prices fetcher's completion callback
+				// re-arms via armBuyPriceIfStillRelevant.
+				getRecommendedPrices(itemId);
+			}
+		}
+		else
+		{
+			refreshFreeLiveBuy(itemId);
+		}
+	}
+
+	/**
+	 * Click-time freshness for the FREE-tier buy auto-fill: fetches the live
+	 * market buy from /v2/item and re-arms {@code pendingGeInputPrice} if the
+	 * buy setup still shows the same item. Mirrors {@link #refreshFreeLiveSell}.
+	 */
+	private void refreshFreeLiveBuy(int itemId)
+	{
+		apiClient.fetchItemInsights(itemId, ins ->
+		{
+			if (ins == null || ins.current == null || ins.current.buyPrice <= 0)
+			{
+				return;
+			}
+			final long freshBuy = ins.current.buyPrice;
+			clientThread.invokeLater(() ->
+			{
+				Widget setup = client.getWidget(InterfaceID.GeOffers.SETUP);
+				if (!isBuySetupVisible(setup))
+				{
+					return;
+				}
+				if (resolveItemIdFromSetupWidget() != itemId)
+				{
+					return;
+				}
+				// Don't stomp a panel-queued buy that arrived meanwhile.
+				if (pendingGeSetPrice != -1 || pendingGeBuyItemId != -1)
+				{
+					return;
+				}
+				pendingGeInputPrice = freshBuy;
+			});
+		});
+	}
+
+	/**
 	 * Game-tick detector that auto-opens the Item tab for whatever item the
-	 * user has on the GE offer setup screen — both the buy flow (item picked
-	 * from search) and the sell flow (item clicked from the inventory side).
+	 * user has on a GE offer screen. Covers three entry points:
+	 * <ul>
+	 *   <li>the new-offer setup screen, buy flow (item picked from search),</li>
+	 *   <li>the new-offer setup screen, sell flow (item clicked from inventory),</li>
+	 *   <li>the existing-offer status screen ({@code GeOffers.DETAILS}) shown
+	 *       when the user clicks an already-placed buy or sell to review it.</li>
+	 * </ul>
 	 * Polled on the game tick rather than reacting to
 	 * {@code GE_OFFERS_SETUP_BUILD} for the same reliability reasons as
 	 * {@link #detectAndArmSellSetup}: the script fires multiple times for
 	 * buys and sometimes not at all for inventory-click sells, while the
-	 * setup widget itself is the ground truth.
+	 * widget state is the ground truth. The detail screen has no build script
+	 * at all, so polling is the only option there.
 	 *
 	 * Only fires while the plugin sidebar is actually visible — the point is
 	 * to enrich a panel the user is already looking at, not to yank the
-	 * sidebar open mid-trade. If the user opens the panel while the setup
-	 * screen is still up, the next tick picks it up.
+	 * sidebar open mid-trade. If the user opens the panel while a GE screen is
+	 * still up, the next tick picks it up.
 	 *
 	 * Idempotency: {@link #autoOpenInsightsItemId} latches the current item
 	 * so the user can navigate to another tab afterwards without the
-	 * detector dragging them back every tick. The latch clears when the
-	 * setup screen closes, letting the next offer re-trigger.
+	 * detector dragging them back every tick. The latch clears once both GE
+	 * offer screens are closed, letting the next offer re-trigger.
 	 *
 	 * Must run on the game thread.
 	 */
 	private void detectAutoOpenItemInsights()
 	{
-		Widget setup = client.getWidget(InterfaceID.GeOffers.SETUP);
-		if (setup == null || setup.isHidden())
+		Widget setup   = client.getWidget(InterfaceID.GeOffers.SETUP);
+		Widget details = client.getWidget(InterfaceID.GeOffers.DETAILS);
+		boolean setupOpen   = setup   != null && !setup.isHidden();
+		boolean detailsOpen = details != null && !details.isHidden();
+
+		if (!setupOpen && !detailsOpen)
 		{
-			// Setup closed — reset latch so the next offer re-triggers.
+			// Both GE offer screens closed — reset latch so the next one re-fires.
 			autoOpenInsightsItemId = -1;
+			// Return the user to whatever tab they were on before the GE screen
+			// auto-switched them to the Item tab.
+			if (geAutoOpenedTab)
+			{
+				geAutoOpenedTab = false;
+				SwingUtilities.invokeLater(() -> panel.restoreTabAfterGeAutoOpen());
+			}
 			return;
 		}
 		if (!config.autoOpenItemTab() || !config.showInsights() || panel == null || !panel.isShowing())
 		{
 			return;
 		}
-		// Still picking an item — the setup screen renders "Choose an item..."
-		// until a search result (buy) or inventory item (sell) is actually
-		// selected. Firing before that resolves placeholder widget icons to
-		// bogus item ids and opens the tab mid-search. The rendered text is
-		// the same ground-truth approach as isSellSetupVisible.
-		if (widgetTreeHasText(setup, "choose an item"))
+
+		int itemId;
+		if (setupOpen)
 		{
-			return;
+			// Still picking an item — the setup screen renders "Choose an item..."
+			// until a search result (buy) or inventory item (sell) is actually
+			// selected. Firing before that resolves placeholder widget icons to
+			// bogus item ids and opens the tab mid-search. The rendered text is
+			// the same ground-truth approach as isSellSetupVisible.
+			if (widgetTreeHasText(setup, "choose an item"))
+			{
+				return;
+			}
+			itemId = resolveItemIdFromSetupWidget();
 		}
-		int itemId = resolveItemIdFromSetupWidget();
+		else
+		{
+			// Existing offer being reviewed — read the viewed slot's item from
+			// game state (the selected-slot varbit indexing the GE offer array)
+			// rather than scraping the detail widget tree.
+			itemId = resolveOfferStatusItemId();
+		}
+
 		if (itemId <= 0 || itemId == autoOpenInsightsItemId)
 		{
 			return;
@@ -1129,21 +1354,57 @@ public class O7FlipPlugin extends Plugin
 			return;
 		}
 		autoOpenInsightsItemId = itemId;
-		// The latch resets whenever the setup widget momentarily hides — e.g.
-		// the custom-price chatbox opening — so a still-open offer for the same
-		// item would otherwise re-resolve and re-open here every few ticks.
-		// Each re-open runs openInsights → a loading-state rebuild → fetch →
-		// render, which throws the user's scroll position back to the top
-		// mid-read. If the Item tab is already showing this exact item, the
-		// re-open is pure churn: skip it (latch is already set above so we
-		// won't reconsider until a different item appears).
+		// The latch resets whenever both GE screens close — and a screen can
+		// momentarily hide mid-interaction (e.g. the custom-price chatbox
+		// opening) — so a still-open offer for the same item would otherwise
+		// re-resolve and re-open here every few ticks. Each re-open runs
+		// openInsights → a loading-state rebuild → fetch → render, which throws
+		// the user's scroll position back to the top mid-read. If the Item tab
+		// is already showing this exact item, the re-open is pure churn: skip it
+		// (latch is already set above so we won't reconsider until a different
+		// item appears).
 		com.o7flip.model.ItemInsights shown = currentInsights;
 		if (shown != null && shown.itemId == itemId)
 		{
 			return;
 		}
-		log.debug("[07Flip] offer setup detected — auto-opening Item tab for {} ({})", name, itemId);
+		log.debug("[07Flip] GE offer screen detected — auto-opening Item tab for {} ({})", name, itemId);
+		// Remember the user's current tab the first time we hijack to Item this
+		// GE session, so we can restore it when the offer screen closes. Posted
+		// before openInsights so the capture reads the pre-switch tab.
+		if (!geAutoOpenedTab)
+		{
+			geAutoOpenedTab = true;
+			SwingUtilities.invokeLater(() -> panel.markGeAutoOpen());
+		}
 		openInsights(itemId, name);
+	}
+
+	/**
+	 * Item id of the existing GE offer the user is currently reviewing on the
+	 * {@code GeOffers.DETAILS} status screen. Reads {@code GE_SELECTEDSLOT}
+	 * (the slot index the detail view is showing) and indexes the live GE
+	 * offer array — authoritative game state, not widget-tree scraping.
+	 * Returns -1 when the slot is out of range or empty.
+	 */
+	private int resolveOfferStatusItemId()
+	{
+		int slot = client.getVarbitValue(VarbitID.GE_SELECTEDSLOT);
+		if (slot < 0)
+		{
+			return -1;
+		}
+		GrandExchangeOffer[] offers = client.getGrandExchangeOffers();
+		if (offers == null || slot >= offers.length)
+		{
+			return -1;
+		}
+		GrandExchangeOffer offer = offers[slot];
+		if (offer == null || offer.getState() == GrandExchangeOfferState.EMPTY)
+		{
+			return -1;
+		}
+		return offer.getItemId();
 	}
 
 	/**
@@ -1167,6 +1428,20 @@ public class O7FlipPlugin extends Plugin
 			return false;
 		}
 		return widgetTreeHasText(setup, "sell offer");
+	}
+
+	/**
+	 * Ground-truth check for "this setup screen is a buy offer, not a sell".
+	 * Inverse of {@link #isSellSetupVisible} — Jagex renders "Buy offer" at the
+	 * top-left of the buy setup screen where the sell screen shows "Sell offer".
+	 */
+	private static boolean isBuySetupVisible(Widget setup)
+	{
+		if (setup == null || setup.isHidden())
+		{
+			return false;
+		}
+		return widgetTreeHasText(setup, "buy offer");
 	}
 
 	/** Case-insensitive recursive text search over a widget's child tree. */
@@ -1280,12 +1555,26 @@ public class O7FlipPlugin extends Plugin
 				// Buy flow: only arm the highlight if the user actually selected the
 				// item we queued — otherwise the yellow highlight would show on any
 				// item they pick from search.
-				if (pendingGeSetItemId == -1 || currentItemId == pendingGeSetItemId)
+				//
+				// SETUP_BUILD fires several times per buy, and on the first fire(s)
+				// the searched-item varp and the setup widget are often not
+				// populated yet, so currentItemId resolves to <= 0. We must NOT
+				// consume the queued price until we have a real id to compare:
+				// the old code cleared it on every fire regardless, so whenever the
+				// id wasn't ready on the first fire the price was discarded before
+				// the fire that could have matched it — the auto-fill then silently
+				// did nothing ("sometimes works, sometimes doesn't"). Leave the
+				// queue armed until an id resolves; the sell branch below already
+				// works this way, which is why sells fill more reliably.
+				if (currentItemId > 0)
 				{
-					price = pendingGeSetPrice;
+					if (pendingGeSetItemId == -1 || currentItemId == pendingGeSetItemId)
+					{
+						price = pendingGeSetPrice;
+					}
+					pendingGeSetPrice  = -1;
+					pendingGeSetItemId = -1;
 				}
-				pendingGeSetPrice  = -1;
-				pendingGeSetItemId = -1;
 			}
 			else if (pendingGeSellItemId != -1)
 			{
@@ -1520,6 +1809,7 @@ public class O7FlipPlugin extends Plugin
 			case "showHighAlch":
 			case "showTeleTablets":
 			case "showScreeners":
+			case "showNews":
 			case "showMyFlips":
 			case "tabOrder":
 			case "topRowTabs":
@@ -3537,9 +3827,14 @@ public class O7FlipPlugin extends Plugin
 						{
 							recPriceCache.put(itemId, rp);
 							// Any fresh rec-price arrival is a chance to arm the
-							// implicit-sell auto-fill if the user is still on a
-							// matching sell setup. No-op otherwise.
-							clientThread.invokeLater(() -> armSellPriceIfStillRelevant(itemId));
+							// implicit auto-fill if the user is still on a matching
+							// setup. Each arm checks its own buy/sell screen type,
+							// so only the relevant one fires; both no-op otherwise.
+							clientThread.invokeLater(() ->
+							{
+								armSellPriceIfStillRelevant(itemId);
+								armBuyPriceIfStillRelevant(itemId);
+							});
 						}
 						recPriceFetchedAt.put(itemId, System.currentTimeMillis());
 					}
@@ -3565,7 +3860,11 @@ public class O7FlipPlugin extends Plugin
 							{
 								recPriceCache.put(itemId, rp);
 								recPriceFetchedAt.put(itemId, System.currentTimeMillis());
-								clientThread.invokeLater(() -> armSellPriceIfStillRelevant(itemId));
+								clientThread.invokeLater(() ->
+								{
+									armSellPriceIfStillRelevant(itemId);
+									armBuyPriceIfStillRelevant(itemId);
+								});
 							}
 						}), retryMs, TimeUnit.MILLISECONDS);
 					}
@@ -4294,6 +4593,9 @@ public class O7FlipPlugin extends Plugin
 				// (cheap: only the slow sections come back).
 				executor.execute(this::fetchSlow);
 				break;
+			case "News":
+				executor.execute(this::fetchNewsNow);
+				break;
 			// Favs + Screener have their own dedicated handlers below — keep
 			// them out of this switch so the throttle doesn't double-count.
 			default:
@@ -4313,6 +4615,88 @@ public class O7FlipPlugin extends Plugin
 			rebuildFavouriteIds(items);
 			SwingUtilities.invokeLater(() -> panel.updateFavourites(items));
 		}));
+	}
+
+	/** Fetches the news feed and pushes it to the News tab. Open to everyone. */
+	private void fetchNewsNow()
+	{
+		apiClient.fetchNews(news ->
+			SwingUtilities.invokeLater(() -> panel.updateNews(news)));
+	}
+
+	/** Watch tab selected — refresh the user's price alerts (auth required). */
+	void onWatchTabSelected()
+	{
+		if (!hasApiKey() || executor == null || executor.isShutdown())
+		{
+			return;
+		}
+		executor.execute(this::fetchPriceAlertsNow);
+	}
+
+	private void fetchPriceAlertsNow()
+	{
+		apiClient.fetchPriceAlerts(alerts ->
+			SwingUtilities.invokeLater(() -> panel.updatePriceAlerts(alerts)));
+	}
+
+	/**
+	 * Opens the "create price alert" dialog for an item (called from the Item
+	 * panel's button). Delegates to the panel where dialog UI lives; seeds the
+	 * target field with the current sell price as a sensible default.
+	 */
+	public void openPriceAlertDialog(int itemId, String name, long currentBuy, long currentSell)
+	{
+		SwingUtilities.invokeLater(() -> panel.openPriceAlertDialog(itemId, name, currentBuy, currentSell));
+	}
+
+	/**
+	 * Creates a price alert, then refreshes the Watch tab on success. Routed
+	 * through the executor (network) with the UI refresh on the EDT.
+	 */
+	public void createPriceAlert(int itemId, String side, String direction, long targetPrice, Runnable onDone, Runnable onError)
+	{
+		if (executor == null || executor.isShutdown())
+		{
+			return;
+		}
+		executor.execute(() -> apiClient.createPriceAlert(itemId, side, direction, targetPrice, ok ->
+			SwingUtilities.invokeLater(() ->
+			{
+				if (ok)
+				{
+					if (onDone != null)
+					{
+						onDone.run();
+					}
+					fetchPriceAlertsNow();
+				}
+				else if (onError != null)
+				{
+					onError.run();
+				}
+			})));
+	}
+
+	/** Deletes a price alert by id, refreshing the Watch tab on success. */
+	public void deletePriceAlert(String id, Runnable onError)
+	{
+		if (executor == null || executor.isShutdown())
+		{
+			return;
+		}
+		executor.execute(() -> apiClient.deletePriceAlert(id, ok ->
+			SwingUtilities.invokeLater(() ->
+			{
+				if (ok)
+				{
+					fetchPriceAlertsNow();
+				}
+				else if (onError != null)
+				{
+					onError.run();
+				}
+			})));
 	}
 
 	// -------------------------------------------------------------------------
