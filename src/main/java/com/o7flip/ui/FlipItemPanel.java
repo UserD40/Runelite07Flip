@@ -55,6 +55,15 @@ public class FlipItemPanel extends JPanel
 
 	public FlipItemPanel(FlipItem flip, ItemManager itemManager, boolean odd, O7FlipPlugin plugin)
 	{
+		this(flip, itemManager, odd, plugin, false);
+	}
+
+	/**
+	 * @param favouritesRow when true, the top-right score chip is replaced with
+	 *                      a "remove from favourites" icon (Favs tab only).
+	 */
+	public FlipItemPanel(FlipItem flip, ItemManager itemManager, boolean odd, O7FlipPlugin plugin, boolean favouritesRow)
+	{
 		Color bg = odd ? ODD_BG : ColorScheme.DARK_GRAY_COLOR;
 
 		// 07Flip's rec_buy / rec_sell prices are the patient-flipper p10/p90
@@ -78,30 +87,36 @@ public class FlipItemPanel extends JPanel
 		nameLabel.setFont(Fonts.BOLD);
 		nameLabel.setForeground(Color.WHITE);
 
-		// Always render a score chip so the right edge of every row aligns —
-		// even when the server returns null (insufficient trade data). Null
-		// renders as a muted dash; the tooltip explains why.
-		JLabel scoreLabel;
-		if (flip.flip07Score != null)
+		// Top-right chip = the 07Flip score (muted dash when the server has no
+		// score). Favourites rows show NO right-side chip — reordering and
+		// removal live in the favourites reorder popup, not per-card.
+		JLabel scoreLabel = null;
+		if (!favouritesRow)
 		{
-			int s = flip.flip07Score;
-			String scoreColor = s >= 70 ? "#00C27A" : (s >= 40 ? "#E8A838" : "#E85050");
-			scoreLabel = new JLabel("<html><font color='" + scoreColor + "'>" + s + "</font></html>");
-			scoreLabel.setFont(Fonts.BOLD);
-			scoreLabel.setToolTipText("07Flip merch algorithm score (0–100)");
-		}
-		else
-		{
-			scoreLabel = new JLabel("—");
-			scoreLabel.setFont(Fonts.BOLD);
-			scoreLabel.setForeground(new Color(0xAAAAAA));
-			scoreLabel.setToolTipText("07Flip merch algorithm score — unavailable for this item right now (insufficient recent trade data).");
+			if (flip.flip07Score != null)
+			{
+				int s = flip.flip07Score;
+				String scoreColor = s >= 70 ? "#00C27A" : (s >= 40 ? "#E8A838" : "#E85050");
+				scoreLabel = new JLabel("<html><font color='" + scoreColor + "'>" + s + "</font></html>");
+				scoreLabel.setFont(Fonts.BOLD);
+				scoreLabel.setToolTipText("07Flip merch algorithm score (0–100)");
+			}
+			else
+			{
+				scoreLabel = new JLabel("—");
+				scoreLabel.setFont(Fonts.BOLD);
+				scoreLabel.setForeground(new Color(0xAAAAAA));
+				scoreLabel.setToolTipText("07Flip merch algorithm score — unavailable for this item right now (insufficient recent trade data).");
+			}
 		}
 
 		JPanel nameRow = new JPanel(new BorderLayout(6, 0));
 		nameRow.setBackground(bg);
-		nameRow.add(nameLabel,  BorderLayout.CENTER);
-		nameRow.add(scoreLabel, BorderLayout.EAST);
+		nameRow.add(nameLabel, BorderLayout.CENTER);
+		if (scoreLabel != null)
+		{
+			nameRow.add(scoreLabel, BorderLayout.EAST);
+		}
 
 		// ── BUY (red) ─────────────────────────────────────────────────────────
 		String buyHtml = "<html><b>Buy:</b>  " + formatGpCompact(flip.buyPrice);
@@ -171,9 +186,15 @@ public class FlipItemPanel extends JPanel
 		// truncates regardless of price magnitude.
 		// Profit only — limit lives in its own label below so it can carry
 		// its own '4-hour buy limit' tooltip.
-		JLabel profitLabel = new JLabel("<html><font color='#00C27A'>+" + formatGpCompact(flip.profit) + "</font></html>");
+		// formatGpCompact already carries the minus sign for negatives, so only
+		// prepend "+" for non-negative values (avoids the "+-97" double sign),
+		// and colour red when the margin is negative.
+		String profitColor = flip.profit >= 0 ? "#00C27A" : "#E85050";
+		String profitSign  = flip.profit >= 0 ? "+" : "";
+		JLabel profitLabel = new JLabel("<html><font color='" + profitColor + "'>"
+			+ profitSign + formatGpCompact(flip.profit) + "</font></html>");
 		profitLabel.setFont(Fonts.SM);
-		profitLabel.setForeground(GREEN);
+		profitLabel.setForeground(flip.profit >= 0 ? GREEN : new Color(0xE85050));
 
 		StringBuilder tip = new StringBuilder("<html><b>");
 		tip.append(escapeHtml(flip.name)).append("</b><br>");

@@ -97,6 +97,15 @@ public class InsightsPanel extends JPanel
 	private int     currentItemId;
 	private String  currentItemName;
 	private JLabel  starLabel;
+	private JLabel  lockLabel;
+	// Ticks the header cooldown bar while the shown item is on a buy-limit cooldown.
+	private javax.swing.Timer headerCooldownTimer;
+
+	// Action-row chip colours.
+	private static final Color CHIP_BG    = new Color(0x2A2A2A);
+	private static final Color CHIP_HOVER = new Color(0x3C3C3C);
+	// Amber used for the recommended Buy/Sell when the price is locked/frozen.
+	private static final Color FROZEN_COL = new Color(0xFFC845);
 
 	public InsightsPanel(ItemManager itemManager)
 	{
@@ -114,7 +123,9 @@ public class InsightsPanel extends JPanel
 		this.plugin      = plugin;
 		this.config      = config;
 		setLayout(new BoxLayout(this, BoxLayout.Y_AXIS));
-		setBackground(ColorScheme.DARK_GRAY_COLOR);
+		// Match the section background so the gaps between sections read as a
+		// single clean panel rather than lighter-grey bands.
+		setBackground(SECTION_BG);
 		setBorder(new EmptyBorder(8, 0, 8, 0));
 		// Stretch fully within the parent listPanel — otherwise the InsightsPanel
 		// takes its preferred width (which is the widest child's preferred width)
@@ -335,7 +346,7 @@ public class InsightsPanel extends JPanel
 		lastShown = null;
 		// No price data during loading — pass 0 so the header skips the
 		// right-click "queue GE buy" wire-up until the real insights land.
-		add(buildHeader(itemId, fallbackName != null ? fallbackName : "Item " + itemId, false, 0, null, null, 0L));
+		add(buildHeader(itemId, fallbackName != null ? fallbackName : "Item " + itemId, false, 0, null, null, null, 0L));
 		add(Box.createVerticalStrut(8));
 		add(centeredLabel("Loading…", ColorScheme.LIGHT_GRAY_COLOR, Fonts.SM));
 		revalidate();
@@ -380,40 +391,38 @@ public class InsightsPanel extends JPanel
 			headerBuyTarget = (ins.current.recBuy != null && ins.current.recBuy > 0)
 				? ins.current.recBuy : ins.current.buyPrice;
 		}
-		add(buildHeader(ins.itemId, ins.name, ins.members, ins.buyLimit, ins.highAlch, ins.lowAlch, headerBuyTarget));
-		add(Box.createVerticalStrut(8));
+		add(buildHeader(ins.itemId, ins.name, ins.members, ins.buyLimit, ins.highAlch, ins.lowAlch,
+			ins.volume != null ? Integer.valueOf(ins.volume.daily) : null, headerBuyTarget));
+		add(Box.createVerticalStrut(4));
 
-		// Per-item "Set price alert" action — only when a key is present (the
-		// alert is account-scoped on the server). Hidden for keyless users.
-		if (plugin != null && plugin.hasApiKeyPublic())
-		{
-			add(buildAlertButton(ins));
-			add(Box.createVerticalStrut(8));
-		}
+		// Visible action row — autofill / alert / lock / web — so these aren't
+		// shortcut-only. Sits directly below the item header.
+		add(buildActionRow(ins, headerBuyTarget));
+		add(sectionDivider());
 
 		if (sectionVisible(O7FlipConfig::itemTabLivePrices))
 		{
 			add(buildLivePrices(ins));
-			add(Box.createVerticalStrut(8));
+			add(sectionDivider());
 		}
 
 		if (sectionVisible(O7FlipConfig::itemTabChart))
 		{
 			add(buildChartSection(ins));
-			add(Box.createVerticalStrut(8));
+			add(sectionDivider());
 		}
 
 		// Range data is served to free users too, so it lives in the open block.
 		if (sectionVisible(O7FlipConfig::itemTabPriceRange))
 		{
 			add(buildRanges(ins));
-			add(Box.createVerticalStrut(8));
+			add(sectionDivider());
 		}
 
 		if (sectionVisible(O7FlipConfig::itemTabVolume))
 		{
 			add(buildVolume(ins));
-			add(Box.createVerticalStrut(8));
+			add(sectionDivider());
 		}
 
 		// Premium-only sections sit between the open block and Alerts so the
@@ -426,44 +435,44 @@ public class InsightsPanel extends JPanel
 			if (sectionVisible(O7FlipConfig::itemTabRecommended))
 			{
 				add(build07FlipPrices(ins));
-				add(Box.createVerticalStrut(8));
+				add(sectionDivider());
 			}
 			if (sectionVisible(O7FlipConfig::itemTabScore))
 			{
 				add(buildScore(ins));
-				add(Box.createVerticalStrut(8));
+				add(sectionDivider());
 			}
 			if (ins.indicators != null && sectionVisible(O7FlipConfig::itemTabIndicators))
 			{
 				add(buildIndicators(ins.indicators));
-				add(Box.createVerticalStrut(8));
+				add(sectionDivider());
 			}
 			if (ins.quality != null && sectionVisible(O7FlipConfig::itemTabQuality))
 			{
 				add(buildQuality(ins.quality));
-				add(Box.createVerticalStrut(8));
+				add(sectionDivider());
 			}
 			if (ins.liquidity != null && sectionVisible(O7FlipConfig::itemTabLiquidity))
 			{
 				add(buildLiquidity(ins.liquidity));
-				add(Box.createVerticalStrut(8));
+				add(sectionDivider());
 			}
 			if (ins.risk != null && sectionVisible(O7FlipConfig::itemTabRisk))
 			{
 				add(buildRisk(ins.risk));
-				add(Box.createVerticalStrut(8));
+				add(sectionDivider());
 			}
 			if (ins.projection != null && sectionVisible(O7FlipConfig::itemTabProjection))
 			{
 				add(buildProjection(ins.projection));
-				add(Box.createVerticalStrut(8));
+				add(sectionDivider());
 			}
 		}
 
 		if (sectionVisible(O7FlipConfig::itemTabAlerts))
 		{
 			add(buildAlerts(ins));
-			add(Box.createVerticalStrut(8));
+			add(sectionDivider());
 		}
 
 		// Single consolidated upsell card for free users — replaces the four
@@ -586,44 +595,221 @@ public class InsightsPanel extends JPanel
 		}
 	}
 
-	/** Slim "Set price alert" button row — opens the create dialog for this item. */
-	private JPanel buildAlertButton(ItemInsights ins)
+	/**
+	 * Visible per-item action row shown under the header: autofill (queue GE
+	 * buy), price alert, favourite, lock, and open-on-web — so these actions
+	 * aren't shortcut/right-click only. Each is an icon chip with a tooltip;
+	 * actions needing an API key (favourite, alert) or premium rec prices
+	 * (lock) render greyed-out with an explanatory tooltip when unavailable.
+	 */
+	private JPanel buildActionRow(ItemInsights ins, long buyTarget)
 	{
-		JPanel wrap = new JPanel(new BorderLayout());
-		wrap.setBackground(SECTION_BG);
-		wrap.setBorder(new EmptyBorder(0, 10, 0, 10));
-		wrap.setAlignmentX(Component.LEFT_ALIGNMENT);
-		wrap.setMaximumSize(new Dimension(Integer.MAX_VALUE, 32));
-
-		JButton btn = new JButton("🔔 Set price alert");
-		btn.setFont(Fonts.SM_BOLD);
-		btn.setForeground(Color.WHITE);
-		btn.setBackground(new Color(0x2A2A2A));
-		btn.setFocusPainted(false);
-		btn.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
-		btn.setBorder(BorderFactory.createCompoundBorder(
-			BorderFactory.createLineBorder(new Color(0x555555), 1),
-			new EmptyBorder(5, 12, 5, 12)));
+		// GridLayout spreads the icons evenly across the full row width instead
+		// of clustering them on the left.
+		JPanel row = new JPanel(new java.awt.GridLayout(1, 0, 2, 0));
+		row.setBackground(SECTION_BG);
+		row.setBorder(new EmptyBorder(2, 6, 2, 6));
+		row.setAlignmentX(Component.LEFT_ALIGNMENT);
+		row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 38));
 
 		final int itemId  = ins.itemId;
 		final String name = ins.name;
+		final boolean hasKey = plugin != null && plugin.hasApiKeyPublic();
+
+		// Autofill — queue a GE buy at the recommended (or live) buy price.
+		boolean canAutofill = plugin != null && buyTarget > 0;
+		row.add(actionChip("💰", canAutofill
+				? "Autofill — queue a GE buy at the recommended price"
+				: "Autofill unavailable — no buy price for this item",
+			canAutofill, () -> plugin.queueGeBuy(itemId, buyTarget, name)));
+
+		// Price alert — opens the create dialog.
 		final long buy  = ins.current != null ? ins.current.buyPrice  : 0L;
 		final long sell = ins.current != null ? ins.current.sellPrice : 0L;
-		btn.addActionListener(e ->
+		row.add(actionChip("🔔", hasKey
+				? "Set a price alert for this item"
+				: "Add your 07flip.com API key to use price alerts",
+			hasKey && plugin != null, () -> plugin.openPriceAlertDialog(itemId, name, buy, sell)));
+
+		// Favourite lives back on the header star (top-right), not here.
+
+		// Lock — pin the recommended sell price. Needs a key + rec prices.
+		final boolean lockable = hasKey && ins.current != null
+			&& ins.current.recSell != null && ins.current.recSell > 0;
+		final Long recBuy  = ins.current != null ? ins.current.recBuy  : null;
+		final Long recSell = ins.current != null ? ins.current.recSell : null;
+		lockLabel = newStateChip();
+		paintLock(lockable);
+		if (lockable)
 		{
-			if (plugin != null)
+			lockLabel.addMouseListener(new MouseAdapter()
 			{
-				plugin.openPriceAlertDialog(itemId, name, buy, sell);
+				@Override
+				public void mouseClicked(MouseEvent e)
+				{
+					if (plugin == null)
+					{
+						return;
+					}
+					if (plugin.isPriceLocked(itemId))
+					{
+						plugin.unlockPrice(itemId);
+					}
+					else
+					{
+						plugin.lockPrice(itemId, recBuy, recSell);
+					}
+					// Re-render so the 07Flip recommended prices recolour (amber
+					// when frozen) and the lock icon updates. Same-item re-render
+					// keeps scroll + chart period.
+					if (lastShown != null)
+					{
+						show(lastShown);
+					}
+					else
+					{
+						paintLock(true);
+					}
+					e.consume();
+				}
+			});
+		}
+		row.add(lockLabel);
+
+		// Open on 07flip.com.
+		row.add(actionChip("🌐", "Open this item on 07flip.com", true,
+			() -> net.runelite.client.util.LinkBrowser.browse("https://07flip.com/item/" + itemId)));
+
+		return row;
+	}
+
+	/** A stateless icon-button chip with a hover highlight + tooltip. */
+	private JLabel actionChip(String glyph, String tooltip, boolean enabled, Runnable onClick)
+	{
+		JLabel l = newStateChip();
+		l.setText(glyph);
+		l.setToolTipText(tooltip);
+		if (!enabled)
+		{
+			l.setForeground(new Color(0x555555));
+			l.setCursor(Cursor.getDefaultCursor());
+			return l;
+		}
+		l.setForeground(Color.WHITE);
+		l.addMouseListener(new MouseAdapter()
+		{
+			@Override
+			public void mouseClicked(MouseEvent e)
+			{
+				if (onClick != null)
+				{
+					onClick.run();
+				}
+				e.consume();
 			}
 		});
+		return l;
+	}
 
-		wrap.add(btn, BorderLayout.CENTER);
-		return wrap;
+	/** Bare chip styling shared by all action chips — transparent so it blends
+	 *  into the panel, with a highlight only on hover. */
+	private JLabel newStateChip()
+	{
+		JLabel l = new JLabel("", SwingConstants.CENTER);
+		l.setFont(l.getFont().deriveFont(15f));
+		l.setOpaque(false);
+		l.setBackground(CHIP_HOVER);
+		l.setForeground(Color.WHITE);
+		l.setBorder(new EmptyBorder(4, 9, 4, 9));
+		l.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+		ClickRouter.markNoRoute(l);
+		l.addMouseListener(new MouseAdapter()
+		{
+			@Override
+			public void mouseEntered(MouseEvent e)
+			{
+				l.setOpaque(true);
+				l.repaint();
+			}
+			@Override
+			public void mouseExited(MouseEvent e)
+			{
+				l.setOpaque(false);
+				l.repaint();
+			}
+		});
+		return l;
+	}
+
+	/** Paints the lock chip from current freeze state (or greyed when not lockable). */
+	private void paintLock(boolean lockable)
+	{
+		if (lockLabel == null)
+		{
+			return;
+		}
+		if (!lockable)
+		{
+			lockLabel.setText("🔒");
+			lockLabel.setForeground(new Color(0x555555));
+			lockLabel.setCursor(Cursor.getDefaultCursor());
+			lockLabel.setToolTipText("Lock pins the 07Flip recommended sell price (premium).");
+			return;
+		}
+		boolean locked = plugin != null && plugin.isPriceLocked(currentItemId);
+		lockLabel.setText(locked ? "🔒" : "🔓");
+		lockLabel.setForeground(locked ? new Color(0xFFC845) : new Color(0xAAAAAA));
+		lockLabel.setToolTipText(locked
+			? "Price locked — click to unlock."
+			: "Click to lock the recommended sell price.");
 	}
 
 	// ── Sections ────────────────────────────────────────────────────────────
 
-	private JPanel buildHeader(int itemId, String name, boolean members, int buyLimit, Integer highAlch, Integer lowAlch, long buyTarget)
+	/**
+	 * Keeps the header cooldown bar ticking each second. When the cooldown
+	 * finishes it stops itself and re-renders so the header reverts to the
+	 * normal "Limit · /day" subtitle.
+	 */
+	private void startHeaderCooldownTimer()
+	{
+		if (headerCooldownTimer == null)
+		{
+			headerCooldownTimer = new javax.swing.Timer(1000, e ->
+			{
+				if (currentItemId > 0 && plugin != null && plugin.buyLimitCooldownMs(currentItemId) > 0)
+				{
+					repaint();
+				}
+				else
+				{
+					headerCooldownTimer.stop();
+					if (lastShown != null && !inEmptyState && !inFailedState)
+					{
+						show(lastShown);
+					}
+				}
+			});
+			headerCooldownTimer.setRepeats(true);
+		}
+		if (!headerCooldownTimer.isRunning())
+		{
+			headerCooldownTimer.start();
+		}
+	}
+
+	/** A 1px hairline between sections — clean separation without a grey gap. */
+	private java.awt.Component sectionDivider()
+	{
+		JPanel d = new JPanel();
+		d.setBackground(new Color(0x2A2A2A));
+		d.setAlignmentX(Component.LEFT_ALIGNMENT);
+		d.setPreferredSize(new Dimension(0, 1));
+		d.setMaximumSize(new Dimension(Integer.MAX_VALUE, 1));
+		return d;
+	}
+
+	private JPanel buildHeader(int itemId, String name, boolean members, int buyLimit, Integer highAlch, Integer lowAlch, Integer dailyVolume, long buyTarget)
 	{
 		// Remember what we're rendering so refreshFavouriteState() can find
 		// the right item when the plugin pings us.
@@ -642,34 +828,61 @@ public class InsightsPanel extends JPanel
 		nameLabel.setFont(Fonts.BOLD);
 		nameLabel.setForeground(Color.WHITE);
 
+		// Trade-relevant glance: buy limit (position cap per 4h) + daily volume
+		// (liquidity). The old Members / Alch line was low-value for flipping
+		// and overflowed the narrow header. Members / F2P is the fallback when
+		// neither number is known (e.g. the loading state).
 		StringBuilder sub = new StringBuilder();
-		sub.append(members ? "Members" : "F2P");
 		if (buyLimit > 0)
 		{
-			sub.append(" · Buy limit ").append(buyLimit);
+			sub.append("Limit ").append(buyLimit);
 		}
-		if (highAlch != null && highAlch > 0)
+		if (dailyVolume != null && dailyVolume > 0)
 		{
-			sub.append(" · Alch ").append(FlipItemPanel.formatGpCompact(highAlch));
+			if (sub.length() > 0)
+			{
+				sub.append("  ·  ");
+			}
+			sub.append(FlipItemPanel.formatGpCompact(dailyVolume)).append("/day");
+		}
+		if (sub.length() == 0)
+		{
+			sub.append(members ? "Members" : "F2P");
 		}
 		JLabel subLabel = new JLabel(sub.toString());
 		subLabel.setFont(Fonts.SM);
 		subLabel.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
+		subLabel.setToolTipText("Buy limit per 4h · daily trade volume");
 
 		JPanel text = new JPanel();
 		text.setLayout(new BoxLayout(text, BoxLayout.Y_AXIS));
 		text.setBackground(SECTION_BG);
 		text.add(nameLabel);
 		text.add(Box.createVerticalStrut(2));
-		text.add(subLabel);
+		// When the item is on a buy-limit cooldown, the subtitle row becomes the
+		// live cooldown bar instead of "Limit · /day".
+		boolean onCooldown = plugin != null && plugin.buyLimitCooldownMs(itemId) > 0;
+		if (onCooldown)
+		{
+			BuyLimitBar bar = new BuyLimitBar(plugin, itemId);
+			bar.setAlignmentX(Component.LEFT_ALIGNMENT);
+			text.add(bar);
+			startHeaderCooldownTimer();
+		}
+		else
+		{
+			text.add(subLabel);
+			if (headerCooldownTimer != null)
+			{
+				headerCooldownTimer.stop();
+			}
+		}
 
-		// ── Star toggle (right edge) ─────────────────────────────────────────
+		// ── Favourite star (right edge) ──────────────────────────────────────
 		starLabel = new JLabel();
 		starLabel.setFont(starLabel.getFont().deriveFont(20f));
 		starLabel.setBorder(new EmptyBorder(0, 8, 0, 0));
 		starLabel.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
-		// Favourite toggle owns its clicks — keep the tree router off it so a
-		// star click doesn't also schedule an openInsights reload.
 		ClickRouter.markNoRoute(starLabel);
 		paintStar();
 		starLabel.addMouseListener(new MouseAdapter()
@@ -688,7 +901,7 @@ public class InsightsPanel extends JPanel
 		// Right-click the header → queue a GE buy at the low buy-side price,
 		// same gesture as the Flips/search rows. Swing doesn't bubble mouse
 		// events, so the handler is attached to the header panel and each of
-		// its non-star children (the star keeps its own click-to-favourite).
+		// its children.
 		if (plugin != null && buyTarget > 0)
 		{
 			MouseAdapter rightClickQueueBuy = new MouseAdapter()
@@ -794,6 +1007,21 @@ public class InsightsPanel extends JPanel
 	private JPanel build07FlipPrices(ItemInsights ins)
 	{
 		// Premium-only — show called only when ins.premiumLocked is false.
+		// When the price is locked, show the ACTUAL frozen buy/sell pair (the
+		// margin you locked in), in amber — not the live rec relabelled. This
+		// is the same pair the GE auto-fill targets, so the two never disagree.
+		boolean locked = plugin != null && plugin.isPriceLocked(ins.itemId);
+		Long frozenBuy  = locked && plugin != null ? plugin.getFrozenBuy(ins.itemId)  : null;
+		Long frozenSell = locked && plugin != null ? plugin.getFrozenSell(ins.itemId) : null;
+		if (locked && frozenBuy != null && frozenBuy > 0 && frozenSell != null && frozenSell > 0)
+		{
+			JPanel panel = sectionPanel("07Flip recommended (locked)");
+			long fProfit = Math.round(frozenSell * 0.98) - frozenBuy;   // after ~2% GE tax
+			panel.add(rowGp("Buy",    frozenBuy,  "frozen", FROZEN_COL));
+			panel.add(rowGp("Sell",   frozenSell, "frozen", FROZEN_COL));
+			panel.add(rowGp("Profit", fProfit,    null,     margingColor(fProfit)));
+			return panel;
+		}
 		JPanel panel = sectionPanel("07Flip recommended");
 		ItemInsights.Current c = ins.current;
 		if (c == null || c.recBuy == null)

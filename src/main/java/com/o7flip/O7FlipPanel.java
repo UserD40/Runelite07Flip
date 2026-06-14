@@ -339,6 +339,10 @@ public class O7FlipPanel extends PluginPanel
 	private List<com.o7flip.model.HighAlchItem> allHighAlch = new ArrayList<>();
 	private List<com.o7flip.model.TeleTablet>   allTablets  = new ArrayList<>();
 	private List<FlipItem>    allFavourites = new ArrayList<>();
+	// Favourites local sort: 0 Default · 1 Margin · 2 Profit · 3 Available (buy-limit).
+	private JButton[] favouritesSortBtns;
+	private int favouritesSortIdx = 0;
+	private javax.swing.Timer favCooldownTimer;
 	private com.o7flip.model.ScreenerPreset.Bundle screenersBundle = new com.o7flip.model.ScreenerPreset.Bundle();
 	private List<AlertItem>   allAlerts  = new ArrayList<>();
 	private List<TradeRecord> allMyFlips = new ArrayList<>();
@@ -1070,6 +1074,49 @@ public class O7FlipPanel extends PluginPanel
 		}
 	}
 
+	/** Optimistically inserts a just-favourited row at the top (dedup by id). */
+	public void addFavouriteRow(FlipItem item)
+	{
+		if (item == null || item.itemId <= 0)
+		{
+			return;
+		}
+		for (FlipItem f : allFavourites)
+		{
+			if (f.itemId == item.itemId)
+			{
+				return;   // already shown
+			}
+		}
+		List<FlipItem> updated = new ArrayList<>();
+		updated.add(item);
+		updated.addAll(allFavourites);
+		allFavourites = updated;
+		renderFavourites(filtered());
+	}
+
+	/** Optimistically drops an unfavourited row by id. */
+	public void removeFavouriteRow(int itemId)
+	{
+		List<FlipItem> updated = new ArrayList<>();
+		boolean found = false;
+		for (FlipItem f : allFavourites)
+		{
+			if (f.itemId == itemId)
+			{
+				found = true;
+				continue;
+			}
+			updated.add(f);
+		}
+		if (!found)
+		{
+			return;
+		}
+		allFavourites = updated;
+		renderFavourites(filtered());
+	}
+
 	/**
 	 * Called by the plugin after an optimistic favourite toggle. Repaints
 	 * any visible star icon so the user sees the new state immediately.
@@ -1255,9 +1302,115 @@ public class O7FlipPanel extends PluginPanel
 		// because they sit above the current cash stack reads as data loss
 		// (the panel showed "No favourites yet" to an account with favourites
 		// and got diagnosed as a server bug). Search still applies.
-		return allFavourites.stream()
+		List<FlipItem> list = allFavourites.stream()
 			.filter(i -> q.isEmpty() || matches(i.name, q))
 			.collect(Collectors.toList());
+		sortFavourites(list);
+		return list;
+	}
+
+	/** Applies the selected local sort to the favourites list. */
+	private void sortFavourites(List<FlipItem> list)
+	{
+		switch (favouritesSortIdx)
+		{
+			case 1: // Margin — the market margin shown on each card, highest first
+				list.sort((a, b) -> Long.compare(b.profit, a.profit));
+				break;
+			case 2: // Available — items on cooldown first (soonest to free up), then the rest
+				if (plugin != null)
+				{
+					list.sort((a, b) ->
+					{
+						long ca = plugin.buyLimitCooldownMs(a.itemId);
+						long cb = plugin.buyLimitCooldownMs(b.itemId);
+						if (ca > 0 && cb > 0) return Long.compare(ca, cb);
+						if (ca > 0) return -1;
+						if (cb > 0) return 1;
+						return 0;
+					});
+				}
+				break;
+			default: // Default — the user's saved manual order (else natural order)
+				applyManualOrder(list);
+				break;
+		}
+	}
+
+	/** Sorts the list by the saved manual favourites order; unordered items keep their place at the end. */
+	private void applyManualOrder(List<FlipItem> list)
+	{
+		if (plugin == null)
+		{
+			return;
+		}
+		List<Integer> order = plugin.getFavouritesOrder();
+		if (order.isEmpty())
+		{
+			return;
+		}
+		java.util.Map<Integer, Integer> rank = new java.util.HashMap<>();
+		for (int i = 0; i < order.size(); i++)
+		{
+			rank.put(order.get(i), i);
+		}
+		list.sort((a, b) -> Integer.compare(
+			rank.getOrDefault(a.itemId, Integer.MAX_VALUE),
+			rank.getOrDefault(b.itemId, Integer.MAX_VALUE)));
+	}
+
+	/** All favourites in manual order — the list shown by the reorder popup. */
+	private List<FlipItem> favouritesForReorder()
+	{
+		List<FlipItem> list = new ArrayList<>(allFavourites);
+		applyManualOrder(list);
+		return list;
+	}
+
+	/** Applies the reorder popup's result: persist the order, drop removed items. */
+	private void applyFavouritesOrder(List<Integer> keptIds)
+	{
+		if (keptIds == null)
+		{
+			return;
+		}
+		java.util.Set<Integer> keptSet = new java.util.HashSet<>(keptIds);
+		// Unfavourite anything the user removed in the popup (server + star).
+		if (plugin != null)
+		{
+			for (FlipItem f : new ArrayList<>(allFavourites))
+			{
+				if (!keptSet.contains(f.itemId))
+				{
+					plugin.unfavouriteForReorder(f.itemId);
+				}
+			}
+			plugin.setFavouritesOrder(keptIds);
+		}
+		// Drop removed items from the local list immediately.
+		List<FlipItem> kept = new ArrayList<>();
+		for (FlipItem f : allFavourites)
+		{
+			if (keptSet.contains(f.itemId))
+			{
+				kept.add(f);
+			}
+		}
+		allFavourites = kept;
+		// Show the manual order.
+		favouritesSortIdx = 0;
+		if (favouritesSortBtns != null)
+		{
+			for (int i = 0; i < favouritesSortBtns.length; i++)
+			{
+				applySortStyle(favouritesSortBtns[i], i == 0);
+			}
+		}
+		renderFavourites(filtered());
+		if (insightsPanel != null)
+		{
+			insightsPanel.refreshFavouriteState();
+		}
 	}
 
 	private List<BarrowsSet> fBarrows(String q)
@@ -1590,15 +1743,60 @@ public class O7FlipPanel extends PluginPanel
 			}
 			else
 			{
+				boolean available = favouritesSortIdx == 2;
 				for (int i = 0; i < shown.size(); i++)
 				{
-					favouritesListPanel.add(new FlipItemPanel(shown.get(i), itemManager, i % 2 != 0, plugin));
+					FlipItem item = shown.get(i);
+					favouritesListPanel.add(new FlipItemPanel(item, itemManager, i % 2 != 0, plugin, true));
+					// In Available mode, show a live buy-limit countdown bar under
+					// any item the user has maxed out this 4h window.
+					if (available && plugin != null && plugin.buyLimitCooldownMs(item.itemId) > 0)
+					{
+						favouritesListPanel.add(new com.o7flip.ui.BuyLimitBar(plugin, item.itemId));
+					}
 					favouritesListPanel.add(sep());
 				}
 			}
 		}
 		favouritesListPanel.revalidate();
 		favouritesListPanel.repaint();
+		updateFavCooldownTimer();
+	}
+
+	/**
+	 * Runs a 1-second repaint timer while the Available sort is active and the
+	 * Favs list is visible, so the buy-limit countdown bars tick live. Stops
+	 * itself when the user leaves Available mode or the tab.
+	 */
+	private void updateFavCooldownTimer()
+	{
+		boolean want = favouritesSortIdx == 2 && favouritesListPanel != null;
+		if (want)
+		{
+			if (favCooldownTimer == null)
+			{
+				favCooldownTimer = new javax.swing.Timer(1000, e ->
+				{
+					if (favouritesSortIdx == 2 && favouritesListPanel != null && favouritesListPanel.isShowing())
+					{
+						favouritesListPanel.repaint();
+					}
+					else if (favCooldownTimer != null)
+					{
+						favCooldownTimer.stop();
+					}
+				});
+				favCooldownTimer.setRepeats(true);
+			}
+			if (!favCooldownTimer.isRunning())
+			{
+				favCooldownTimer.start();
+			}
+		}
+		else if (favCooldownTimer != null && favCooldownTimer.isRunning())
+		{
+			favCooldownTimer.stop();
+		}
 	}
 
 	private void renderScreeners()
@@ -5336,7 +5534,32 @@ public class O7FlipPanel extends PluginPanel
 	private JPanel buildFavouritesTab()
 	{
 		favouritesListPanel = listPanel();
-		return assembleTab(null, favouritesListPanel, null);
+		favouritesSortBtns = new JButton[3];
+		JPanel sortBar = buildSortBar(favouritesSortBtns,
+			new String[]{"Default", "Margin", "Available"},
+			() -> favouritesSortIdx,
+			i ->
+			{
+				favouritesSortIdx = i;
+				renderFavourites(filtered());
+			},
+			false);
+
+		// Reorder / remove popup entry point (burger).
+		JButton reorderBtn = pillButton("☰");
+		reorderBtn.setToolTipText("Reorder or remove favourites");
+		reorderBtn.addActionListener(e ->
+			com.o7flip.ui.FavouritesReorderDialog.show(this, favouritesForReorder(), this::applyFavouritesOrder));
+
+		JPanel topBar = new JPanel(new BorderLayout());
+		topBar.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+		topBar.add(sortBar, BorderLayout.CENTER);
+		JPanel reorderWrap = new JPanel(new FlowLayout(FlowLayout.RIGHT, 4, 4));
+		reorderWrap.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+		reorderWrap.add(reorderBtn);
+		topBar.add(reorderWrap, BorderLayout.EAST);
+
+		return assembleTab(topBar, favouritesListPanel, null);
 	}
 
 	/**

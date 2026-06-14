@@ -347,6 +347,10 @@ public class O7FlipPlugin extends Plugin
 	private final java.util.concurrent.ConcurrentHashMap<Integer, FrozenSell> frozenSellByItemId
 		= new java.util.concurrent.ConcurrentHashMap<>();
 
+	/** Frozen rec_buy per item — the locked entry price, paired with {@link #frozenSellByItemId}. */
+	private final java.util.concurrent.ConcurrentHashMap<Integer, Long> frozenBuyByItemId
+		= new java.util.concurrent.ConcurrentHashMap<>();
+
 	/**
 	 * Small immutable holder for a frozen sell-price + the moment it was
 	 * stamped. Stamps live in millis to match every other timestamp in this
@@ -363,6 +367,33 @@ public class O7FlipPlugin extends Plugin
 			this.frozenAtMillis = frozenAtMillis;
 		}
 	}
+
+	// -------------------------------------------------------------------------
+	// Buy-limit cooldown tracking (local). When the user buys an item's full
+	// 4-hour GE buy limit, we track when the rolling window started so the
+	// Favourites tab can show a "rebuy in HH:MM" countdown and notify on reset.
+	// -------------------------------------------------------------------------
+
+	/** 4-hour GE buy-limit window. */
+	private static final long BUY_LIMIT_WINDOW_MS = 4L * 60L * 60L * 1000L;
+	private static final String BUY_LIMIT_WINDOWS_KEY = "buyLimitWindows";
+	private static final String BUY_LIMITS_KEY = "buyLimitsByItem";
+
+	/** Per-item rolling buy window: when it started + how much was bought. */
+	private static final class BuyLimitWindow
+	{
+		long windowStartMs;
+		int  boughtQty;
+		boolean notified;   // "available again" toast already fired for this window
+	}
+
+	/** itemId → current window. Persisted so a restart mid-window keeps the timer. */
+	private final java.util.concurrent.ConcurrentHashMap<Integer, BuyLimitWindow> buyLimitWindows
+		= new java.util.concurrent.ConcurrentHashMap<>();
+
+	/** itemId → GE buy limit, learned opportunistically from any FlipItem/insights we see. */
+	private final java.util.concurrent.ConcurrentHashMap<Integer, Integer> buyLimitByItem
+		= new java.util.concurrent.ConcurrentHashMap<>();
 
 	private static final int MAX_TRADE_HISTORY = 200;
 	private static final String TRADE_HISTORY_KEY = "tradeHistory";
@@ -512,11 +543,11 @@ public class O7FlipPlugin extends Plugin
 	}
 
 	/**
-	 * Posts a price freeze for the given item using the best rec_buy / rec_sell
-	 * pair we have at hand. Tries the loaded Flips list first; if the item
-	 * isn't there, falls back to {@code /recommended-prices}. Best-effort —
-	 * any failure is logged at warn level by the API client. No-op when the
-	 * user has no API key (freeze is account-scoped).
+	 * Posts a price freeze for the given item using the /v2/item rec_buy /
+	 * rec_sell pair — the SAME source the Item panel and auto-fill use, so the
+	 * frozen margin matches everything else. Uses the cached insights when
+	 * available, else fetches /v2/item and freezes when it lands. Best-effort;
+	 * no-op when the user has no API key (freeze is account-scoped).
 	 */
 	private void freezeFromTrackedOrFetch(int itemId)
 	{
@@ -524,29 +555,36 @@ public class O7FlipPlugin extends Plugin
 		{
 			return;
 		}
-		executor.execute(() ->
+		// Synchronous cache reads first (open item, then overlay cache).
+		com.o7flip.model.ItemInsights cached = currentInsights;
+		if (!hasFreezableRec(cached, itemId))
 		{
-			for (FlipItem f : lastFlips)
+			cached = overlayInsightsCache.get(itemId);
+		}
+		if (hasFreezableRec(cached, itemId))
+		{
+			freezeAndCache(itemId, cached.current.recBuy, cached.current.recSell);
+			return;
+		}
+		// Cold cache — fetch /v2/item and freeze when it lands.
+		executor.execute(() -> apiClient.fetchItemInsights(itemId, ins ->
+		{
+			if (hasFreezableRec(ins, itemId))
 			{
-				if (f.itemId == itemId && f.recBuyPrice != null && f.recSellPrice != null)
-				{
-					freezeAndCache(itemId, f.recBuyPrice, f.recSellPrice);
-					return;
-				}
-			}
-			// Not in Flips list — try the cached /recommended-prices, which the
-			// GE overlay already populates on hover for arbitrary items. Triggers
-			// an async fetch if cold; we'll just miss the freeze for this attempt.
-			com.o7flip.model.RecommendedPrices rp = getRecommendedPrices(itemId);
-			if (rp != null && rp.recBuyPrice != null && rp.recSellPrice != null)
-			{
-				freezeAndCache(itemId, rp.recBuyPrice, rp.recSellPrice);
+				freezeAndCache(itemId, ins.current.recBuy, ins.current.recSell);
 			}
 			else
 			{
-				log.debug("[07Flip] Skipping freeze for item {} — no rec prices available", itemId);
+				log.debug("[07Flip] Skipping freeze for item {} — no /v2/item rec prices", itemId);
 			}
-		});
+		}));
+	}
+
+	private static boolean hasFreezableRec(com.o7flip.model.ItemInsights ins, int itemId)
+	{
+		return ins != null && ins.itemId == itemId && ins.current != null
+			&& ins.current.recBuy != null && ins.current.recBuy > 0
+			&& ins.current.recSell != null && ins.current.recSell > 0;
 	}
 
 	private void freezeAndCache(int itemId, long recBuy, long recSell)
@@ -556,7 +594,243 @@ public class O7FlipPlugin extends Plugin
 		// local cache stays — the next sell still gets the right number, and
 		// the server miss matters only across plugin restarts.
 		frozenSellByItemId.put(itemId, new FrozenSell(recSell, System.currentTimeMillis()));
+		frozenBuyByItemId.put(itemId, recBuy);
 		apiClient.postFreeze(itemId, recBuy, recSell, null);
+	}
+
+	/** Locally-cached frozen rec_buy (the entry the margin was locked against), or null. */
+	public Long getFrozenBuy(int itemId)
+	{
+		return frozenBuyByItemId.get(itemId);
+	}
+
+	// -------------------------------------------------------------------------
+	// Manual price lock — Item-tab action button. Lets the user pin the current
+	// 07Flip recommended prices for an item (normally frozen automatically on
+	// buy) so the GE overlay keeps suggesting that target through market drift.
+	// -------------------------------------------------------------------------
+
+	/** True when this item currently has a locked (frozen) sell price. */
+	public boolean isPriceLocked(int itemId)
+	{
+		return frozenSellByItemId.get(itemId) != null;
+	}
+
+	/**
+	 * Manually lock (freeze) the recommended prices for an item. When the
+	 * caller has the rec pair on hand (premium Item view) it's cached
+	 * immediately so the UI reflects the lock at once; otherwise we fall back
+	 * to the shared fetch-then-freeze path.
+	 */
+	public void lockPrice(int itemId, Long recBuy, Long recSell)
+	{
+		if (recBuy != null && recSell != null && recBuy > 0 && recSell > 0)
+		{
+			freezeAndCache(itemId, recBuy, recSell);
+		}
+		else
+		{
+			freezeFromTrackedOrFetch(itemId);
+		}
+	}
+
+	/** Manually unlock (unfreeze) a previously-locked price. */
+	public void unlockPrice(int itemId)
+	{
+		frozenSellByItemId.remove(itemId);
+		frozenBuyByItemId.remove(itemId);
+		apiClient.postUnfreeze(itemId, null);
+	}
+
+	// ── Buy-limit cooldown API ───────────────────────────────────────────────
+
+	/** Accumulates a buy fill into the item's rolling 4h window. Game-thread. */
+	private void recordBuyForLimit(int itemId, int qty, long timestamp)
+	{
+		if (itemId <= 0 || qty <= 0)
+		{
+			return;
+		}
+		BuyLimitWindow w = buyLimitWindows.get(itemId);
+		if (w == null || timestamp - w.windowStartMs >= BUY_LIMIT_WINDOW_MS)
+		{
+			w = new BuyLimitWindow();
+			w.windowStartMs = timestamp;
+			w.boughtQty = qty;
+		}
+		else
+		{
+			w.boughtQty += qty;
+		}
+		buyLimitWindows.put(itemId, w);
+		saveBuyLimitWindows();
+	}
+
+	/** Learns an item's buy limit from any data that carries it. */
+	void rememberBuyLimit(int itemId, int buyLimit)
+	{
+		if (itemId > 0 && buyLimit > 0)
+		{
+			Integer prev = buyLimitByItem.put(itemId, buyLimit);
+			if (prev == null || prev != buyLimit)
+			{
+				saveCache(BUY_LIMITS_KEY, buyLimitByItem);
+			}
+		}
+	}
+
+	void rememberBuyLimits(java.util.List<FlipItem> items)
+	{
+		if (items == null)
+		{
+			return;
+		}
+		boolean changed = false;
+		for (FlipItem f : items)
+		{
+			if (f != null && f.itemId > 0 && f.buyLimit > 0
+				&& !Integer.valueOf(f.buyLimit).equals(buyLimitByItem.get(f.itemId)))
+			{
+				buyLimitByItem.put(f.itemId, f.buyLimit);
+				changed = true;
+			}
+		}
+		if (changed)
+		{
+			saveCache(BUY_LIMITS_KEY, buyLimitByItem);
+		}
+	}
+
+	/**
+	 * Remaining cooldown (ms) before the user can rebuy this item — non-zero
+	 * only when the full buy limit has been hit and the 4h window is still
+	 * open. 0 means buyable now (or limit/window unknown).
+	 */
+	public long buyLimitCooldownMs(int itemId)
+	{
+		BuyLimitWindow w = buyLimitWindows.get(itemId);
+		Integer limit = buyLimitByItem.get(itemId);
+		if (w == null || limit == null || limit <= 0 || w.boughtQty < limit)
+		{
+			return 0L;
+		}
+		long remaining = (w.windowStartMs + BUY_LIMIT_WINDOW_MS) - System.currentTimeMillis();
+		return remaining > 0 ? remaining : 0L;
+	}
+
+	/** Fraction [0..1] of the cooldown elapsed, for a progress bar. 1.0 = ready. */
+	public double buyLimitCooldownProgress(int itemId)
+	{
+		BuyLimitWindow w = buyLimitWindows.get(itemId);
+		Integer limit = buyLimitByItem.get(itemId);
+		if (w == null || limit == null || limit <= 0 || w.boughtQty < limit)
+		{
+			return 1.0;
+		}
+		double p = (System.currentTimeMillis() - w.windowStartMs) / (double) BUY_LIMIT_WINDOW_MS;
+		return Math.max(0.0, Math.min(1.0, p));
+	}
+
+	/**
+	 * Game-tick check: when a hit-limit window passes 4h, fire the "available
+	 * again" notification once and prune the spent window.
+	 */
+	private void checkBuyLimitResets()
+	{
+		if (buyLimitWindows.isEmpty())
+		{
+			return;
+		}
+		long now = System.currentTimeMillis();
+		java.util.Iterator<java.util.Map.Entry<Integer, BuyLimitWindow>> it = buyLimitWindows.entrySet().iterator();
+		boolean changed = false;
+		while (it.hasNext())
+		{
+			java.util.Map.Entry<Integer, BuyLimitWindow> e = it.next();
+			BuyLimitWindow w = e.getValue();
+			if (now - w.windowStartMs < BUY_LIMIT_WINDOW_MS)
+			{
+				continue;
+			}
+			int itemId = e.getKey();
+			Integer limit = buyLimitByItem.get(itemId);
+			// Only announce items the user actually maxed out this window.
+			if (!w.notified && limit != null && limit > 0 && w.boughtQty >= limit)
+			{
+				notifier.notify("07Flip: buy limit available again for " + itemNameFor(itemId));
+			}
+			it.remove();   // window expired — drop it
+			changed = true;
+		}
+		if (changed)
+		{
+			saveBuyLimitWindows();
+		}
+	}
+
+	private String itemNameFor(int itemId)
+	{
+		try
+		{
+			String n = client.getItemDefinition(itemId).getName();
+			if (n != null && !n.isEmpty() && !"null".equalsIgnoreCase(n))
+			{
+				return n;
+			}
+		}
+		catch (Exception ignored)
+		{
+		}
+		return "an item";
+	}
+
+	private void saveBuyLimitWindows()
+	{
+		saveCache(BUY_LIMIT_WINDOWS_KEY, buyLimitWindows);
+	}
+
+	@SuppressWarnings("unchecked")
+	private void loadBuyLimitState()
+	{
+		try
+		{
+			java.util.Map<String, Double> limits = loadCache(BUY_LIMITS_KEY, java.util.HashMap.class);
+			if (limits != null)
+			{
+				for (java.util.Map.Entry<String, Double> e : limits.entrySet())
+				{
+					buyLimitByItem.put(Integer.parseInt(e.getKey()), (int) (double) e.getValue());
+				}
+			}
+		}
+		catch (Exception ignored)
+		{
+		}
+		try
+		{
+			java.lang.reflect.Type t = com.google.gson.reflect.TypeToken
+				.getParameterized(java.util.HashMap.class, Integer.class, BuyLimitWindow.class).getType();
+			String json = configManager.getConfiguration("o7flip", "cache_" + BUY_LIMIT_WINDOWS_KEY);
+			if (json != null && !json.isEmpty())
+			{
+				java.util.Map<Integer, BuyLimitWindow> loaded = gson.fromJson(json, t);
+				long now = System.currentTimeMillis();
+				if (loaded != null)
+				{
+					for (java.util.Map.Entry<Integer, BuyLimitWindow> e : loaded.entrySet())
+					{
+						BuyLimitWindow w = e.getValue();
+						if (w != null && now - w.windowStartMs < BUY_LIMIT_WINDOW_MS)
+						{
+							buyLimitWindows.put(e.getKey(), w);
+						}
+					}
+				}
+			}
+		}
+		catch (Exception ignored)
+		{
+		}
 	}
 
 	/**
@@ -612,17 +886,57 @@ public class O7FlipPlugin extends Plugin
 		// Premium → 07Flip recommended sell (plus the frozen-at-buy floor).
 		// Free  → live market sell price only (rec + freeze are premium features).
 		boolean premium = panel != null && panel.isPremium();
+		long candidate;
 		if (!premium)
 		{
 			Long liveSell = lookupLiveSell(itemId);
-			return (liveSell != null && liveSell > 0) ? liveSell : -1L;
+			candidate = (liveSell != null && liveSell > 0) ? liveSell : -1L;
 		}
-		Long frozen  = getFrozenSell(itemId);
-		Long recSell = lookupLiveRecSell(itemId);
-		long best    = -1L;
-		if (frozen  != null && frozen  > 0)                   best = frozen;
-		if (recSell != null && recSell > 0 && recSell > best) best = recSell;
-		return best;
+		else
+		{
+			Long frozen  = getFrozenSell(itemId);
+			Long recSell = lookupLiveRecSell(itemId);
+			long best    = -1L;
+			if (frozen  != null && frozen  > 0)                   best = frozen;
+			if (recSell != null && recSell > 0 && recSell > best) best = recSell;
+			candidate = best;
+		}
+		// Break-even floor — the critical guard. Never auto-fill a sell that
+		// would lose money against the user's actual average buy cost (after the
+		// 2% GE tax). This protects ALL tiers regardless of whether a freeze
+		// exists, against rec/market drift, and against thin-margin items whose
+		// recommended sell can itself sit below buy + tax. We'd rather the offer
+		// sit unfilled than instantly sell at a loss.
+		long breakEven = breakEvenSellPrice(itemId);
+		if (candidate > 0 && breakEven > 0)
+		{
+			candidate = Math.max(candidate, breakEven);
+		}
+		return candidate;
+	}
+
+	/**
+	 * Lowest sell price that breaks even against the user's open-position
+	 * average buy cost after the 2% GE tax (capped at 5M/item). Returns -1 when
+	 * there's no tracked open position for the item.
+	 */
+	private long breakEvenSellPrice(int itemId)
+	{
+		com.o7flip.util.ProfitCalculator.Result r = com.o7flip.util.ProfitCalculator.compute(tradeHistory);
+		com.o7flip.util.ProfitCalculator.OpenPosition pos = r.openPositions.get(itemId);
+		if (pos == null || pos.remainingQty <= 0 || pos.remainingCostBasis <= 0)
+		{
+			return -1L;
+		}
+		double avgCost = pos.remainingCostBasis / (double) pos.remainingQty;
+		// Sell S nets S − min(floor(S·0.02), 5M); break-even when net ≥ avgCost.
+		long uncapped = (long) Math.ceil(avgCost / 0.98);
+		if (uncapped <= 250_000_000L)
+		{
+			return uncapped;
+		}
+		// Above ~250M the 2% tax is capped at 5M, so the break-even is lower.
+		return (long) Math.ceil(avgCost) + 5_000_000L;
 	}
 
 	/**
@@ -643,21 +957,31 @@ public class O7FlipPlugin extends Plugin
 		return null;
 	}
 
+	/**
+	 * Single source of truth for an item's 07Flip rec prices: the /v2/item
+	 * insights — the SAME object the Item panel renders — so the auto-fill,
+	 * overlay and panel can never show different "recommended" numbers. Uses
+	 * the open item's {@code currentInsights} when it matches, else the
+	 * {@code getOverlayInsights} cache (which async-fetches /v2/item on a miss
+	 * and re-arms the auto-fill when it lands). Returns null when not yet
+	 * cached — the caller leaves the field for manual entry until it arrives.
+	 */
+	private com.o7flip.model.ItemInsights recInsightsFor(int itemId)
+	{
+		com.o7flip.model.ItemInsights cur = currentInsights;
+		if (cur != null && cur.itemId == itemId && cur.current != null)
+		{
+			return cur;
+		}
+		return getOverlayInsights(itemId);
+	}
+
 	private Long lookupLiveRecSell(int itemId)
 	{
-		// First check the Flips list — cheapest source, already on-hand.
-		for (FlipItem f : lastFlips)
+		com.o7flip.model.ItemInsights ins = recInsightsFor(itemId);
+		if (ins != null && ins.current != null && ins.current.recSell != null && ins.current.recSell > 0)
 		{
-			if (f.itemId == itemId && f.recSellPrice != null && f.recSellPrice > 0)
-			{
-				return f.recSellPrice;
-			}
-		}
-		// Fall back to the /recommended-prices cache populated by the GE overlay.
-		com.o7flip.model.RecommendedPrices rp = recPriceCache.get(itemId);
-		if (rp != null && rp.recSellPrice != null && rp.recSellPrice > 0)
-		{
-			return rp.recSellPrice;
+			return ins.current.recSell;
 		}
 		return null;
 	}
@@ -696,19 +1020,10 @@ public class O7FlipPlugin extends Plugin
 
 	private Long lookupLiveRecBuy(int itemId)
 	{
-		// Flips list first — cheapest source, already on-hand.
-		for (FlipItem f : lastFlips)
+		com.o7flip.model.ItemInsights ins = recInsightsFor(itemId);
+		if (ins != null && ins.current != null && ins.current.recBuy != null && ins.current.recBuy > 0)
 		{
-			if (f.itemId == itemId && f.recBuyPrice != null && f.recBuyPrice > 0)
-			{
-				return f.recBuyPrice;
-			}
-		}
-		// Fall back to the /recommended-prices cache populated by the GE overlay.
-		com.o7flip.model.RecommendedPrices rp = recPriceCache.get(itemId);
-		if (rp != null && rp.recBuyPrice != null && rp.recBuyPrice > 0)
-		{
-			return rp.recBuyPrice;
+			return ins.current.recBuy;
 		}
 		return null;
 	}
@@ -723,7 +1038,7 @@ public class O7FlipPlugin extends Plugin
 	 */
 	private void kickoffSellAutoFillFetch(int itemId)
 	{
-		getRecommendedPrices(itemId);
+		getOverlayInsights(itemId);
 	}
 
 	/**
@@ -809,6 +1124,7 @@ public class O7FlipPlugin extends Plugin
 			return;
 		}
 		frozenSellByItemId.remove(itemId);
+		frozenBuyByItemId.remove(itemId);
 		apiClient.postUnfreeze(itemId, null);
 	}
 
@@ -970,6 +1286,10 @@ public class O7FlipPlugin extends Plugin
 		// Game-tick polling closes that gap — cheap snapshot, hash-compared.
 		syncActiveOffersFromClient();
 
+		// Announce any buy-limit cooldown that just reset (cheap — only iterates
+		// items currently on cooldown).
+		checkBuyLimitResets();
+
 		// Once per login, after GE offers are readable, reconcile any optimiser
 		// leg whose live sell offer vanished while offline (§7 offline-sell half).
 		if (offlineReconcileArmed && activeSession != null)
@@ -1120,7 +1440,7 @@ public class O7FlipPlugin extends Plugin
 				// Premium: no cached rec yet — the shared rec-prices fetcher's
 				// completion callback re-arms via armSellPriceIfStillRelevant.
 				log.debug("[07Flip] sell-setup detector: no cached rec for itemId {}, kicking off fetch", itemId);
-				getRecommendedPrices(itemId);
+				getOverlayInsights(itemId);
 			}
 		}
 		else
@@ -1219,9 +1539,9 @@ public class O7FlipPlugin extends Plugin
 		{
 			if (auto <= 0)
 			{
-				// No cached rec yet — the rec-prices fetcher's completion callback
+				// No cached rec yet — the /v2/item fetch's completion callback
 				// re-arms via armBuyPriceIfStillRelevant.
-				getRecommendedPrices(itemId);
+				getOverlayInsights(itemId);
 			}
 		}
 		else
@@ -1381,30 +1701,44 @@ public class O7FlipPlugin extends Plugin
 	}
 
 	/**
-	 * Item id of the existing GE offer the user is currently reviewing on the
-	 * {@code GeOffers.DETAILS} status screen. Reads {@code GE_SELECTEDSLOT}
-	 * (the slot index the detail view is showing) and indexes the live GE
-	 * offer array — authoritative game state, not widget-tree scraping.
-	 * Returns -1 when the slot is out of range or empty.
+	 * Item id of the existing GE offer the user is reviewing on the
+	 * {@code GeOffers.DETAILS} status screen.
+	 *
+	 * Cross-validates two sources to avoid opening the WRONG item: the item
+	 * icon actually rendered on the DETAILS screen (ground truth of what's on
+	 * screen) and the {@code GE_SELECTEDSLOT} varbit indexed into the live GE
+	 * offer array (authoritative game state). The varbit can lag or linger on a
+	 * previously-viewed offer while a different one is on screen — which opened
+	 * an unrelated active offer's item. So: if both resolve and DISAGREE, bail
+	 * (-1) rather than guess; otherwise prefer the on-screen icon, falling back
+	 * to the varbit slot only when no icon is found (e.g. a just-collected,
+	 * now-empty slot still showing its detail panel).
 	 */
 	private int resolveOfferStatusItemId()
 	{
+		int shown = firstItemIdInWidget(client.getWidget(InterfaceID.GeOffers.DETAILS));
+
+		int slotItem = -1;
 		int slot = client.getVarbitValue(VarbitID.GE_SELECTEDSLOT);
-		if (slot < 0)
-		{
-			return -1;
-		}
 		GrandExchangeOffer[] offers = client.getGrandExchangeOffers();
-		if (offers == null || slot >= offers.length)
+		if (slot >= 0 && offers != null && slot < offers.length)
 		{
-			return -1;
+			GrandExchangeOffer offer = offers[slot];
+			if (offer != null && offer.getState() != GrandExchangeOfferState.EMPTY)
+			{
+				slotItem = offer.getItemId();
+			}
 		}
-		GrandExchangeOffer offer = offers[slot];
-		if (offer == null || offer.getState() == GrandExchangeOfferState.EMPTY)
+
+		if (shown > 0 && slotItem > 0 && shown != slotItem)
 		{
-			return -1;
+			return -1;   // ambiguous (stale/lingering varbit) — don't open the wrong item
 		}
-		return offer.getItemId();
+		if (shown > 0)
+		{
+			return shown;
+		}
+		return slotItem;
 	}
 
 	/**
@@ -1493,12 +1827,17 @@ public class O7FlipPlugin extends Plugin
 	 */
 	private int resolveItemIdFromSetupWidget()
 	{
-		Widget setup = client.getWidget(InterfaceID.GeOffers.SETUP);
-		if (setup == null || setup.isHidden())
+		return firstItemIdInWidget(client.getWidget(InterfaceID.GeOffers.SETUP));
+	}
+
+	/** First item-model id rendered in a widget's dynamic/static/grandchild tree, or -1. */
+	private static int firstItemIdInWidget(Widget root)
+	{
+		if (root == null || root.isHidden())
 		{
 			return -1;
 		}
-		Widget[] dyn = setup.getDynamicChildren();
+		Widget[] dyn = root.getDynamicChildren();
 		if (dyn != null)
 		{
 			for (Widget w : dyn)
@@ -1508,7 +1847,7 @@ public class O7FlipPlugin extends Plugin
 				if (id > 0) return id;
 			}
 		}
-		Widget[] stat = setup.getStaticChildren();
+		Widget[] stat = root.getStaticChildren();
 		if (stat != null)
 		{
 			for (Widget w : stat)
@@ -1608,7 +1947,7 @@ public class O7FlipPlugin extends Plugin
 				int sellItemId = resolveItemIdFromSetupWidget();
 				if (sellItemId > 0 && computeAutoSellPrice(sellItemId) <= 0)
 				{
-					getRecommendedPrices(sellItemId);
+					getOverlayInsights(sellItemId);
 				}
 			}
 
@@ -2079,8 +2418,7 @@ public class O7FlipPlugin extends Plugin
 			apiClient.fetchFavourites(items ->
 			{
 				if (items != null && !items.isEmpty()) saveCache("favourites", items);
-				rebuildFavouriteIds(items);
-				SwingUtilities.invokeLater(() -> panel.updateFavourites(items));
+				pushFavouritesToPanel(items);
 			});
 		}
 		// Screeners poll on a 2-min floor — fire only when due.
@@ -2248,13 +2586,15 @@ public class O7FlipPlugin extends Plugin
 			SwingUtilities.invokeLater(() -> panel.updateTeleTablets(snap));
 		}
 
+		// Buy-limit cooldown state (windows still within their 4h life + the
+		// learned item→limit map).
+		loadBuyLimitState();
+
 		// Favourites — requires the IDs set to be rebuilt for the star icon
 		List<FlipItem> cf = loadListCache("favourites", FlipItem.class);
 		if (cf != null && !cf.isEmpty())
 		{
-			rebuildFavouriteIds(cf);
-			final List<FlipItem> snap = cf;
-			SwingUtilities.invokeLater(() -> panel.updateFavourites(snap));
+			pushFavouritesToPanel(cf);
 		}
 
 		// Screeners
@@ -2884,6 +3224,17 @@ public class O7FlipPlugin extends Plugin
 		if (isBuy)
 		{
 			getRecommendedPrices(offer.getItemId());
+			recordBuyForLimit(offer.getItemId(), deltaQty, timestamp);
+			// Freeze the 07Flip rec margin on the FIRST fill of a new position so
+			// the sell target is locked in for ANY buy — manually-placed offers
+			// included, not just panel-queued ones. Skip when already frozen so
+			// later fills of the same position don't drift the frozen value.
+			// (Premium-only in effect: no rec prices to freeze for free users,
+			// who are still protected by the break-even floor on the sell side.)
+			if (!frozenSellByItemId.containsKey(offer.getItemId()))
+			{
+				freezeFromTrackedOrFetch(offer.getItemId());
+			}
 		}
 
 		final List<TradeRecord> snapshot = tradeHistory;
@@ -3896,6 +4247,14 @@ public class O7FlipPlugin extends Plugin
 					if (ins != null)
 					{
 						overlayInsightsCache.put(itemId, ins);
+						// Fresh /v2/item rec prices landed — re-arm the GE auto-fill
+						// if a buy/sell setup for this item is still open. Each arm
+						// checks its own screen type, so only the relevant one fires.
+						clientThread.invokeLater(() ->
+						{
+							armSellPriceIfStillRelevant(itemId);
+							armBuyPriceIfStillRelevant(itemId);
+						});
 					}
 					overlayInsightsFetchedAt.put(itemId, System.currentTimeMillis());
 				}
@@ -3978,6 +4337,10 @@ public class O7FlipPlugin extends Plugin
 	{
 		apiClient.fetchItemInsights(itemId, insights ->
 		{
+			if (insights != null && insights.buyLimit > 0)
+			{
+				rememberBuyLimit(insights.itemId, insights.buyLimit);
+			}
 			// Late callbacks from earlier clicks shouldn't overwrite the user's
 			// current selection — only apply if this is still the item the
 			// panel is showing (or no selection yet).
@@ -4214,6 +4577,7 @@ public class O7FlipPlugin extends Plugin
 			{
 				lastFlips = items;
 				rebuildTrackedItems();
+				rememberBuyLimits(items);
 				SwingUtilities.invokeLater(() -> panel.updateFlips(items, total, page));
 			},
 			upgradeUrl -> SwingUtilities.invokeLater(() -> panel.showPremiumRequiredToast(upgradeUrl))
@@ -4612,8 +4976,7 @@ public class O7FlipPlugin extends Plugin
 		executor.execute(() -> apiClient.fetchFavourites(items ->
 		{
 			if (items != null && !items.isEmpty()) saveCache("favourites", items);
-			rebuildFavouriteIds(items);
-			SwingUtilities.invokeLater(() -> panel.updateFavourites(items));
+			pushFavouritesToPanel(items);
 		}));
 	}
 
@@ -4717,6 +5080,11 @@ public class O7FlipPlugin extends Plugin
 	/** Mirror of {@link #recentlyAddedFavs} for the remove direction. */
 	private final java.util.Map<Integer, Long> recentlyRemovedFavs = new java.util.concurrent.ConcurrentHashMap<>();
 
+	/** FlipItem rows for {@link #recentlyAddedFavs} entries, so an optimistic
+	 *  add can be re-inserted into the Favs list if a stale GET response
+	 *  doesn't yet include it. Kept in sync with recentlyAddedFavs. */
+	private final java.util.Map<Integer, FlipItem> recentlyAddedFavItems = new java.util.concurrent.ConcurrentHashMap<>();
+
 	/** How long a recent local toggle survives a stale server response.
 	 *  5 min is plenty for any reasonable read-after-write delay; longer
 	 *  starts to mask real "user cleared all favs on the website" syncs. */
@@ -4727,6 +5095,75 @@ public class O7FlipPlugin extends Plugin
 	public boolean isFavourite(int itemId)
 	{
 		return favouriteItemIds.contains(itemId);
+	}
+
+	private static final String FAVOURITES_ORDER_KEY = "favouritesOrder";
+
+	/** The user's saved manual favourites order (item ids), or empty if none. */
+	public java.util.List<Integer> getFavouritesOrder()
+	{
+		java.util.List<Integer> out = new java.util.ArrayList<>();
+		String csv = configManager.getConfiguration("o7flip", FAVOURITES_ORDER_KEY);
+		if (csv != null && !csv.isEmpty())
+		{
+			for (String s : csv.split(","))
+			{
+				try
+				{
+					out.add(Integer.parseInt(s.trim()));
+				}
+				catch (NumberFormatException ignored)
+				{
+				}
+			}
+		}
+		return out;
+	}
+
+	/** Persists the manual favourites order set in the reorder popup. */
+	public void setFavouritesOrder(java.util.List<Integer> ids)
+	{
+		if (ids == null || ids.isEmpty())
+		{
+			configManager.unsetConfiguration("o7flip", FAVOURITES_ORDER_KEY);
+			return;
+		}
+		StringBuilder sb = new StringBuilder();
+		for (int i = 0; i < ids.size(); i++)
+		{
+			if (i > 0) sb.append(',');
+			sb.append(ids.get(i));
+		}
+		configManager.setConfiguration("o7flip", FAVOURITES_ORDER_KEY, sb.toString());
+	}
+
+	/**
+	 * Server-side unfavourite used by the reorder popup when an item is dropped.
+	 * Updates the id set + recent-toggle buffers + refreshes the star, but does
+	 * NOT touch the panel's Favs list (the panel rebuilds it itself after a
+	 * reorder/remove batch).
+	 */
+	public void unfavouriteForReorder(int itemId)
+	{
+		if (!hasApiKey() || itemId <= 0)
+		{
+			return;
+		}
+		java.util.Set<Integer> next = new java.util.HashSet<>(favouriteItemIds);
+		next.remove(itemId);
+		favouriteItemIds = java.util.Collections.unmodifiableSet(next);
+		long now = System.currentTimeMillis();
+		recentlyRemovedFavs.put(itemId, now);
+		recentlyAddedFavs.remove(itemId);
+		recentlyAddedFavItems.remove(itemId);
+		apiClient.removeFavourite(itemId, ok ->
+		{
+			if (!Boolean.TRUE.equals(ok))
+			{
+				log.warn("[07Flip] reorder unfavourite failed for itemId {}", itemId);
+			}
+		});
+		SwingUtilities.invokeLater(() -> panel.onFavouriteToggled(itemId));
 	}
 
 	/**
@@ -4750,8 +5187,22 @@ public class O7FlipPlugin extends Plugin
 		java.util.Set<Integer> next = new java.util.HashSet<>(snapshot);
 		if (currentlyFav) next.remove(itemId); else next.add(itemId);
 		favouriteItemIds = java.util.Collections.unmodifiableSet(next);
-		// Refresh any panel that displays favourite state.
-		SwingUtilities.invokeLater(() -> panel.onFavouriteToggled(itemId));
+		// Build the optimistic Favs-list row up front (for an add) so the panel
+		// shows it instantly rather than waiting for the next /favourites GET.
+		final FlipItem optimisticFav = currentlyFav ? null : buildFavouriteFlipItem(itemId);
+		// Refresh any panel that displays favourite state — star + the Favs list.
+		SwingUtilities.invokeLater(() ->
+		{
+			panel.onFavouriteToggled(itemId);
+			if (currentlyFav)
+			{
+				panel.removeFavouriteRow(itemId);
+			}
+			else if (optimisticFav != null)
+			{
+				panel.addFavouriteRow(optimisticFav);
+			}
+		});
 
 		java.util.function.Consumer<Boolean> done = ok -> SwingUtilities.invokeLater(() ->
 		{
@@ -4766,11 +5217,13 @@ public class O7FlipPlugin extends Plugin
 				{
 					recentlyRemovedFavs.put(itemId, now);
 					recentlyAddedFavs.remove(itemId);
+					recentlyAddedFavItems.remove(itemId);
 				}
 				else
 				{
 					recentlyAddedFavs.put(itemId, now);
 					recentlyRemovedFavs.remove(itemId);
+					if (optimisticFav != null) recentlyAddedFavItems.put(itemId, optimisticFav);
 				}
 				// No immediate refetch — the optimistic update is already
 				// what the user expects to see, and an immediate GET often
@@ -4780,9 +5233,12 @@ public class O7FlipPlugin extends Plugin
 			}
 			else
 			{
-				// Server rejected — revert the optimistic update and notify.
+				// Server rejected — revert the optimistic id-set + list and notify.
 				favouriteItemIds = snapshot;
+				recentlyAddedFavItems.remove(itemId);
 				panel.onFavouriteToggled(itemId);
+				// Restore the list to server truth (rare path).
+				onFavouritesTabSelected();
 				if (onError != null) onError.run();
 			}
 		});
@@ -4806,6 +5262,87 @@ public class O7FlipPlugin extends Plugin
 	 * reflects them — no longer needed — or (b) they've aged past
 	 * {@link #FAV_BUFFER_TTL_MS} — eventual consistency wins.
 	 */
+	/**
+	 * Builds the row data for an optimistic favourite add. Prefers the
+	 * currently-open Insights item (the user favourites what they're viewing),
+	 * falls back to the loaded Flips list, then to a name-only stub the next
+	 * GET fills in.
+	 */
+	private FlipItem buildFavouriteFlipItem(int itemId)
+	{
+		com.o7flip.model.ItemInsights ins = currentInsights;
+		if (ins != null && ins.itemId == itemId)
+		{
+			FlipItem f = new FlipItem();
+			f.itemId = itemId;
+			f.name   = ins.name;
+			if (ins.current != null)
+			{
+				f.buyPrice     = ins.current.buyPrice;
+				f.sellPrice    = ins.current.sellPrice;
+				f.profit       = ins.current.profit;
+				f.roiPct       = ins.current.roiPct;
+				f.recBuyPrice  = ins.current.recBuy;
+				f.recSellPrice = ins.current.recSell;
+				f.recProfit    = ins.current.recProfit;
+			}
+			f.buyLimit = ins.buyLimit;
+			if (ins.score != null) f.flip07Score = ins.score.confidence;
+			if (ins.volume != null)
+			{
+				f.hourlyVolume = ins.volume.hourly;
+				f.dailyVolume  = ins.volume.daily;
+			}
+			return f;
+		}
+		for (FlipItem f : lastFlips)
+		{
+			if (f.itemId == itemId) return f;
+		}
+		FlipItem stub = new FlipItem();
+		stub.itemId = itemId;
+		stub.name   = "Item " + itemId;
+		return stub;
+	}
+
+	/**
+	 * Merges a fresh /favourites GET with the recently-toggled buffers so an
+	 * optimistic add the server hasn't caught up to stays visible, and an
+	 * optimistic remove stays hidden, until the TTL window passes (mirrors
+	 * {@link #rebuildFavouriteIds} but for the row list, not the id set).
+	 */
+	private java.util.List<FlipItem> reconcileFavouritesList(java.util.List<FlipItem> serverItems)
+	{
+		java.util.List<FlipItem> merged = new java.util.ArrayList<>();
+		java.util.Set<Integer> present = new java.util.HashSet<>();
+		if (serverItems != null)
+		{
+			for (FlipItem f : serverItems)
+			{
+				if (f == null || recentlyRemovedFavs.containsKey(f.itemId)) continue;
+				merged.add(f);
+				present.add(f.itemId);
+			}
+		}
+		for (java.util.Map.Entry<Integer, FlipItem> e : recentlyAddedFavItems.entrySet())
+		{
+			if (!present.contains(e.getKey()))
+			{
+				merged.add(0, e.getValue());
+			}
+		}
+		return merged;
+	}
+
+	/** Centralised favourites push: reconcile ids + rows, then render. */
+	private void pushFavouritesToPanel(java.util.List<FlipItem> serverItems)
+	{
+		rebuildFavouriteIds(serverItems);
+		rememberBuyLimits(serverItems);
+		final java.util.List<FlipItem> reconciled = reconcileFavouritesList(serverItems);
+		SwingUtilities.invokeLater(() -> panel.updateFavourites(reconciled));
+	}
+
 	private void rebuildFavouriteIds(java.util.List<FlipItem> items)
 	{
 		long now = System.currentTimeMillis();
@@ -4824,6 +5361,8 @@ public class O7FlipPlugin extends Plugin
 		// entry — we no longer need to "protect" it from being wiped.
 		recentlyAddedFavs.keySet().removeIf(serverSet::contains);
 		recentlyRemovedFavs.keySet().removeIf(id -> !serverSet.contains(id));
+		// Keep the optimistic-row map in lockstep with the add buffer.
+		recentlyAddedFavItems.keySet().retainAll(recentlyAddedFavs.keySet());
 
 		// Merged set = (server ∪ recentlyAdded) − recentlyRemoved.
 		java.util.Set<Integer> merged = new java.util.HashSet<>(serverSet);
