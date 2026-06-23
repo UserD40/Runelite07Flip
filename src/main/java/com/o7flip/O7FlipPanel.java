@@ -28,14 +28,12 @@ import com.o7flip.model.DecantItem;
 import com.o7flip.model.DumpItem;
 import com.o7flip.model.FlipItem;
 import com.o7flip.model.SearchResultItem;
-import com.o7flip.model.SpikeItem;
 import com.o7flip.model.TradeRecord;
 import com.o7flip.ui.DecantItemPanel;
 import com.o7flip.ui.DipItemPanel;
 import com.o7flip.ui.DumpItemPanel;
 import com.o7flip.ui.FlipItemPanel;
 import com.o7flip.ui.SearchResultPanel;
-import com.o7flip.ui.SpikeItemPanel;
 import com.o7flip.ui.TradeRecordPanel;
 import com.o7flip.util.Fonts;
 import net.runelite.client.game.ItemManager;
@@ -199,7 +197,6 @@ public class O7FlipPanel extends PluginPanel
 	private int dumpsMinProfitIdx  = 0;
 	private int dumpsPriceRangeIdx = 0;
 
-	private String spikesSortKey = "recent";
 	private String dumpsSortKey  = "max_profit";
 	private String dipsSortKey   = "recent";
 	private String dipsActivityWindow = "1d";
@@ -243,7 +240,6 @@ public class O7FlipPanel extends PluginPanel
 	}
 
 	private List<FlipItem>    allFlips   = new ArrayList<>();
-	private List<SpikeItem>   allSpikes  = new ArrayList<>();
 	private List<DumpItem>    allDumps   = new ArrayList<>();
 	private List<com.o7flip.model.DipItem> allDips = new ArrayList<>();
 	private List<DecantItem>  allDecants = new ArrayList<>();
@@ -254,7 +250,6 @@ public class O7FlipPanel extends PluginPanel
 	private List<TradeRecord> allMyFlips = new ArrayList<>();
 
 	private int flipsSortIdx   = 0;
-	private int spikesSortIdx  = 0;
 	private int dumpsSortIdx   = 0;
 	private int myFlipsSortIdx = 0;  // 0=Active 1=Recent 2=Margin
 	private int myFlipsPage    = 0;
@@ -265,13 +260,11 @@ public class O7FlipPanel extends PluginPanel
 		com.o7flip.ui.MyTradesStatsPanel.Period.DAILY;
 
 	private int flipsPage   = 0;  private int flipsTotal  = 0;
-	private int spikesPage  = 0;  private int spikesTotal = 0;
 	private int dumpsPage   = 0;  private int dumpsTotal  = 0;
 	private int dipsPage    = 0;  private int dipsTotal   = 0;
 	private int decantPage  = 0;
 
 	private JPanel flipsListPanel;
-	private JPanel spikesListPanel;
 	private JPanel dumpsListPanel;
 	private JPanel dipsListPanel;
 	private JPanel decantListPanel;
@@ -295,7 +288,6 @@ public class O7FlipPanel extends PluginPanel
 	private JPanel searchResultsPanel;
 	private JScrollPane searchScrollPane;
 
-	private JButton[] spikesSortBtns;
 	private JButton[] dumpsSortBtns;
 	private JButton[] dumpsTierBtns;       // [All, Confirmed, Likely]
 	private JPanel    dumpsTierBar;        // container for the segmented control
@@ -309,7 +301,6 @@ public class O7FlipPanel extends PluginPanel
 	private JButton   myFlipsPeriodButton;
 
 	private JLabel  flipsPageLabel;   private JButton flipsPrev,    flipsNext;
-	private JLabel  spikesPageLabel;  private JButton spikesPrev,   spikesNext;
 	private JLabel  dumpsPageLabel;   private JButton dumpsPrev,    dumpsNext;
 	private JLabel  dipsPageLabel;    private JButton dipsPrev,     dipsNext;
 	private int     dipsSortIdx = 0;
@@ -582,11 +573,6 @@ public class O7FlipPanel extends PluginPanel
 		return FLIPS_SORTS[idx][0];
 	}
 
-	public String getSpikesSortKey()
-	{
-		return spikesSortKey;
-	}
-
 	public boolean dumpsUsesBotEndpoint()
 	{
 		return dumpsUseBotEndpoint;
@@ -645,11 +631,6 @@ public class O7FlipPanel extends PluginPanel
 		return flipsPage;
 	}
 
-	public int getSpikesPage()
-	{
-		return spikesPage;
-	}
-
 	public int getDumpsPage()
 	{
 		return dumpsPage;
@@ -670,14 +651,6 @@ public class O7FlipPanel extends PluginPanel
 		pushInsightsRecommendations();   // refresh the Item-tab empty state if it's showing
 		updateTimestamp();
 		setLoading(false);
-	}
-
-	public void updateSpikes(List<SpikeItem> items, int total, int page)
-	{
-		allSpikes = items;
-		spikesTotal = total;
-		spikesPage = page;
-		renderSpikes(filtered());
 	}
 
 	public void updateDumps(com.o7flip.model.DumpItem.Response resp, int page)
@@ -816,7 +789,6 @@ public class O7FlipPanel extends PluginPanel
 		{
 			cl.show(mainArea, "tabs");
 			renderFlips("");
-			renderSpikes("");
 			renderDumps("");
 			renderDips("");
 			renderDecants("");
@@ -883,15 +855,6 @@ public class O7FlipPanel extends PluginPanel
 		return allFlips.stream()
 			.filter(i -> notBlocked(i.itemId))
 			.filter(i -> minVol <= 0 || i.hourlyVolume == null || i.hourlyVolume >= minVol)
-			.filter(i -> q.isEmpty() || matches(i.name, q))
-			.collect(Collectors.toList());
-	}
-
-	private List<SpikeItem>  fSpikes(String q)
-	{
-		return allSpikes.stream()
-			.filter(i -> notBlocked(i.itemId))
-			.filter(i -> affordable(i.buyPrice))
 			.filter(i -> q.isEmpty() || matches(i.name, q))
 			.collect(Collectors.toList());
 	}
@@ -1046,15 +1009,6 @@ public class O7FlipPanel extends PluginPanel
 			flipsPageLabel, flipsPrev, flipsNext,
 			(item, odd) -> new FlipItemPanel(item, itemManager, odd, plugin),
 			"No flips found", "Try a different preset or filter");
-	}
-
-	private void renderSpikes(String q)
-	{
-		fillListPaged(spikesListPanel, fSpikes(q), spikesPage, spikesTotal,
-			spikesPageLabel, spikesPrev, spikesNext,
-			(item, odd) -> new SpikeItemPanel(item, itemManager, odd, plugin),
-			"No spike signals", "Check back soon");
-		hilite(spikesSortBtns, spikesSortIdx);
 	}
 
 	private void renderDumps(String q)
@@ -2153,7 +2107,6 @@ public class O7FlipPanel extends PluginPanel
 	{
 		String q = filtered();
 		renderDumps(q);
-		renderSpikes(q);
 		renderDips(q);
 		renderFavourites(q);
 	}
@@ -2310,7 +2263,6 @@ public class O7FlipPanel extends PluginPanel
 			case "Dumps":   return config.showDumps();
 			case "Dips":    return config.showDips();
 			case "Decant":  return config.showDecant();
-			case "Spikes":  return config.showSpikes();
 			default:        return false;
 		}
 	}
@@ -2330,7 +2282,6 @@ public class O7FlipPanel extends PluginPanel
 
 		JPanel flipsContent    = buildFlipsTab();
 		JPanel dumpsContent    = buildDumpsTab();
-		JPanel spikesContent   = buildSpikesTab();
 		JPanel insightsContent = buildInsightsTab();
 		JPanel dipsContent       = buildDipsTab();
 		JPanel decantContent     = buildDecantTab();
@@ -2896,7 +2847,6 @@ public class O7FlipPanel extends PluginPanel
 		tabsWrapper.repaint();
 		String q = filtered();
 		renderFlips(q);
-		renderSpikes(q);
 		renderDumps(q);
 		renderDips(q);
 		renderDecants(q);
@@ -3347,43 +3297,6 @@ public class O7FlipPanel extends PluginPanel
 			}
 		});
 		return chip;
-	}
-
-	private JPanel buildSpikesTab()
-	{
-		spikesSortBtns = new JButton[2];
-		JPanel sortRow = buildSortBar(spikesSortBtns, new String[]{"Recent", "Spike %"},
-			() -> spikesSortIdx, i ->
-			{
-				spikesSortIdx = i;
-				spikesSortKey = i == 0 ? "recent" : "spike_pct";
-				spikesPage    = 0;
-				if (plugin != null)
-				{
-					plugin.onSpikesSortChanged(spikesSortKey);
-				}
-			});
-
-		spikesListPanel = listPanel();
-		spikesPageLabel = pageLabel();
-		spikesPrev      = pageBtn("\u2039");
-		spikesNext      = pageBtn("\u203A");
-		spikesPrev.addActionListener(e ->
-		{
-			if (plugin != null)
-			{
-				plugin.onSpikesPageChanged(--spikesPage);
-			}
-		});
-		spikesNext.addActionListener(e ->
-		{
-			if (plugin != null)
-			{
-				plugin.onSpikesPageChanged(++spikesPage);
-			}
-		});
-
-		return assembleTab(sortRow, spikesListPanel, buildPageBar(spikesPageLabel, spikesPrev, spikesNext));
 	}
 
 	private JPanel buildDumpsTierBar()

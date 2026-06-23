@@ -29,7 +29,6 @@ import com.google.gson.JsonObject;
 import com.google.inject.Provides;
 import com.o7flip.model.DumpItem;
 import com.o7flip.model.FlipItem;
-import com.o7flip.model.SpikeItem;
 import com.o7flip.model.TrackedItemData;
 import com.o7flip.model.TradeRecord;
 import net.runelite.api.Client;
@@ -167,7 +166,6 @@ public class O7FlipPlugin extends Plugin
 
 	List<FlipItem>  lastFlips  = Collections.emptyList();
 	private List<DumpItem>  lastDumps  = Collections.emptyList();
-	private List<SpikeItem> lastSpikes = Collections.emptyList();
 
 	public volatile Map<Integer, TrackedItemData> trackedItems = Collections.emptyMap();
 
@@ -1475,7 +1473,6 @@ public class O7FlipPlugin extends Plugin
 		{
 			case "showFlips":
 			case "showDumps":
-			case "showSpikes":
 			case "showItem":
 			case "showDips":
 			case "showDecant":
@@ -1538,18 +1535,6 @@ public class O7FlipPlugin extends Plugin
 		JsonObject sections = new JsonObject();
 
 
-		if (config.showSpikes())
-		{
-			JsonObject p = new JsonObject();
-			String sort = panel.getSpikesSortKey();
-			if (sort != null && !sort.isEmpty())
-			{
-				p.addProperty("sort", sort);
-			}
-			p.addProperty("page", panel.getSpikesPage());
-			sections.add("spikes", p);
-		}
-
 		if (config.showDumps() && !panel.dumpsUsesBotEndpoint())
 		{
 			JsonObject p = new JsonObject();
@@ -1578,18 +1563,11 @@ public class O7FlipPlugin extends Plugin
 		}
 
 		final int flipsPage   = panel.getFlipsPage();
-		final int spikesPage  = panel.getSpikesPage();
 		final int dumpsPage   = panel.getDumpsPage();
 
 		apiClient.fetchBundle(
 			sections,
 			null,
-			config.showSpikes() ? (items, total) ->
-			{
-				lastSpikes = items;
-				rebuildTrackedItems();
-				SwingUtilities.invokeLater(() -> panel.updateSpikes(items, total, spikesPage));
-			} : null,
 			null,
 			connectUrl ->
 			{
@@ -1763,18 +1741,6 @@ public class O7FlipPlugin extends Plugin
 			});
 			d.dumpBuyPrice  = du.buyPrice;
 			d.dumpSellPrice = du.sellPrice;
-		}
-
-		for (SpikeItem s : lastSpikes)
-		{
-			TrackedItemData d = map.computeIfAbsent(s.itemId, id ->
-			{
-				TrackedItemData t = new TrackedItemData();
-				t.itemId = id;
-				t.name = s.name;
-				return t;
-			});
-			d.spikeBuyPrice = s.buyPrice;
 		}
 
 		trackedItems = Collections.unmodifiableMap(map);
@@ -3294,18 +3260,6 @@ public class O7FlipPlugin extends Plugin
 		}
 	}
 
-	void onSpikesPageChanged(int page)
-	{
-		executor.execute(() ->
-			apiClient.fetchSpikes(panel.getSpikesSortKey(), page,
-				(items, total) ->
-				{
-					lastSpikes = items;
-					rebuildTrackedItems();
-					SwingUtilities.invokeLater(() -> panel.updateSpikes(items, total, page));
-				}));
-	}
-
 	void onDumpsPageChanged(int page)
 	{
 		executor.execute(() -> fetchDumpsAtPage(panel.getDumpsSortKey(), page));
@@ -4688,18 +4642,6 @@ public class O7FlipPlugin extends Plugin
 	}
 
 
-
-	void onSpikesSortChanged(String sort)
-	{
-		executor.execute(() ->
-			apiClient.fetchSpikes(sort, 0,
-				(items, total) ->
-				{
-					lastSpikes = items;
-					rebuildTrackedItems();
-					SwingUtilities.invokeLater(() -> panel.updateSpikes(items, total, 0));
-				}));
-	}
 
 	void onDumpsSortChanged(String sort)
 	{

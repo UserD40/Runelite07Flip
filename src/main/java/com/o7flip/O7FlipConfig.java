@@ -206,19 +206,6 @@ public interface O7FlipConfig extends Config
 	}
 
 	@ConfigItem(
-		keyName = "showSpikes",
-		name = "",
-		description = "",
-		section = tabsSection,
-		position = 2,
-		hidden = true
-	)
-	default boolean showSpikes()
-	{
-		return false;
-	}
-
-	@ConfigItem(
 		keyName = "showItem",
 		name = "",
 		description = "",

@@ -37,7 +37,6 @@ import com.o7flip.model.ItemInsights;
 import com.o7flip.model.OptimizeResult;
 import com.o7flip.model.RecommendedPrices;
 import com.o7flip.model.SearchResultItem;
-import com.o7flip.model.SpikeItem;
 import com.o7flip.model.TrackerStats;
 import com.o7flip.model.TradeRecord;
 import org.slf4j.Logger;
@@ -2039,17 +2038,6 @@ public class O7FlipApiClient
 		return o;
 	}
 
-	public void fetchSpikes(String sort, int page, BiConsumer<List<SpikeItem>, Integer> callback)
-	{
-		StringBuilder url = new StringBuilder(BASE_URL + "/spikes?limit=").append(PAGE_LIMIT)
-			.append("&page=").append(page);
-		if (sort != null && !sort.isEmpty())
-		{
-			url.append("&sort=").append(sort);
-		}
-		fetchPaged(url.toString(), "fetchSpikes", "spikes", this::parseSpikeItem, callback);
-	}
-
 	public void fetchDumps(String sort, long minProfit, long priceMin, long priceMax,
 	                       int minScore, boolean activeOnly, String tier,
 	                       int page, Consumer<DumpItem.Response> callback)
@@ -2167,7 +2155,6 @@ public class O7FlipApiClient
 	public void fetchBundle(
 		JsonObject sections,
 		BiConsumer<List<FlipItem>, Integer>  onFlips,
-		BiConsumer<List<SpikeItem>, Integer> onSpikes,
 		BiConsumer<List<DumpItem>, Integer>  onDumps,
 		Consumer<String>                     onConnectUrl
 	)
@@ -2220,12 +2207,6 @@ public class O7FlipApiClient
 						JsonObject sec = root.getAsJsonObject("flips");
 						List<FlipItem> items = parseArray(sec, "flips", O7FlipApiClient.this::parseFlipItem);
 						onFlips.accept(items, getInt(sec, "total", items.size()));
-					}
-					if (onSpikes != null && root.has("spikes"))
-					{
-						JsonObject sec = root.getAsJsonObject("spikes");
-						List<SpikeItem> items = parseArray(sec, "spikes", O7FlipApiClient.this::parseSpikeItem);
-						onSpikes.accept(items, getInt(sec, "total", items.size()));
 					}
 					if (onDumps != null && root.has("dumps"))
 					{
@@ -2400,22 +2381,6 @@ public class O7FlipApiClient
 		item.dipPct1d     = getDoubleOrNull(obj, "dip_pct_1d");
 		item.dipPct7d     = getDoubleOrNull(obj, "dip_pct_7d");
 		item.dipPct30d    = getDoubleOrNull(obj, "dip_pct_30d");
-		return item;
-	}
-
-	private SpikeItem parseSpikeItem(JsonObject obj)
-	{
-		SpikeItem item = new SpikeItem();
-		item.itemId       = getInt(obj, "item_id", 0);
-		item.name         = getString(obj, "name", "Unknown");
-		item.buyPrice     = getLong(obj, "buy_price", 0);
-		item.avg24hBuy    = getLong(obj, "avg_24h_buy", 0);
-		item.spikePct     = getDouble(obj, "spike_pct", 0);
-		item.hourlyVolume = getInt(obj, "hourly_volume", 0);
-		item.dailyVolume  = getInt(obj, "daily_volume", 0);
-		item.buyLimit     = getInt(obj, "buy_limit", 0);
-		item.members      = getBool(obj, "members", true);
-		item.lastUpdated  = getString(obj, "last_updated", "");
 		return item;
 	}
 
