@@ -76,46 +76,20 @@ public class O7FlipApiClient
 	@Inject
 	private O7FlipConfig config;
 
-	/** Epoch ms until which all requests should be skipped after a 429 response. */
 	private volatile long backoffUntil = 0;
-	/** Consecutive 429 incidents — drives mild escalation. Reset to 0 after a
-	 *  clean gap with no rate limiting. Only touched inside the synchronised
-	 *  {@link #markRateLimited(Response)}. */
 	private int rateLimitIncidents = 0;
 
-	/** Base cooldown applied when the server sends no usable {@code Retry-After}. */
 	private static final long RATE_LIMIT_BASE_MS  = 60_000L;
-	/** Hard ceiling on any single cooldown window, even after escalation/jitter. */
 	private static final long RATE_LIMIT_MAX_MS   = 5L * 60_000L;
-	/** A fresh 429 arriving this long after the previous window ended starts a
-	 *  new incident (escalation counter resets). */
 	private static final long RATE_LIMIT_RESET_MS = 5L * 60_000L;
 
-	/** One-shot log guard so we only report sanitisation once per plugin session. */
 	private volatile boolean loggedKeySanitisation = false;
 
-	/** Returns true if the client is currently in a rate-limit backoff window. */
 	boolean isRateLimited()
 	{
 		return System.currentTimeMillis() < backoffUntil;
 	}
 
-	/**
-	 * Records a 429 and (re)arms the global backoff window. The cooldown is:
-	 * <ul>
-	 *   <li>the server's {@code Retry-After} (delta-seconds or HTTP-date) when
-	 *       present and parseable, else {@link #RATE_LIMIT_BASE_MS};</li>
-	 *   <li>multiplied by a mild escalation factor (×2 per consecutive incident,
-	 *       capped ×8) so a server that keeps limiting us is backed off harder;</li>
-	 *   <li>plus up to 20% random jitter so many clients don't retry in lockstep;</li>
-	 *   <li>clamped to {@link #RATE_LIMIT_MAX_MS}.</li>
-	 * </ul>
-	 * Concurrent 429s belonging to the SAME incident (those arriving while a
-	 * window is already active) only extend the window if the server asks for
-	 * longer — they never re-escalate. {@code synchronized} because it is a
-	 * read-modify-write across the OkHttp dispatcher threads; it only runs on a
-	 * 429 so contention is negligible.
-	 */
 	private synchronized void markRateLimited(Response response)
 	{
 		long now     = System.currentTimeMillis();
@@ -124,8 +98,6 @@ public class O7FlipApiClient
 
 		if (now < backoffUntil)
 		{
-			// Same incident — another in-flight request also got 429. Only push
-			// the window out further if the server explicitly asked for longer.
 			if (retryMs > 0)
 			{
 				long until = now + withJitter(Math.min(base, RATE_LIMIT_MAX_MS));
@@ -134,7 +106,6 @@ public class O7FlipApiClient
 			return;
 		}
 
-		// New incident — reset escalation if we had a clean gap since the last window.
 		if (now - backoffUntil > RATE_LIMIT_RESET_MS) rateLimitIncidents = 0;
 		rateLimitIncidents++;
 
@@ -146,19 +117,12 @@ public class O7FlipApiClient
 			retryMs > 0 ? (retryMs / 1000) + "s" : "none");
 	}
 
-	/** Adds 0–20% random jitter to a cooldown, clamped to {@link #RATE_LIMIT_MAX_MS}. */
 	private static long withJitter(long ms)
 	{
 		long jittered = ms + (long) (ms * 0.20 * Math.random());
 		return Math.min(jittered, RATE_LIMIT_MAX_MS);
 	}
 
-	/**
-	 * Parses an HTTP {@code Retry-After} header into milliseconds. Supports both
-	 * the delta-seconds form ({@code "120"}) and the HTTP-date form
-	 * ({@code "Wed, 21 Oct 2015 07:28:00 GMT"}). Returns -1 when the header is
-	 * absent, empty, or unparseable so the caller falls back to the base cooldown.
-	 */
 	private static long parseRetryAfterMs(Response response)
 	{
 		if (response == null) return -1L;
@@ -173,7 +137,6 @@ public class O7FlipApiClient
 		}
 		catch (NumberFormatException notSeconds)
 		{
-			// Fall through to HTTP-date parsing.
 		}
 		try
 		{
@@ -188,12 +151,6 @@ public class O7FlipApiClient
 		}
 	}
 
-	/**
-	 * Strips anything that isn't alphanumeric or a hyphen — defeats whitespace,
-	 * quote characters, smart quotes, and trailing newlines that can sneak in
-	 * when pasting from a "Copy API key" button. Returns null when the result
-	 * is empty (no key configured).
-	 */
 	private String sanitizedApiKey()
 	{
 		String raw = config != null ? config.apiKey() : null;
@@ -213,11 +170,6 @@ public class O7FlipApiClient
 
 	private void fetch(String url, Callback callback)
 	{
-		// Global 429 backoff — when the server has rate-limited us recently, skip
-		// the request entirely and signal the caller via its onFailure path (every
-		// fetch* callback degrades gracefully there: empty list / null). This keeps
-		// EVERY GET routed through here off the server for the whole cooldown,
-		// instead of only throttling the periodic bundle refresh.
 		if (isRateLimited())
 		{
 			callback.onFailure(null, new IOException("07Flip: request skipped — rate-limit backoff active"));
@@ -234,9 +186,6 @@ public class O7FlipApiClient
 		okHttpClient.newCall(builder.build()).enqueue(callback);
 	}
 
-	// -------------------------------------------------------------------------
-	// Search
-	// -------------------------------------------------------------------------
 
 	public void fetchSearch(String query, Consumer<List<SearchResultItem>> callback)
 	{
@@ -265,8 +214,6 @@ public class O7FlipApiClient
 						item.margin         = getLongOrNull(obj, "margin");
 						item.profit         = getLongOrNull(obj, "profit");
 						item.roi            = getDoubleOrNull(obj, "roi");
-						// Premium-only on /v2/search — null for free/anon. Used to
-						// queue the rec buy price for premium users (free → live).
 						item.recBuyPrice    = getLongOrNull(obj, "rec_buy_price");
 						item.recSellPrice   = getLongOrNull(obj, "rec_sell_price");
 						item.recProfit      = getLongOrNull(obj, "rec_profit");
@@ -289,23 +236,7 @@ public class O7FlipApiClient
 		}
 	}
 
-	// -------------------------------------------------------------------------
-	// Trade Tracker
-	// -------------------------------------------------------------------------
 
-	/**
-	 * Bulk-equivalent of {@link #postTradeRecord} for {@code /tracker/bulk}.
-	 * Idempotent on the server via {@code unique_trade(userId, itemId,
-	 * tradedAt, isBuy)} — duplicates come back in the {@code duplicates}
-	 * counter, not as errors. Server cap is 500 trades per request; the
-	 * local trade window is bounded at MAX_TRADE_HISTORY which is well
-	 * under that, so a single request handles a full backlog.
-	 *
-	 * Used at startup to recover any trades that were recorded locally
-	 * but never reached the server (the May 14-onward zero-delta terminal-
-	 * state regression). Cheap to run unconditionally because the server
-	 * dedup keeps repeat submissions a no-op.
-	 */
 	public void postTradeRecordsBulk(List<TradeRecord> trades, Consumer<BulkSyncResult> callback)
 	{
 		String key = sanitizedApiKey();
@@ -327,11 +258,6 @@ public class O7FlipApiClient
 
 		JsonObject body = new JsonObject();
 		JsonArray arr = new JsonArray();
-		// Parallel list of the TradeRecords that actually made it into the
-		// request, in request-array order. The server's response trades[]
-		// uses {@code index} into this array, so we use it to map each
-		// returned {@code trade_id} back to the local row's
-		// {@link TradeRecord#offerInstanceId}.
 		final List<TradeRecord> sentTrades = new ArrayList<>();
 		for (TradeRecord t : trades)
 		{
@@ -345,8 +271,6 @@ public class O7FlipApiClient
 			row.addProperty("total_gp",  t.totalGp);
 			row.addProperty("timestamp", t.timestamp);
 			row.addProperty("partial",   t.partial);
-			// SYNC_CONTRACT §5c — additive offer-epoch key so the server can
-			// dedupe on it as a backstop even if timestamps ever drift again.
 			if (t.offerInstanceId != null)
 			{
 				row.addProperty("offer_instance_id", t.offerInstanceId);
@@ -412,13 +336,6 @@ public class O7FlipApiClient
 		});
 	}
 
-	/**
-	 * Reads the {@code trades[]} array on a /tracker/bulk response and builds
-	 * a map from local {@code offerInstanceId} → server {@code trade_id} for
-	 * every row that has both. Returns an empty map when the server response
-	 * pre-dates the {@code trades[]} field, so a stale server is a no-op
-	 * (the plugin falls back to fingerprint dedup on next history sync).
-	 */
 	private java.util.Map<Long, Long> parseBulkTradeIds(JsonObject root, List<TradeRecord> sentTrades)
 	{
 		java.util.Map<Long, Long> out = new java.util.HashMap<>();
@@ -446,16 +363,11 @@ public class O7FlipApiClient
 			}
 			catch (Exception ignored)
 			{
-				// Malformed row — skip it. The other rows still map cleanly.
 			}
 		}
 		return out;
 	}
 
-	/** Result of a {@code /tracker/bulk} call. {@code ok} false means the
-	 *  whole batch failed (network, 5xx, parse error); caller may retry.
-	 *  {@link #tradeIdsByOfferInstanceId} is the per-row mapping the plugin
-	 *  uses to stamp newly-synced rows with their canonical server id. */
 	public static final class BulkSyncResult
 	{
 		public final boolean ok;
@@ -482,21 +394,6 @@ public class O7FlipApiClient
 		}
 	}
 
-	/**
-	 * POSTs a single trade to {@code /tracker}. The callback fires with
-	 * {@code (delivered, tradeId)}:
-	 * <ul>
-	 *   <li>{@code delivered} — true on ANY 2xx, including the duplicate
-	 *       case where the server already had the row. SYNC_CONTRACT §5: a
-	 *       delivered fill must never be re-POSTed, so callers persist this
-	 *       (see {@code TradeRecord.serverSynced}).</li>
-	 *   <li>{@code tradeId} — the server-issued id, null when the response
-	 *       omits it (e.g. a duplicate where the secondary lookup failed) or
-	 *       on any failure. A null id with {@code delivered=true} is not a
-	 *       failure — the row reconciles on the next history sync.</li>
-	 * </ul>
-	 * Callers may pass {@code null} for {@code onResult}.
-	 */
 	public void postTradeRecord(TradeRecord trade, BiConsumer<Boolean, Long> onResult)
 	{
 		if (isRateLimited())
@@ -513,7 +410,6 @@ public class O7FlipApiClient
 		body.addProperty("total_gp",  trade.totalGp);
 		body.addProperty("timestamp", trade.timestamp);
 		body.addProperty("partial",   trade.partial);
-		// SYNC_CONTRACT §5c — additive offer-epoch key for server-side dedup.
 		if (trade.offerInstanceId != null)
 		{
 			body.addProperty("offer_instance_id", trade.offerInstanceId);
@@ -558,8 +454,6 @@ public class O7FlipApiClient
 					}
 					catch (Exception parse)
 					{
-						// 2xx with an unparseable body — the server still has
-						// the row, so delivery stands; only the id is lost.
 						log.warn("[07Flip] postTradeRecord parse error: {}", parse.getMessage());
 					}
 					if (onResult != null) onResult.accept(true, tradeId);
@@ -572,13 +466,6 @@ public class O7FlipApiClient
 		});
 	}
 
-	/**
-	 * Fetches the user's stored trade history from 07flip.com. Requires an
-	 * API key — without one the callback receives an empty list and false.
-	 *
-	 * Callback receives (trades, hasMore). Called once with an empty list
-	 * on any failure (network, 401, parse error, no key).
-	 */
 	public void fetchTrackerHistory(Long since, int limit, BiConsumer<List<TradeRecord>, Boolean> callback)
 	{
 		String key = sanitizedApiKey();
@@ -621,7 +508,6 @@ public class O7FlipApiClient
 					{
 						TradeRecord t = new TradeRecord();
 						t.tradeId   = getLongOrNull(obj, "trade_id");
-						// Came FROM the server, so by definition it has it.
 						t.serverSynced = true;
 						t.itemId    = getInt(obj, "item_id", 0);
 						t.name      = getString(obj, "name", "");
@@ -649,15 +535,6 @@ public class O7FlipApiClient
 		});
 	}
 
-	/**
-	 * Server-authoritative My Trades stats — merges plugin trade_records with
-	 * website-logged tracker_entries and de-dupes via flip_trade_links so the
-	 * plugin doesn't have to. Requires an API key; returns null on any failure
-	 * (no key, network, 401, parse error, 404 if endpoint not yet deployed).
-	 *
-	 * Callers should treat null as "fall back to local FIFO ProfitCalculator
-	 * result" — same UX as a user with no key.
-	 */
 	public void fetchTrackerStats(Consumer<TrackerStats> callback)
 	{
 		String key = sanitizedApiKey();
@@ -686,8 +563,6 @@ public class O7FlipApiClient
 					}
 					if (!response.isSuccessful() || response.body() == null)
 					{
-						// 404 is expected until the server deploys the endpoint —
-						// log at debug, not warn, to avoid scaring early users.
 						if (response.code() == 404)
 						{
 							log.debug("[07Flip] /tracker/stats not yet available (404)");
@@ -740,13 +615,6 @@ public class O7FlipApiClient
 		});
 	}
 
-	/**
-	 * Pins the current 07Flip rec_buy / rec_sell prices for an item to the
-	 * user's account. Sell-side overlay later reads these via the {@code frozen}
-	 * field on {@code /v2/item/{id}} so projected margin survives market drift
-	 * between buy placement and sell setup. Best-effort — server-side state
-	 * matters, the callback exists only for log / retry hooks.
-	 */
 	public void postFreeze(int itemId, long frozenBuy, long frozenSell, Consumer<Boolean> callback)
 	{
 		String key = sanitizedApiKey();
@@ -792,11 +660,6 @@ public class O7FlipApiClient
 		});
 	}
 
-	/**
-	 * Clears any active freeze for an item. Silent no-op server-side if none
-	 * existed. Called by the plugin after a sell FIFO-matches a buy in
-	 * tradeHistory, closing out the flip cycle.
-	 */
 	public void postUnfreeze(int itemId, Consumer<Boolean> callback)
 	{
 		String key = sanitizedApiKey();
@@ -810,7 +673,6 @@ public class O7FlipApiClient
 			if (callback != null) callback.accept(false);
 			return;
 		}
-		// Empty JSON body — server only needs the {itemId, userId} pair.
 		RequestBody requestBody = RequestBody.create(MEDIA_TYPE_JSON, "{}");
 		Request.Builder builder = new Request.Builder()
 			.url(BASE_URL + "/v2/item/" + itemId + "/unfreeze")
@@ -840,16 +702,6 @@ public class O7FlipApiClient
 		});
 	}
 
-	/**
-	 * Fetches the per-item Insights blob shown on the Insights tab. Premium
-	 * fields ({@code rec_*}, {@code score.signal}, {@code projection}) come
-	 * back as null for free users — callers must check {@code premiumLocked}
-	 * to decide whether to show the upsell card.
-	 *
-	 * Open to free + premium API keys, and even to anonymous requests
-	 * (server returns the open subset). Callback receives null on any
-	 * failure: 404 (unknown item), 400 (non-numeric id), network, parse.
-	 */
 	public void fetchItemInsights(int itemId, Consumer<ItemInsights> callback)
 	{
 		fetch(BASE_URL + "/v2/item/" + itemId, new Callback()
@@ -1062,12 +914,6 @@ public class O7FlipApiClient
 		return out;
 	}
 
-	/**
-	 * Parses a JSON number array where individual elements may be null —
-	 * preserved as Java nulls so callers can distinguish "no data here" from
-	 * a real zero. Used for the buy/sell sparkline arrays where the current
-	 * incomplete hour is sent as null.
-	 */
 	private Long[] parseNullableLongArray(JsonObject parent, String key)
 	{
 		if (parent == null || !parent.has(key) || parent.get(key).isJsonNull() || !parent.get(key).isJsonArray())
@@ -1108,20 +954,7 @@ public class O7FlipApiClient
 		return (el == null || el.isJsonNull() || !el.isJsonObject()) ? null : el.getAsJsonObject();
 	}
 
-	// -------------------------------------------------------------------------
-	// Auth
-	// -------------------------------------------------------------------------
 
-	/**
-	 * @param onSuccess fired exactly once on a successful 200 response with
-	 *                  parsed AuthStatus.
-	 * @param onTransient fired once if the call failed in a way the server
-	 *                    explicitly invites a retry on — currently HTTP 503
-	 *                    (deploy warmup) or network failure. Callers should
-	 *                    schedule a one-shot retry. NOT fired for permanent
-	 *                    errors (401/403/parse errors) — auth state is
-	 *                    deliberately left unchanged for those.
-	 */
 	public void fetchAuthStatus(Consumer<AuthStatus> onSuccess, Runnable onTransient)
 	{
 		String key = sanitizedApiKey();
@@ -1146,10 +979,6 @@ public class O7FlipApiClient
 					int code = response.code();
 					if (code >= 500 && code <= 599)
 					{
-						// Any 5xx is treated as transient — covers the 503 warmup
-						// guard our server uses after a deploy, plus 502/504 from
-						// the gateway during the same window. Schedule a retry;
-						// don't change the user-facing auth state in the meantime.
 						log.debug("[07Flip] /auth returned {} — transient server error, will retry", code);
 						if (onTransient != null)
 						{
@@ -1159,7 +988,6 @@ public class O7FlipApiClient
 					}
 					if (!response.isSuccessful() || response.body() == null)
 					{
-						// Permanent error (401/403/etc) — leave existing auth state unchanged.
 						log.warn("[07Flip] fetchAuthStatus HTTP {}", code);
 						return;
 					}
@@ -1181,34 +1009,18 @@ public class O7FlipApiClient
 		});
 	}
 
-	/** Convenience overload kept for any callers that don't care about retry signalling. */
 	public void fetchAuthStatus(Consumer<AuthStatus> callback)
 	{
 		fetchAuthStatus(callback, null);
 	}
 
-	// -------------------------------------------------------------------------
-	// Paginated endpoints — callback receives (items, serverTotal)
-	// serverTotal defaults to items.size() when the server does not return "total"
-	// -------------------------------------------------------------------------
 
-	/** Backwards-compatible overload — defaults sort to flip07Score (server default). */
 	public void fetchFlips(String preset, long minProfit, long priceMin, long priceMax,
 	                       int page, BiConsumer<List<FlipItem>, Integer> callback)
 	{
 		fetchFlips(preset, "flip07Score", minProfit, priceMin, priceMax, 0L, page, callback, null);
 	}
 
-	/**
-	 * Full request including sort, optional cashStack annotation, and a
-	 * separate callback for premium-gated rejections (HTTP 403). When the
-	 * server returns 403 with {@code error: premium_required}, the empty
-	 * list is delivered to {@code callback} and {@code onPremiumRequired}
-	 * is also invoked with the {@code upgrade_url} so the UI can surface
-	 * an "upgrade to unlock" prompt instead of just showing a blank list.
-	 *
-	 * @param sort  one of "flip07Score" | "potentialProfit" | "profit" | "roi" | "recProfit"
-	 */
 	public void fetchFlips(String preset, String sort, long minProfit, long priceMin, long priceMax,
 	                       long cashStack, int page,
 	                       BiConsumer<List<FlipItem>, Integer> callback,
@@ -1222,9 +1034,6 @@ public class O7FlipApiClient
 		}
 		if (sort != null && !sort.isEmpty())
 		{
-			// "buyPriceDesc" / "sellPriceDesc" pseudo-keys are split here into
-			// real (sort, order) pairs so the panel can offer ascending +
-			// descending variants of the same field in one dropdown.
 			String realSort = sort;
 			String order = null;
 			if (sort.endsWith("Desc"))
@@ -1234,8 +1043,6 @@ public class O7FlipApiClient
 			}
 			else if ("buyPrice".equals(sort) || "sellPrice".equals(sort))
 			{
-				// Price ascending is the natural intuition for "buy cheap" —
-				// override the server's default (desc) for these two keys.
 				order = "asc";
 			}
 			url.append("&sort=").append(realSort);
@@ -1312,16 +1119,6 @@ public class O7FlipApiClient
 		}
 	}
 
-	/**
-	 * Fetches the /dips feed — a mix of dip-window and ATL items distinguished
-	 * by the {@code type} field on each row.
-	 *
-	 * @param sort one of {@code "recent"} (default), {@code "dip_pct"} or
-	 *             {@code "atl_pct"}; pass null/empty for server default.
-	 * @param window {@code "1d"} (default), {@code "7d"}, or {@code "30d"}.
-	 *               Determines which dip window the server uses to populate
-	 *               {@code dip_pct} and to gate the -5% filter.
-	 */
 	public void fetchDips(String sort, String window, int page,
 	                      BiConsumer<List<DipItem>, Integer> callback)
 	{
@@ -1331,8 +1128,6 @@ public class O7FlipApiClient
 		{
 			url.append("&sort=").append(sort);
 		}
-		// "1d" is the server default — sending it explicitly is redundant.
-		// Anything else gets passed through verbatim.
 		if (window != null && !window.isEmpty() && !"1d".equals(window))
 		{
 			url.append("&activity_window=").append(window);
@@ -1354,9 +1149,6 @@ public class O7FlipApiClient
 		});
 	}
 
-	// -------------------------------------------------------------------------
-	// /high-alch — High Alchemy profit list (anon, no auth)
-	// -------------------------------------------------------------------------
 
 	public void fetchHighAlch(String sort, int page, boolean fireStaff, boolean bryophyta,
 	                          Consumer<HighAlchItem.Response> callback)
@@ -1446,18 +1238,7 @@ public class O7FlipApiClient
 		return item;
 	}
 
-	// -------------------------------------------------------------------------
-	// /favourites — user's saved item list (auth required)
-	// -------------------------------------------------------------------------
 
-	/**
-	 * Calls back with the user's favourites, enriched with the same flip-row
-	 * fields {@link FlipItem} carries. Items the server marks {@code stale}
-	 * are returned with whatever non-null fields it could populate — usually
-	 * just item_id + name.
-	 *
-	 * No API key → callback fires once with an empty list.
-	 */
 	public void fetchFavourites(Consumer<List<FlipItem>> callback)
 	{
 		String key = sanitizedApiKey();
@@ -1493,9 +1274,6 @@ public class O7FlipApiClient
 					callback.accept(new ArrayList<>());
 					return;
 				}
-				// Parse + log result count. The body has to be consumed before
-				// we can read the parsed list, so we read the string once and
-				// reuse it for the parse + the diagnostic.
 				try
 				{
 					String body = response.body().string();
@@ -1515,10 +1293,6 @@ public class O7FlipApiClient
 						? root.get("count").getAsInt() : items.size();
 					if (items.isEmpty())
 					{
-						// Surfacing this at INFO is intentional — when the user
-						// has favourites on the website but the plugin reads 0,
-						// this is the diagnostic. (Could be apiKey↔userId
-						// mismatch, replication lag, or an empty list.)
 						log.info("[07Flip] GET /favourites returned 0 items (server count={})", serverCount);
 					}
 					else
@@ -1537,28 +1311,18 @@ public class O7FlipApiClient
 		});
 	}
 
-	/** Optional handler the plugin sets to be notified of 401s from
-	 *  /favourites. Plugin uses it to surface a "key invalid" prompt. */
 	private volatile Runnable onUnauthorized;
 
-	/** Plugin wires in the 401 handler — invoked from the OkHttp callback
-	 *  thread, so the handler is responsible for marshalling back to EDT. */
 	public void setOnFavouritesUnauthorized(Runnable handler)
 	{
 		this.onUnauthorized = handler;
 	}
 
-	/**
-	 * Adds {@code itemId} to the user's favourites. {@code onResult} is fired
-	 * with {@code true} on a 2xx response and {@code false} otherwise. Always
-	 * fired exactly once.
-	 */
 	public void addFavourite(int itemId, Consumer<Boolean> onResult)
 	{
 		mutateFavourite("POST", itemId, onResult);
 	}
 
-	/** Removes {@code itemId} from the user's favourites. */
 	public void removeFavourite(int itemId, Consumer<Boolean> onResult)
 	{
 		mutateFavourite("DELETE", itemId, onResult);
@@ -1621,25 +1385,7 @@ public class O7FlipApiClient
 		});
 	}
 
-	// -------------------------------------------------------------------------
-	// /optimize — premium-gated 8-slot portfolio optimizer
-	// -------------------------------------------------------------------------
 
-	/**
-	 * Calls {@code POST /api/runelite/optimize} with the user's chosen
-	 * inputs and dispatches one of three callbacks depending on the
-	 * response:
-	 * <ul>
-	 *   <li>{@code onSuccess(OptimizeResult)} on 200 — full allocation plan.</li>
-	 *   <li>{@code onPremiumRequired(upgradeUrl)} on 403 — free user. The
-	 *       URL is the server's upgrade target, ready to feed into LinkBrowser.</li>
-	 *   <li>{@code onError(reason)} on validation 400, transport failure, or
-	 *       parse failure. {@code reason} is the server's error code (e.g.
-	 *       {@code invalid_capital}) or a short transport-error string.</li>
-	 * </ul>
-	 *
-	 * Each callback fires at most once.
-	 */
 	public void fetchOptimize(long capital, int slots, String risk,
 	                          int maxFillHours, Boolean members, java.util.List<Integer> excludeItemIds,
 	                          Double minProfitPct,
@@ -1671,8 +1417,6 @@ public class O7FlipApiClient
 			for (Integer id : excludeItemIds) if (id != null && id > 0) ex.add(id);
 			body.add("exclude_item_ids", ex);
 		}
-		// Optional per-slot wealth floor. Omit (server auto) unless the user
-		// set a value in range. Server clamps 0..10 but we guard locally too.
 		if (minProfitPct != null && minProfitPct > 0 && minProfitPct <= 10)
 		{
 			body.addProperty("min_profit_pct", minProfitPct);
@@ -1786,14 +1530,6 @@ public class O7FlipApiClient
 		return out;
 	}
 
-	/**
-	 * Parses one allocation / live-slot object. Shared by {@link #parseOptimizeResponse}
-	 * and {@link #parseSession} so the two never drift — the only difference
-	 * between the endpoints is that {@code buys}/{@code sells}/{@code state}/
-	 * {@code partial} are populated on {@code /optimize/active} and absent on
-	 * a fresh {@code /optimize}. All field reads are lenient (unknown keys
-	 * ignored, missing keys fall back to defaults).
-	 */
 	private OptimizeResult.Allocation parseAllocation(JsonObject a)
 	{
 		OptimizeResult.Allocation al = new OptimizeResult.Allocation();
@@ -1818,7 +1554,6 @@ public class O7FlipApiClient
 		al.hourlyTrend           = parseIntArray(a, "hourly_trend");
 		al.profitPctOfBank       = getDoubleOrNull(a, "profit_pct_of_bank");
 		al.belowWealthThreshold  = getBoolOrNull(a, "below_wealth_threshold");
-		// Live-tracking fields (only populated on /optimize/active responses)
 		parseSlotFills(a, "buys",  al.buys);
 		parseSlotFills(a, "sells", al.sells);
 		al.state                 = com.o7flip.model.SlotState.fromWire(getString(a, "state", "pending"));
@@ -1826,22 +1561,13 @@ public class O7FlipApiClient
 		al.sellListed            = getBool(a, "sell_listed", false);
 		al.reservedGp            = getLong(a, "reserved_gp", 0);
 		al.offerInstanceId       = getLongOrNull(a, "offer_instance_id");
-		// §7 manual override — server-owned rev + source, round-tripped on POST.
 		al.overrideRev           = getInt(a, "override_rev", 0);
 		String overrideSource    = getString(a, "override_source", "");
 		al.overrideSource        = overrideSource.isEmpty() ? null : overrideSource;
-		// A leg parsed straight from the server already reflects this rev, so the
-		// plugin's applied high-water mark starts equal (no redundant re-adopt).
 		al.appliedOverrideRev    = al.overrideRev;
 		return al;
 	}
 
-	/**
-	 * Parses a plan summary object. Shared by {@link #parseOptimizeResponse} and
-	 * {@link #parseSession} so the {@code /optimize} and {@code /optimize/active}
-	 * summaries never drift. Package-private + symmetric with {@link #summaryToJson}
-	 * so the round-trip is unit-testable.
-	 */
 	OptimizeResult.Summary parseSummary(JsonObject s)
 	{
 		OptimizeResult.Summary sum = new OptimizeResult.Summary();
@@ -1868,11 +1594,6 @@ public class O7FlipApiClient
 		return sum;
 	}
 
-	/**
-	 * Serialises a plan summary back to the wire shape. Key-symmetric with
-	 * {@link #parseSummary} so a GET→POST round-trip preserves the server figures.
-	 * Package-private so the round-trip is unit-testable.
-	 */
 	JsonObject summaryToJson(OptimizeResult.Summary sum)
 	{
 		JsonObject s = new JsonObject();
@@ -1918,10 +1639,6 @@ public class O7FlipApiClient
 		return s;
 	}
 
-	/**
-	 * Parses the redesigned-engine summary additions. Separated so the long
-	 * common summary block stays readable. Every field is optional.
-	 */
 	private void parseSummaryExtras(JsonObject s, OptimizeResult.Summary sum)
 	{
 		String empty                = getString(s, "empty_reason", "");
@@ -1954,18 +1671,7 @@ public class O7FlipApiClient
 		}
 	}
 
-	// -------------------------------------------------------------------------
-	// /optimize/active — cross-surface session sync (website + plugin)
-	// -------------------------------------------------------------------------
 
-	/**
-	 * GET the currently-active optimiser session. The endpoint returns either
-	 * HTTP 200 with the session body or HTTP 204 (no active session). On 204
-	 * the callback receives null — that's the "fresh user, nothing to hydrate"
-	 * signal, NOT an error.
-	 *
-	 * Bearer apiKey auth. 60/min/IP rate-limit on the server side.
-	 */
 	public void fetchActiveSession(Consumer<com.o7flip.model.OptimizerSession> callback)
 	{
 		String key = sanitizedApiKey();
@@ -2013,11 +1719,6 @@ public class O7FlipApiClient
 		});
 	}
 
-	/**
-	 * Upsert the active session. Body matches the GET response shape. The
-	 * server is last-write-wins (no version check). Caller should debounce
-	 * to ~1s so a flurry of local changes collapses into one POST.
-	 */
 	public void postActiveSession(com.o7flip.model.OptimizerSession session, Consumer<Boolean> onComplete)
 	{
 		String key = sanitizedApiKey();
@@ -2056,7 +1757,6 @@ public class O7FlipApiClient
 		});
 	}
 
-	/** Clear the active session. 204 expected. */
 	public void deleteActiveSession(Consumer<Boolean> onComplete)
 	{
 		String key = sanitizedApiKey();
@@ -2099,10 +1799,6 @@ public class O7FlipApiClient
 		{
 			JsonObject root = gson.fromJson(json, JsonObject.class);
 			if (root == null) return s;
-			// Server wraps the payload in a {"session": {...}} envelope (per
-			// src/app/api/runelite/optimize/active/route.ts). Unwrap when
-			// present; fall through to root-level if a future endpoint
-			// version flattens it.
 			JsonObject body = root.has("session") && root.get("session").isJsonObject()
 				? root.getAsJsonObject("session") : root;
 			s.generatedAt = getString(body, "generated_at", "");
@@ -2140,8 +1836,6 @@ public class O7FlipApiClient
 					catch (Exception ignored) {}
 				}
 			}
-			// Phase 4 — carry the server's plan summary verbatim (read from the
-			// unwrapped body) so the panel renders real figures, not a re-sum.
 			if (body.has("summary") && body.get("summary").isJsonObject())
 			{
 				s.summary = parseSummary(body.getAsJsonObject("summary"));
@@ -2154,12 +1848,6 @@ public class O7FlipApiClient
 		return s;
 	}
 
-	/**
-	 * Serialise a session back to the JSON shape the server expects. Mirrors
-	 * the GET response: wrapped in a {@code {"session": {...}}} envelope.
-	 * Keep this symmetric with {@link #parseSession} or POST round-trips
-	 * silently drop fields.
-	 */
 	private String sessionToJson(com.o7flip.model.OptimizerSession session)
 	{
 		JsonObject body = new JsonObject();
@@ -2199,10 +1887,6 @@ public class O7FlipApiClient
 				if (al.fillConfidence != null) s.addProperty("fill_confidence", al.fillConfidence);
 				s.addProperty("buy_limit",                al.buyLimit);
 				if (al.hourlyVolume != null)    s.addProperty("hourly_volume", al.hourlyVolume);
-				// price_source is REQUIRED by the website — a missing value makes
-				// it discard the whole session. parseAllocation maps an absent/
-				// empty source to null, so write a conservative "raw" fallback
-				// rather than omitting the key.
 				s.addProperty("price_source", al.priceSource != null ? al.priceSource : "raw");
 				if (al.rawBuyPrice != null)     s.addProperty("raw_buy_price", al.rawBuyPrice);
 				if (al.rawSellPrice != null)    s.addProperty("raw_sell_price", al.rawSellPrice);
@@ -2220,21 +1904,13 @@ public class O7FlipApiClient
 				s.add("buys",  fillsToJson(al.buys));
 				s.add("sells", fillsToJson(al.sells));
 				s.addProperty("state", al.state == null ? "pending" : al.state.wire());
-				// SYNC_CONTRACT §10 — live sell-listing signal so the site can show
-				// "Selling — awaiting buyer" the moment the offer is placed.
 				if (al.sellListed) s.addProperty("sell_listed", true);
-				// Partial-fill round-trip — the website tolerates + renders these.
 				if (al.partial)
 				{
 					s.addProperty("partial", true);
 					if (al.reservedGp > 0) s.addProperty("reserved_gp", al.reservedGp);
 				}
-				// SYNC_CONTRACT §2 — leg identity. Server keys by (item_id,
-				// offer_instance_id); omit when the plugin hasn't traded this slot.
 				if (al.offerInstanceId != null) s.addProperty("offer_instance_id", al.offerInstanceId);
-				// SYNC_CONTRACT §7 — round-trip the manual-override rev/source so the
-				// server keeps its own correction across plugin POSTs. The plugin
-				// never bumps these itself (site-first, §8.3).
 				if (al.overrideRev > 0) s.addProperty("override_rev", al.overrideRev);
 				if (al.overrideSource != null) s.addProperty("override_source", al.overrideSource);
 				slots.add(s);
@@ -2248,15 +1924,10 @@ public class O7FlipApiClient
 		{
 			body.addProperty("updated_at", session.updatedAt);
 		}
-		// Phase 4 — round-trip the server plan summary so a fill-only POST doesn't
-		// blank it server-side. Plugin never invents summary figures (site-authoritative).
 		if (session.summary != null)
 		{
 			body.add("summary", summaryToJson(session.summary));
 		}
-		// POST body is the raw session shape (not wrapped in a "session"
-		// envelope). The envelope only appears on the GET RESPONSE side —
-		// confirmed via a 400 from the server when we wrapped the POST too.
 		return gson.toJson(body);
 	}
 
@@ -2276,16 +1947,7 @@ public class O7FlipApiClient
 		return arr;
 	}
 
-	// -------------------------------------------------------------------------
-	// /optimize/completed — shared completed-positions history (web + plugin)
-	// -------------------------------------------------------------------------
 
-	/**
-	 * GET the shared completed-positions list. Server returns
-	 * {@code { positions: [...], updated_at }}, newest-first, capped at 200.
-	 * Bearer auth. The callback receives null on any failure (no key, transport,
-	 * non-2xx) so the caller can keep its current cache rather than blanking it.
-	 */
 	public void fetchCompletedPositions(Consumer<List<com.o7flip.model.CompletedPosition>> callback)
 	{
 		String key = sanitizedApiKey();
@@ -2331,11 +1993,6 @@ public class O7FlipApiClient
 		});
 	}
 
-	/**
-	 * POST one completed position (append). The server is idempotent on
-	 * {@code item_id + closed_at} and returns the full updated list, which the
-	 * plugin adopts as its authoritative cache. Callback gets null on failure.
-	 */
 	public void postCompletedPosition(com.o7flip.model.CompletedPosition cp,
 	                                  Consumer<List<com.o7flip.model.CompletedPosition>> callback)
 	{
@@ -2461,9 +2118,6 @@ public class O7FlipApiClient
 	                       int minScore, boolean activeOnly, String tier,
 	                       int page, Consumer<DumpItem.Response> callback)
 	{
-		// confirmedOnly was dropped — the server now enforces confirmed_bot=true
-		// as a base filter on /dumps, so every row in the response is verified.
-		// Sending the param is a no-op; not sending it keeps the URL clean.
 		StringBuilder url = new StringBuilder(BASE_URL + "/dumps?limit=").append(PAGE_LIMIT)
 			.append("&page=").append(page);
 		if (sort != null && !sort.isEmpty())
@@ -2490,8 +2144,6 @@ public class O7FlipApiClient
 		{
 			url.append("&activeOnly=true");
 		}
-		// v5 tier filter — pass "confirmed" or "likely" to narrow, omit for All.
-		// "all" is the server default; sending it explicitly is fine but verbose.
 		if (tier != null && !tier.isEmpty() && !"all".equals(tier))
 		{
 			url.append("&tier=").append(tier);
@@ -2552,18 +2204,10 @@ public class O7FlipApiClient
 		}
 	}
 
-	/**
-	 * Fetches the bot-dumps feed — items currently being mass-dumped by
-	 * automated price-collapse detectors. Same response shape as
-	 * {@link #fetchDumps}, served from a different endpoint that pulls
-	 * specifically from the bot-driven dump signal.
-	 */
 	public void fetchBotDumps(String sort, long minProfit, long priceMin, long priceMax,
 	                          int minScore, boolean activeOnly, String tier,
 	                          int page, Consumer<DumpItem.Response> callback)
 	{
-		// confirmedOnly removed from /bot-dumps for the same reason as /dumps —
-		// server enforces the base confirmed-bot filter.
 		StringBuilder url = new StringBuilder(BASE_URL + "/bot-dumps?limit=").append(PAGE_LIMIT)
 			.append("&page=").append(page);
 		if (sort != null && !sort.isEmpty())
@@ -2611,9 +2255,6 @@ public class O7FlipApiClient
 		});
 	}
 
-	// -------------------------------------------------------------------------
-	// Bundle endpoint — single POST replacing all scheduled individual calls
-	// -------------------------------------------------------------------------
 
 	public void fetchBundle(
 		JsonObject sections,
@@ -2623,8 +2264,6 @@ public class O7FlipApiClient
 		Consumer<String>                     onConnectUrl
 	)
 	{
-		// Honour the global 429 backoff (this is also gated upstream in
-		// fetchAll(), but guard here too so every enqueue path is covered).
 		if (isRateLimited())
 		{
 			return;
@@ -2634,10 +2273,6 @@ public class O7FlipApiClient
 		RequestBody requestBody = RequestBody.create(MEDIA_TYPE_JSON, gson.toJson(body));
 
 		Request.Builder builder = new Request.Builder()
-			// v2 bundle returns full-shape flips rows (members + flip07_score
-			// + rec_buy_price/rec_sell_price/rec_profit). v1 still serves the
-			// legacy 8-key flips section. Other endpoints stay on v1 — only
-			// /bundle has a v2 equivalent right now.
 			.url(BASE_URL + "/v2/bundle")
 			.post(requestBody)
 			.header("User-Agent", USER_AGENT);
@@ -2705,38 +2340,12 @@ public class O7FlipApiClient
 		});
 	}
 
-	// -------------------------------------------------------------------------
-	// Per-type parsers (shared by individual fetch methods and fetchBundle)
-	// -------------------------------------------------------------------------
 
-	/**
-	 * Fetch the per-item p10/p90 recommended buy/sell prices from
-	 * {@code GET /api/runelite/recommended-prices?itemId=…}. Used by the GE
-	 * overlay to populate the auto-fill price suggestion.
-	 *
-	 * Callback receives {@code null} when the item has insufficient recent
-	 * trade data, or on any error (network / HTTP non-200). The plugin
-	 * should treat null as "no recommendation available" and fall back to
-	 * whatever it already shows.
-	 */
 	public void fetchRecommendedPrices(int itemId, Consumer<RecommendedPrices> callback)
 	{
 		fetchRecommendedPrices(itemId, callback, null);
 	}
 
-	/**
-	 * As {@link #fetchRecommendedPrices(int, Consumer)} but with a transient-retry
-	 * hook for deploy-warmup 503s. On a 503 this:
-	 * <ul>
-	 *   <li>does NOT trip the global 429 backoff;</li>
-	 *   <li>does NOT invoke {@code callback} — so the caller keeps serving its
-	 *       last-known cached price untouched (no stamping it stale);</li>
-	 *   <li>fires {@code onRetryAfter} with the delay in ms parsed from the
-	 *       server's {@code Retry-After} (default 30s) so the caller can schedule
-	 *       a single retry.</li>
-	 * </ul>
-	 * 429 still trips the backoff and yields {@code callback(null)} as before.
-	 */
 	public void fetchRecommendedPrices(int itemId, Consumer<RecommendedPrices> callback,
 	                                   java.util.function.LongConsumer onRetryAfter)
 	{
@@ -2768,9 +2377,6 @@ public class O7FlipApiClient
 					}
 					if (code == 503)
 					{
-						// Server deploy warmup. Keep the 429 backoff out of it,
-						// leave the caller's last-known value in place (don't call
-						// callback), and ask for one retry after Retry-After.
 						long retry = parseRetryAfterMs(response);
 						if (retry <= 0) retry = 30_000L;
 						log.debug("[07Flip] /recommended-prices 503 — retry in {}ms (keeping last-known)", retry);
@@ -2829,10 +2435,8 @@ public class O7FlipApiClient
 		item.recBuyPrice     = getLongOrNull(obj, "rec_buy_price");
 		item.recSellPrice    = getLongOrNull(obj, "rec_sell_price");
 		item.recProfit       = getLongOrNull(obj, "rec_profit");
-		// Volume fields — null on rows where server doesn't echo them.
 		item.hourlyVolume    = getIntOrNull(obj, "hourly_volume");
 		item.dailyVolume     = getIntOrNull(obj, "daily_volume");
-		// Band ("Bulk Margin") fields — present only on ?preset=bandFlip rows.
 		item.bandProfit         = getLongOrNull(obj, "band_profit");
 		item.bandMargin         = getLongOrNull(obj, "band_margin");
 		item.bandFloor          = getLongOrNull(obj, "band_floor");
@@ -2883,8 +2487,6 @@ public class O7FlipApiClient
 	private DumpItem parseDumpItem(JsonObject obj)
 	{
 		DumpItem item = new DumpItem();
-		// v5 tier classification — null on older responses; the renderer
-		// treats null the same way it treats "likely" for safety.
 		String t = getString(obj, "tier", "");
 		item.tier             = t.isEmpty() ? null : t;
 		item.itemId           = getInt(obj, "item_id", 0);
@@ -2892,7 +2494,6 @@ public class O7FlipApiClient
 		item.buyPrice         = getLong(obj, "buy_price", 0);
 		item.sellPrice        = getLong(obj, "sell_price", 0);
 		item.profit           = getLong(obj, "profit", 0);
-		// Fallback: older API versions use current_price instead of buy_price
 		if (item.buyPrice == 0)
 		{
 			item.buyPrice = getLong(obj, "current_price", 0);
@@ -2907,7 +2508,6 @@ public class O7FlipApiClient
 		item.buyLimit         = getInt(obj, "buy_limit", 0);
 		item.members          = getBool(obj, "members", true);
 
-		// ── v3 dump-engine fields. All nullable — older responses skip them ─
 		item.roiPct              = getDoubleOrNull(obj, "roi_pct");
 		item.maxProfitAtLimit    = getLongOrNull(obj,   "max_profit_at_limit");
 		item.patternStale        = getBoolOrNull(obj,   "pattern_stale");
@@ -2922,9 +2522,6 @@ public class O7FlipApiClient
 		item.recoveryHours       = getDoubleOrNull(obj, "recovery_hours");
 		item.recoverySamples     = getIntOrNull(obj,    "recovery_samples");
 
-		// hourly_volumes — 24-element int array. Tolerant of missing / wrong
-		// length: anything other than a non-empty array becomes null and the
-		// row simply skips the sparkline.
 		JsonArray hv = obj.has("hourly_volumes") && obj.get("hourly_volumes").isJsonArray()
 			? obj.getAsJsonArray("hourly_volumes") : null;
 		if (hv != null && hv.size() > 0)
@@ -2940,9 +2537,6 @@ public class O7FlipApiClient
 		return item;
 	}
 
-	// -------------------------------------------------------------------------
-	// Internal helpers
-	// -------------------------------------------------------------------------
 
 	@FunctionalInterface
 	private interface JsonMapper<T>
@@ -2950,10 +2544,6 @@ public class O7FlipApiClient
 		T map(JsonObject obj);
 	}
 
-	/**
-	 * Parses a paginated response. Extracts the items array and the "total" field.
-	 * If the server does not include "total", falls back to items.size().
-	 */
 	private <T> void parsePagedResponse(Response response, String arrayKey,
 	                                    JsonMapper<T> mapper,
 	                                    BiConsumer<List<T>, Integer> callback)
@@ -2982,7 +2572,6 @@ public class O7FlipApiClient
 		}
 	}
 
-	/** Parses an array from an already-decoded JsonObject. */
 	private <T> List<T> parseArray(JsonObject json, String arrayKey, JsonMapper<T> mapper)
 	{
 		List<T> result = new ArrayList<>();
@@ -3005,19 +2594,6 @@ public class O7FlipApiClient
 		return result;
 	}
 
-	/**
-	 * Reads the new {@code expected_profit} (cycle total, after tax) with a
-	 * fallback that tolerates two legacy shapes during the transition:
-	 * <ol>
-	 *   <li>Old {@code expected_profit_per_hour} × {@code estimated_fill_hours}
-	 *       — the math that produced the old extrapolated rate, reversed to
-	 *       approximate the new cycle figure.</li>
-	 *   <li>{@code qty × profit_per_unit} — last-ditch derivation if neither
-	 *       new nor old fields are present.</li>
-	 * </ol>
-	 * Sessions saved before the server's semantic change still carry the
-	 * old field, so a stale-cache GET round-trip doesn't blank the card.
-	 */
 	private long readExpectedProfit(JsonObject obj)
 	{
 		if (obj == null) return 0L;
@@ -3037,12 +2613,6 @@ public class O7FlipApiClient
 		return (long) qty * perU;
 	}
 
-	/**
-	 * Pulls a plain {@code int[]} out of a JSON array field. Returns null if
-	 * the field is missing or null (matching the server's "null when the DB
-	 * query failed" semantic for {@code hourly_trend}). Non-numeric entries
-	 * are skipped silently.
-	 */
 	private int[] parseIntArray(JsonObject obj, String key)
 	{
 		if (obj == null || !obj.has(key) || obj.get(key).isJsonNull()) return null;
@@ -3058,11 +2628,6 @@ public class O7FlipApiClient
 		return out;
 	}
 
-	/**
-	 * Reads a {@code SlotFill[]} JSON array onto an existing target list.
-	 * Used for {@code buys} / {@code sells} on LiveSlot — present only on
-	 * {@code /optimize/active} responses, absent on plain {@code /optimize}.
-	 */
 	private void parseSlotFills(JsonObject obj, String key, List<com.o7flip.model.SlotFill> target)
 	{
 		if (obj == null || !obj.has(key) || obj.get(key).isJsonNull()) return;
@@ -3084,7 +2649,6 @@ public class O7FlipApiClient
 		}
 	}
 
-	/** Parses an array from an HTTP response (used by non-paginated endpoints). */
 	private <T> List<T> parseArray(Response response, String arrayKey, JsonMapper<T> mapper)
 	{
 		if (response.code() == 429)
