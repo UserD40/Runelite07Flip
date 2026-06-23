@@ -29,12 +29,6 @@ import com.o7flip.model.SlotFill;
 import org.junit.Test;
 import static org.junit.Assert.assertEquals;
 
-/**
- * {@code O7FlipPlugin.cappedFillQty} — black-and-white rule: the optimiser leg
- * counts only up to the plan target. A buy fills only up to {@code qty}; a sell
- * only up to what the leg counts as bought. Excess actual fills live in My
- * Trades, not on the leg.
- */
 public class CappedFillQtyTest
 {
 	private static OptimizeResult.Allocation slot(int qty, int bought, int sold)
@@ -63,21 +57,18 @@ public class CappedFillQtyTest
 	@Test
 	public void buy_partiallyExceedsTarget_countsOnlyHeadroom()
 	{
-		// 950 already bought, a 100 delta arrives → only 50 fits under the 1000 plan.
 		assertEquals(50, O7FlipPlugin.cappedFillQty(true, slot(1000, 950, 0), 100));
 	}
 
 	@Test
 	public void buy_alreadyAtTarget_countsNothing()
 	{
-		// Plan says 1000, already 1000 — the extra 100 is My-Trades-only.
 		assertEquals(0, O7FlipPlugin.cappedFillQty(true, slot(1000, 1000, 0), 100));
 	}
 
 	@Test
 	public void sell_cannotExceedCountedBought()
 	{
-		// Counted-bought 1000, sold 600 → only 400 more can be counted.
 		assertEquals(400, O7FlipPlugin.cappedFillQty(false, slot(1000, 1000, 600), 500));
 	}
 

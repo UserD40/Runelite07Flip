@@ -28,14 +28,6 @@ import org.junit.Test;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
-/**
- * {@code O7FlipPlugin.nextGeneratedAt} — the plugin's floored-monotonic version
- * stamp, the symmetric counterpart to the server's {@code nextGeneratedAt}. A
- * plugin structure change (swap / Build / "Stop buying") must produce a stamp
- * STRICTLY newer than the prior one so the website (strictly-newer adoption)
- * picks it up — and it must never regress on a stale/non-monotonic
- * {@code /optimize updated_at} or clock skew.
- */
 public class GeneratedAtMonotonicTest
 {
 	private static final String PREV = "2026-06-09T20:00:00Z";
@@ -43,7 +35,6 @@ public class GeneratedAtMonotonicTest
 	@Test
 	public void serverNewerThanFloor_returnsServerStamp()
 	{
-		// updated_at is comfortably ahead of prev+1s → used verbatim.
 		assertEquals("2026-06-09T21:00:00Z",
 			O7FlipPlugin.nextGeneratedAt(PREV, "2026-06-09T21:00:00Z"));
 	}
@@ -51,7 +42,6 @@ public class GeneratedAtMonotonicTest
 	@Test
 	public void serverEqualToPrev_floorsToPrevPlusOneSecond()
 	{
-		// Equal stamp (the stale-swap bug) must NOT pass through — floored to +1s.
 		assertEquals("2026-06-09T20:00:01Z",
 			O7FlipPlugin.nextGeneratedAt(PREV, PREV));
 	}
@@ -59,7 +49,6 @@ public class GeneratedAtMonotonicTest
 	@Test
 	public void serverOlderThanPrev_floorsToPrevPlusOneSecond()
 	{
-		// Clock skew / non-monotonic updated_at can't regress the version.
 		assertEquals("2026-06-09T20:00:01Z",
 			O7FlipPlugin.nextGeneratedAt(PREV, "2026-06-09T19:00:00Z"));
 	}
@@ -74,7 +63,6 @@ public class GeneratedAtMonotonicTest
 	@Test
 	public void noServerStamp_stillStrictlyAfterPrev()
 	{
-		// "Stop buying" has no /optimize round-trip — base = now, floored to prev+1s.
 		String result = O7FlipPlugin.nextGeneratedAt(PREV, null);
 		assertTrue("must advance past prev", O7FlipPlugin.isIsoAfter(result, PREV));
 	}

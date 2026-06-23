@@ -33,13 +33,6 @@ import org.junit.Test;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
-/**
- * Covers {@link O7FlipPlugin#isOfflineSellCompletion} — the offline-sell
- * completion signature used by the login reconcile (SYNC_CONTRACT §7). Only a
- * leg the plugin still thinks is SELLING, whose item has NO live GE offer, is a
- * candidate; everything else must be left alone so the non-destructive prompt
- * doesn't fire spuriously.
- */
 public class OfflineReconcileTest
 {
 	private static final int EYE_OF_AYAK = 28_409;
@@ -68,14 +61,12 @@ public class OfflineReconcileTest
 	@Test
 	public void sellingWithLiveOffer_isNotComplete()
 	{
-		// The sell is still sitting in the GE — the position is not done.
 		assertFalse(O7FlipPlugin.isOfflineSellCompletion(leg(SlotState.SELLING), live(EYE_OF_AYAK)));
 	}
 
 	@Test
 	public void filledWaitingToList_isNotFlagged()
 	{
-		// Bought, no sell listed yet — empty slot is normal, not a completion.
 		assertFalse(O7FlipPlugin.isOfflineSellCompletion(leg(SlotState.FILLED), Collections.emptySet()));
 	}
 

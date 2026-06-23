@@ -31,12 +31,6 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotSame;
 import static org.junit.Assert.assertTrue;
 
-/**
- * Covers {@link OptimizerSession#copy()} — the deep snapshot taken on the game
- * thread before an off-thread POST. The snapshot MUST be fully independent of the
- * live session: {@code foldFill} mutates {@link SlotFill}s in place and structural
- * edits hit the slots list, so a shallow copy would still tear under the writer.
- */
 public class SessionCopyTest
 {
 	private static SlotFill fill(int qty, long priceEach)
@@ -93,7 +87,6 @@ public class SessionCopyTest
 		assertNotSame(oa.buys.get(0), ca.buys.get(0));
 		assertNotSame(oa.hourlyTrend, ca.hourlyTrend);
 
-		// Values carried faithfully, including §2/§7 identity + override fields.
 		assertEquals(28_409, ca.itemId);
 		assertEquals(SlotState.SELLING, ca.state);
 		assertEquals(Long.valueOf(17_000_000_003L), ca.offerInstanceId);
@@ -113,7 +106,6 @@ public class SessionCopyTest
 		OptimizerSession orig = sample();
 		OptimizerSession copy = orig.copy();
 
-		// Simulate foldFill mutating the live SlotFill in place after the snapshot.
 		orig.slots.get(0).buys.get(0).qty = 999;
 		orig.slots.get(0).buys.get(0).priceEach = 7;
 

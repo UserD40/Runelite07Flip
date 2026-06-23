@@ -32,15 +32,6 @@ import static org.junit.Assert.assertNotSame;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
-/**
- * Phase 4 — the plan summary now rides the {@code /optimize/active} session
- * verbatim. Covers the {@code parseSummary} ⇄ {@code summaryToJson} wire
- * round-trip and the {@link OptimizeResult.Summary#copy()} deep-copy
- * independence (so a game-thread POST snapshot can't tear the nested mutables).
- *
- * {@code parseSummary}/{@code summaryToJson} operate purely on the JsonObject
- * argument (no injected gson/config), so a bare instance suffices.
- */
 public class SummaryWireTest
 {
 	private final O7FlipApiClient client = new O7FlipApiClient();
@@ -122,7 +113,6 @@ public class SummaryWireTest
 		assertNotSame(s.slotSuggestion, c.slotSuggestion);
 		assertNotSame(s.eligibilityRejections, c.eligibilityRejections);
 
-		// Mutating the original after the copy must not bleed into the snapshot.
 		s.slotSuggestion.suggestedSlots = 99;
 		s.eligibilityRejections.put("y", 2);
 		assertEquals(6, c.slotSuggestion.suggestedSlots);

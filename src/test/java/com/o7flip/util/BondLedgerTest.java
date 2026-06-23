@@ -68,7 +68,6 @@ public class BondLedgerTest
 			.apply(buy(BOND, 1, 15_174_000L))
 			.apply(sell(BOND, 1, 15_092_000L)); // sold one back at the GE buy price
 
-		// 2 buys, 1 sell back → 1 net bond consumed; spend is 30,348,000 − 15,092,000.
 		assertEquals(15_256_000L, l.spend);
 		assertEquals(1, l.count);
 	}
@@ -76,9 +75,6 @@ public class BondLedgerTest
 	@Test
 	public void sellMoreThanBought_clampsAtZero()
 	{
-		// The user might sell bonds back that pre-date the ledger (legacy
-		// data we don't have a buy record for). The stat should bottom out
-		// at zero rather than going negative.
 		BondLedger l = BondLedger.EMPTY
 			.apply(buy(BOND, 1, 15_174_000L))
 			.apply(sell(BOND, 5, 75_460_000L));
@@ -87,11 +83,6 @@ public class BondLedgerTest
 		assertEquals(0,  l.count);
 	}
 
-	/**
-	 * The headline migration scenario — a year's worth of bonds sitting in
-	 * tradeHistory get summed once into the ledger so the user's
-	 * Membership cost stat survives the upgrade to the bond-ledger build.
-	 */
 	@Test
 	public void seedFromHistory_aggregatesAllBondTradesAcrossMixedRecords()
 	{
@@ -103,9 +94,6 @@ public class BondLedgerTest
 			buy(BOND, 1, 15_174_000L)
 		));
 
-		// 3 bond buys at 15.174M, 1 sell at 15.092M:
-		// spend = 3 × 15_174_000 − 15_092_000 = 30_430_000
-		// count = 3 − 1 = 2
 		assertEquals(30_430_000L, l.spend);
 		assertEquals(2, l.count);
 	}
@@ -126,7 +114,6 @@ public class BondLedgerTest
 		assertEquals(0,  l.count);
 	}
 
-	// ── helpers ──────────────────────────────────────────────────────────────
 
 	private static TradeRecord buy(int itemId, int qty, long totalGp)
 	{

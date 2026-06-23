@@ -36,13 +36,6 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
-/**
- * Covers the SYNC_CONTRACT §7 manual-override carve-out in
- * {@link O7FlipPlugin#mergeRemoteFills}: a server leg whose {@code overrideRev}
- * is ahead of the plugin's applied rev is adopted authoritatively (bought/sold/
- * state), bypassing the local-authoritative {@code isEmpty()} rule for THAT leg
- * only; every other leg stays local-authoritative.
- */
 public class OverrideAdoptionTest
 {
 	private static final int EYE_OF_AYAK = 28_409;
@@ -84,10 +77,6 @@ public class OverrideAdoptionTest
 	@Test
 	public void adoptsAuthoritatively_whenOverrideRevAhead_bypassingIsEmpty()
 	{
-		// Local leg is mid-flip (has its own buys, partially sold, flagged for
-		// offline reconcile). The site entered a correction: bought 10 / sold 10,
-		// CLOSED, overrideRev 1. The plugin must adopt it wholesale despite local
-		// having fills (the isEmpty() rule is bypassed for this leg).
 		Allocation local = leg(EYE_OF_AYAK, 10, SlotState.SELLING, 0, null, 0, true,
 			Arrays.asList(fill(10, 100)), Arrays.asList(fill(4, 110)));
 		Allocation remote = leg(EYE_OF_AYAK, 10, SlotState.CLOSED, 1, "site", 1, false,
@@ -108,9 +97,6 @@ public class OverrideAdoptionTest
 	@Test
 	public void doesNotReAdopt_whenRevNotAhead_localStaysAuthoritative()
 	{
-		// appliedOverrideRev already equals the server's overrideRev → no re-adopt.
-		// Local leg keeps its own (different) fills; the local-authoritative
-		// isEmpty() rule applies (non-empty local leg is untouched).
 		Allocation local = leg(EYE_OF_AYAK, 10, SlotState.SELLING, 1, "site", 1, false,
 			Arrays.asList(fill(10, 100)), Arrays.asList(fill(3, 110)));
 		Allocation remote = leg(EYE_OF_AYAK, 10, SlotState.CLOSED, 1, "site", 1, false,
@@ -119,7 +105,6 @@ public class OverrideAdoptionTest
 		boolean changed = O7FlipPlugin.mergeRemoteFills(session(local), session(remote));
 
 		assertFalse(changed);
-		// Local sells NOT overwritten by the server's count.
 		assertEquals(1, local.sells.size());
 		assertEquals(3, local.sells.get(0).qty);
 		assertEquals(1, local.appliedOverrideRev);
@@ -129,13 +114,10 @@ public class OverrideAdoptionTest
 	@Test
 	public void multiLeg_overridesOneLeg_leavesOtherLocalAuthoritative()
 	{
-		// Leg A: the site advanced overrideRev → adopt authoritatively.
 		Allocation localA = leg(EYE_OF_AYAK, 10, SlotState.SELLING, 0, null, 0, true,
 			Arrays.asList(fill(10, 100)), Arrays.asList(fill(4, 110)));
 		Allocation remoteA = leg(EYE_OF_AYAK, 10, SlotState.CLOSED, 1, "site", 1, false,
 			Arrays.asList(fill(10, 100)), Arrays.asList(fill(10, 110)));
-		// Leg B: NO override. The local leg is non-empty, so it must stay
-		// local-authoritative — a stale/ahead remote snapshot must NOT be unioned.
 		Allocation localB = leg(BANDOS_CHESTPLATE, 5, SlotState.SELLING, 0, null, 0, false,
 			Arrays.asList(fill(5, 200)), Arrays.asList(fill(2, 210)));
 		Allocation remoteB = leg(BANDOS_CHESTPLATE, 5, SlotState.SELLING, 0, null, 0, false,
@@ -145,12 +127,10 @@ public class OverrideAdoptionTest
 			session(localA, localB), session(remoteA, remoteB));
 
 		assertTrue(changed);
-		// A adopted authoritatively.
 		assertEquals(SlotState.CLOSED, localA.state);
 		assertEquals(1, localA.appliedOverrideRev);
 		assertEquals(10, localA.sells.get(0).qty);
 		assertFalse(localA.pendingOfflineReconcile);
-		// B untouched — local-authoritative, no override, non-empty local leg.
 		assertEquals(0, localB.appliedOverrideRev);
 		assertEquals(1, localB.sells.size());
 		assertEquals(2, localB.sells.get(0).qty);
@@ -176,10 +156,6 @@ public class OverrideAdoptionTest
 	@Test
 	public void normalBranch_adoptsRemoteOfferInstanceId_intoFreshLeg()
 	{
-		// No override. A freshly-Built (or post-restart) local leg has no identity
-		// and no fills; the server-discovered leg carries an offerInstanceId. The
-		// normal merge must adopt the fills AND the id so the next in-client fill
-		// merges into the same leg instead of forking a new epoch.
 		Allocation local = leg(EYE_OF_AYAK, 10, SlotState.PENDING, 0, null, 0, false,
 			new ArrayList<>(), new ArrayList<>());
 		Allocation remote = leg(EYE_OF_AYAK, 10, SlotState.BUYING, 0, null, 0, false,
@@ -196,8 +172,6 @@ public class OverrideAdoptionTest
 	@Test
 	public void normalBranch_doesNotOverwriteExistingOfferInstanceId()
 	{
-		// The plugin already owns this leg (it has its own epoch + fills). A stale
-		// remote snapshot must neither overwrite the id nor union its fills.
 		Allocation local = leg(EYE_OF_AYAK, 10, SlotState.BUYING, 0, null, 0, false,
 			Arrays.asList(fill(6, 100)), new ArrayList<>());
 		local.offerInstanceId = 17_000_000_999L;
@@ -221,13 +195,11 @@ public class OverrideAdoptionTest
 
 		O7FlipPlugin.mergeRemoteFills(session(local), session(remote));
 
-		// Mutating the remote (now-discarded) lists must not affect the adopted leg.
 		remote.sells.clear();
 		assertEquals(1, local.sells.size());
 		assertEquals(10, local.sells.get(0).qty);
 	}
 
-	// ── Phase 4: version-gated structural adoption + no-clobber ─────────────────
 
 	private static final int CRYSTAL_SEED = 23_956;
 	private static final String GEN_OLD = "2026-06-09T20:00:00Z";
@@ -334,7 +306,6 @@ public class OverrideAdoptionTest
 		assertTrue(O7FlipPlugin.isIsoAfter(GEN_NEW, GEN_OLD));
 		assertFalse(O7FlipPlugin.isIsoAfter(GEN_OLD, GEN_NEW));
 		assertFalse(O7FlipPlugin.isIsoAfter(GEN_OLD, GEN_OLD));
-		// differing precision still orders correctly (instant parse, not lexical compare)
 		assertTrue(O7FlipPlugin.isIsoAfter("2026-06-09T21:00:00.500Z", "2026-06-09T21:00:00Z"));
 	}
 }

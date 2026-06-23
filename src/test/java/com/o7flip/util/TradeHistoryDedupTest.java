@@ -51,12 +51,6 @@ public class TradeHistoryDedupTest
 		assertSame(one, out.get(0));
 	}
 
-	/**
-	 * The headline regression — exactly the shape that produced the user's
-	 * inflated "Today" and "Worst" numbers. One locally-merged BUY 7 row
-	 * sits alongside 7 server-fill rows of qty=1 each, totalling the same
-	 * qty and gp. Scrub should keep the merged row and drop the 7 fills.
-	 */
 	@Test
 	public void serverFills_summingToLocalMergedRow_areDropped()
 	{
@@ -75,7 +69,6 @@ public class TradeHistoryDedupTest
 		assertSame(local, out.get(0));
 	}
 
-	/** Same shape on the sell side — what crystal armour seed had today. */
 	@Test
 	public void serverSellFills_summingToLocalSellMergedRow_areDropped()
 	{
@@ -89,11 +82,6 @@ public class TradeHistoryDedupTest
 		assertSame(local, out.get(0));
 	}
 
-	/**
-	 * If the server fills only PARTIALLY cover the local row's totals,
-	 * leave them alone — the user might have placed and partially closed
-	 * the offer on the website, then completed the rest in-client.
-	 */
 	@Test
 	public void serverFills_notSummingToLocal_areKept()
 	{
@@ -105,11 +93,6 @@ public class TradeHistoryDedupTest
 		assertEquals(2, out.size());
 	}
 
-	/**
-	 * Two local merged rows for the same offer (different offerInstanceIds —
-	 * happens when slotRecordedFills was lost across a restart and the same
-	 * offer got re-observed). Drop the partial-twin, keep the terminal one.
-	 */
 	@Test
 	public void staleTwins_dropPartialKeepsTerminal()
 	{
@@ -125,11 +108,6 @@ public class TradeHistoryDedupTest
 		assertSame(terminal, out.get(0));
 	}
 
-	/**
-	 * Combined scenario covering both passes: stale-partial twin AND the
-	 * server-fill bundle. The terminal twin survives and all the server
-	 * fills get dropped.
-	 */
 	@Test
 	public void combined_staleTwinPlusSubsumedFills_collapses_to_one_row()
 	{
@@ -148,12 +126,6 @@ public class TradeHistoryDedupTest
 		assertSame(terminal, out.get(0));
 	}
 
-	/**
-	 * Three legitimate bond buys placed back-to-back must NOT be collapsed.
-	 * Bonds back the "Membership cost" stat — each redemption is its own
-	 * offer (qty=1 at the same gp), and the user explicitly said collapsing
-	 * them wiped their 21-bond ledger after buying 3 new bonds.
-	 */
 	@Test
 	public void multipleSeparateOfferRows_ofIdenticalShape_areKept()
 	{
@@ -169,14 +141,6 @@ public class TradeHistoryDedupTest
 		assertEquals(3, out.size());
 	}
 
-	/**
-	 * Same bond-ledger scenario but every row is stale partial=true — the
-	 * common pattern in the on-disk file because BOUGHT-transition without
-	 * a new fill never clears the flag. Without the "auth signal must
-	 * differ" check, all three would collapse to one and the user's
-	 * Membership cost stat would silently halve every time they redeemed
-	 * three bonds.
-	 */
 	@Test
 	public void multipleBondBuys_allPartialTrue_areKept()
 	{
@@ -189,7 +153,6 @@ public class TradeHistoryDedupTest
 		assertEquals(3, out.size());
 	}
 
-	/** Twins outside the 24-hour proximity window aren't collapsed. */
 	@Test
 	public void localTwins_farApart_inTime_areKept()
 	{
@@ -202,11 +165,6 @@ public class TradeHistoryDedupTest
 		assertEquals(2, out.size());
 	}
 
-	/**
-	 * Server fills shouldn't be attributed across item boundaries — a
-	 * Crystal armour seed merged row must not absorb a macuahuitl fill
-	 * even if quantities happen to add up.
-	 */
 	@Test
 	public void differentItems_doNotMatch()
 	{
@@ -218,39 +176,20 @@ public class TradeHistoryDedupTest
 		assertEquals(2, out.size());
 	}
 
-	/**
-	 * The "full ProfitCalculator round-trip" — what would today have
-	 * looked like if the scrub had been in place. Build the user's actual
-	 * crystal-seed shape from disk and confirm the duplicates collapse so
-	 * FIFO sees the correct trade count.
-	 */
 	@Test
 	public void integration_crystalSeed_panicSell_collapsesToOneSell()
 	{
-		// The real on-disk shape captured from the user's tradeHistory after
-		// the panic sell of 6 crystal armour seeds today: one local merged
-		// SELL 6 plus two server-fill rows (SELL 4 + SELL 2) summing back to it.
 		TradeRecord local = merged(CRYSTAL_SEED, "Crystal armour seed", false, 6, 41_218_674L, 1_778_694_533_005L);
 		TradeRecord fill4 = serverFill(CRYSTAL_SEED, "Crystal armour seed", false, 4, 27_479_116L, 1_778_694_533_005L, 2485);
 		TradeRecord fill2 = serverFill(CRYSTAL_SEED, "Crystal armour seed", false, 2, 13_739_558L, 1_778_694_605_586L, 2486);
 
 		List<TradeRecord> out = TradeHistoryDedup.scrub(Arrays.asList(local, fill4, fill2));
 
-		// Only the merged row survives — FIFO will now consume 6 sells (not 12).
 		assertEquals(1, out.size());
 		assertSame(local, out.get(0));
 	}
 
-	// ── stuck-partial duplicates ────────────────────────────────────────────
 
-	/**
-	 * The user's actual on-disk shape: 14 identical {@code SELL 1/2}
-	 * primordial boots rows spread across 5-11 → 5-14, all
-	 * {@code partial=true}, all locally-merged (different offerInstanceIds
-	 * because slotRecordedFills was lost between sessions). Scrub must
-	 * collapse them to one — FIFO was matching every duplicate against the
-	 * single real buy and producing phantom "Today" wins.
-	 */
 	@Test
 	public void stuckPartialDuplicates_areCollapsed()
 	{
@@ -266,14 +205,9 @@ public class TradeHistoryDedupTest
 		List<TradeRecord> out = TradeHistoryDedup.scrub(rows);
 
 		assertEquals(1, out.size());
-		// Earliest observation kept — its timestamp is the original fill time.
 		assertEquals(base, out.get(0).timestamp);
 	}
 
-	/**
-	 * Two separate offers genuinely matching the same shape but more than
-	 * the 7-day window apart aren't collapsed — they're distinct events.
-	 */
 	@Test
 	public void stuckPartialDuplicates_outsideWindow_areKept()
 	{
@@ -288,11 +222,6 @@ public class TradeHistoryDedupTest
 		assertEquals(2, out.size());
 	}
 
-	/**
-	 * Rows that differ in {@code totalQuantity} aren't duplicates — they
-	 * represent offers of different sizes. The user might sell a 1-of-1
-	 * and a 1-of-2 at the same price.
-	 */
 	@Test
 	public void stuckPartialDuplicates_differentTotalQty_areKept()
 	{
@@ -306,14 +235,6 @@ public class TradeHistoryDedupTest
 		assertEquals(2, out.size());
 	}
 
-	/**
-	 * After an earlier scrub pass has already removed older duplicates,
-	 * only two observations of the stuck offer may remain — the original
-	 * and one recent re-observation. As long as they're separated by ≥ 48
-	 * hours we still treat that as the stuck-observation pattern and
-	 * collapse them. This is the exact shape that produced the user's
-	 * phantom primordial flip today: 5-11 SELL plus a 5-14 re-observation.
-	 */
 	@Test
 	public void twoStuckRows_overTwoDays_areCollapsed()
 	{
@@ -329,7 +250,6 @@ public class TradeHistoryDedupTest
 		assertEquals(1_000_000L, out.get(0).timestamp);
 	}
 
-	/** Terminal rows (partial=false) of the same shape aren't lumped in. */
 	@Test
 	public void stuckPartialDuplicates_terminalRowsAreNotCollapsed()
 	{
@@ -345,15 +265,7 @@ public class TradeHistoryDedupTest
 		assertEquals(2, out.size());
 	}
 
-	// ── healBackdatedTimestamps ──────────────────────────────────────────────
 
-	/**
-	 * The user's actual rancour scenario from disk: a BUY 3 placed at
-	 * 20:32 was back-dated to 17:14:28 (1 ms before an older BUY 2 at
-	 * 17:14:29), so today's SELL 3 was wrongly matched against 2 items
-	 * from the older lot. The heal must restore BUY 3's real observation
-	 * time so FIFO sorts BUY 2 first, then BUY 3 second.
-	 */
 	@Test
 	public void heal_rewritesBackdatedBuyToObservedTime()
 	{
@@ -370,13 +282,11 @@ public class TradeHistoryDedupTest
 		assertEquals(observedReal, out.get(0).timestamp);
 	}
 
-	/** Heal leaves rows whose stored timestamp matches the observed real time alone. */
 	@Test
 	public void heal_doesNotTouchTimestampsWithinTolerance()
 	{
 		long observedReal = 1_778_697_167_813L;
 		long offerId      = observedReal * 10L + 1L;
-		// Stored ts is 2 minutes after observed real — well inside the 5-minute window.
 		long storedTs     = observedReal + 2L * 60_000L;
 
 		TradeRecord row = merged(MACUAHUITL, "Dual macuahuitl", true, 1, 6_000_000L, storedTs);
@@ -384,11 +294,9 @@ public class TradeHistoryDedupTest
 
 		List<TradeRecord> out = TradeHistoryDedup.healBackdatedTimestamps(Collections.singletonList(row));
 
-		// Same identity returned — no rewrite happened.
 		assertSame(row, out.get(0));
 	}
 
-	/** Server-fetched rows (no offerInstanceId) are out of scope for the heal. */
 	@Test
 	public void heal_ignoresRowsWithoutOfferInstanceId()
 	{
@@ -400,14 +308,12 @@ public class TradeHistoryDedupTest
 		row.totalGp = 6_000_000L;
 		row.timestamp = 1L;             // wildly low
 		row.tradeId = 999L;
-		// offerInstanceId deliberately null
 
 		List<TradeRecord> out = TradeHistoryDedup.healBackdatedTimestamps(Collections.singletonList(row));
 
 		assertSame(row, out.get(0));
 	}
 
-	// ── helpers ──────────────────────────────────────────────────────────────
 
 	private static TradeRecord merged(int itemId, String name, boolean isBuy, int qty, long totalGp, long ts)
 	{
@@ -436,7 +342,6 @@ public class TradeHistoryDedupTest
 		t.timestamp = ts;
 		t.partial = true;
 		t.tradeId = tradeId;
-		// no offerInstanceId — that's what makes it a "server fill"
 		return t;
 	}
 }
