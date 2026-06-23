@@ -225,36 +225,6 @@ public class DumpItemPanel extends JPanel
 		return sb.toString();
 	}
 
-	private static String formatStatus(String status)
-	{
-		if (status == null)
-		{
-			return "Pattern";
-		}
-		switch (status)
-		{
-			case "dumping":  return "Dumping now";
-			case "due_soon": return "Due soon";
-			case "pattern":  return "Pattern";
-			default:         return "Watching";
-		}
-	}
-
-	private static Color statusColor(String status)
-	{
-		if (status == null)
-		{
-			return new Color(0x888888);
-		}
-		switch (status)
-		{
-			case "dumping":  return new Color(0xFF5555);
-			case "due_soon": return new Color(0xFF981F);
-			case "pattern":  return new Color(0x888888);
-			default:         return new Color(0x666666);
-		}
-	}
-
 	private static String formatAgo(double hours)
 	{
 		if (hours < 2.0)

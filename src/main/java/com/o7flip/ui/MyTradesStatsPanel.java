@@ -524,27 +524,6 @@ public class MyTradesStatsPanel extends JPanel
 		return row;
 	}
 
-	private static JPanel stackedRow(String labelText, JLabel value)
-	{
-		JPanel row = new JPanel();
-		row.setLayout(new BoxLayout(row, BoxLayout.Y_AXIS));
-		row.setBackground(SECTION_BG);
-		row.setBorder(new EmptyBorder(2, 0, 2, 0));
-		row.setAlignmentX(Component.LEFT_ALIGNMENT);
-		row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 36));
-
-		JLabel l = rowLabel(labelText);
-		l.setAlignmentX(Component.LEFT_ALIGNMENT);
-		l.setMaximumSize(new Dimension(Integer.MAX_VALUE, 16));
-
-		value.setAlignmentX(Component.LEFT_ALIGNMENT);
-		value.setMaximumSize(new Dimension(Integer.MAX_VALUE, 16));
-
-		row.add(l);
-		row.add(value);
-		return row;
-	}
-
 	private JPanel stackedBondsRow()
 	{
 		JPanel row = new JPanel(new BorderLayout());

@@ -49,14 +49,12 @@ import javax.swing.JButton;
 import javax.swing.JComboBox;
 import javax.swing.JComponent;
 import javax.swing.JLabel;
-import javax.swing.JList;
 import javax.swing.JMenuItem;
 import javax.swing.JPanel;
 import javax.swing.JPopupMenu;
 import javax.swing.JScrollPane;
 import javax.swing.JTabbedPane;
 import javax.swing.JTextField;
-import javax.swing.ListCellRenderer;
 import javax.swing.Scrollable;
 import javax.swing.SwingConstants;
 import javax.swing.SwingUtilities;
@@ -66,7 +64,6 @@ import javax.swing.border.EmptyBorder;
 import javax.swing.border.MatteBorder;
 import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
-import javax.swing.plaf.basic.BasicComboBoxRenderer;
 import java.awt.BorderLayout;
 import java.awt.CardLayout;
 import java.awt.Color;
@@ -86,7 +83,6 @@ import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -122,12 +118,6 @@ public class O7FlipPanel extends PluginPanel
 		{"lowVolatility",    "Low Volatility"},
 		{"bandFlip",         "Bulk Margin"},
 	};
-	private static final boolean[] PREMIUM_PRESET = {
-		false, false, false, false,                       // free
-		true,  true,  true,  true,  true,  true,  true,   // premium
-		true,                                             // bandFlip (Bulk Margin)
-	};
-
 	private static final String[][] FLIPS_SORTS = {
 		{"flip07Score",     "07Flip Score"},
 		{"potentialProfit", "gp / hour"},
@@ -1804,43 +1794,6 @@ public class O7FlipPanel extends PluginPanel
 		panel.revalidate();
 		panel.repaint();
 	}
-
-	private <T> void fillList(JPanel panel, List<T> items, int page,
-		JLabel pageLabel, JButton prev, JButton next,
-		RowFactory<T> factory, String emptyTitle, String emptySub)
-	{
-		panel.removeAll();
-		int ps    = isSignedIn ? PAGE_SIZE : FREE_ROWS;
-		int total = items.size();
-		int pages = Math.max(1, (int) Math.ceil(total / (double) ps));
-		int safe  = isSignedIn ? Math.min(page, pages - 1) : 0;
-		int start = safe * ps;
-		int end   = Math.min(start + ps, total);
-
-		if (total == 0)
-		{
-			panel.add(emptyLabel(emptyTitle, emptySub));
-		}
-		else
-		{
-			for (int i = start; i < end; i++)
-			{
-				panel.add(factory.build(items.get(i), i % 2 != 0));
-				panel.add(sep());
-			}
-			if (!isSignedIn && total > FREE_ROWS)
-			{
-				panel.add(signInPrompt(total - FREE_ROWS));
-			}
-		}
-
-		pageLabel.setText(isSignedIn && total > 0 ? (safe + 1) + " / " + pages : "");
-		prev.setEnabled(isSignedIn && safe > 0);
-		next.setEnabled(isSignedIn && safe < pages - 1);
-		panel.revalidate();
-		panel.repaint();
-	}
-
 
 	private JPanel buildTopPanel()
 	{
@@ -3935,77 +3888,6 @@ public class O7FlipPanel extends PluginPanel
 		}
 		optInputsHost.revalidate();
 		optInputsHost.repaint();
-	}
-
-	private static boolean memKeyMatches(String key, Boolean state)
-	{
-		switch (key)
-		{
-			case "members": return Boolean.TRUE.equals(state);
-			case "f2p":     return Boolean.FALSE.equals(state);
-			case "any":
-			default:        return state == null;
-		}
-	}
-
-	private String buildOptimizerCapitalLabel()
-	{
-		long cap = plugin != null ? plugin.effectiveCapital() : 0L;
-		if (cap <= 0)
-		{
-			return "<html><font color='#E85050'>Capital not set</font></html>";
-		}
-		return "<html><font color='#888888'>Capital: </font><font color='#FFFFFF'>"
-			+ formatCapital(cap) + "</font></html>";
-	}
-
-	private JPanel buildLabeledStepperRow(String labelA, java.util.function.IntSupplier getA,
-		java.util.function.IntConsumer setA, int minA, int maxA,
-		String labelB, java.util.function.IntSupplier getB,
-		java.util.function.IntConsumer setB, int minB, int maxB)
-	{
-		JPanel row = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 2));
-		row.setBackground(ColorScheme.DARKER_GRAY_COLOR);
-		row.add(buildStepper(labelA, getA, setA, minA, maxA));
-		row.add(buildStepper(labelB, getB, setB, minB, maxB));
-		return row;
-	}
-
-	private JPanel buildStepper(String label, java.util.function.IntSupplier getter,
-		java.util.function.IntConsumer setter, int min, int max)
-	{
-		JPanel s = new JPanel(new FlowLayout(FlowLayout.LEFT, 2, 0));
-		s.setBackground(ColorScheme.DARKER_GRAY_COLOR);
-		JLabel l = new JLabel(label);
-		l.setFont(Fonts.SM);
-		l.setForeground(new Color(0xAAAAAA));
-		JButton dec = pillButton("◀");
-		JButton inc = pillButton("▶");
-		dec.setBackground(new Color(0x3E3E3E));
-		dec.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
-		inc.setBackground(new Color(0x3E3E3E));
-		inc.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
-		JLabel value = new JLabel(String.valueOf(getter.getAsInt()));
-		value.setFont(Fonts.BOLD);
-		value.setForeground(Color.WHITE);
-		value.setBorder(new EmptyBorder(0, 6, 0, 6));
-		dec.addActionListener(e ->
-		{
-			int v = Math.max(min, getter.getAsInt() - 1);
-			setter.accept(v);
-			value.setText(String.valueOf(getter.getAsInt()));
-		});
-		inc.addActionListener(e ->
-		{
-			int v = Math.min(max, getter.getAsInt() + 1);
-			setter.accept(v);
-			value.setText(String.valueOf(getter.getAsInt()));
-		});
-		s.add(l);
-		s.add(dec);
-		s.add(value);
-		s.add(inc);
-		return s;
 	}
 
 	public void onOptimizeResult(com.o7flip.model.OptimizeResult result)

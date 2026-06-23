@@ -186,48 +186,108 @@ public class O7FlipApiClient
 		okHttpClient.newCall(builder.build()).enqueue(callback);
 	}
 
+	// GET a paged list endpoint with the standard log-and-empty-on-failure + parse-on-success
+	// callback. label is used only for the failure warn line.
+	private <T> void fetchPaged(String url, String label, String arrayKey,
+	                            JsonMapper<T> mapper, BiConsumer<List<T>, Integer> callback)
+	{
+		fetch(url, new Callback()
+		{
+			@Override
+			public void onFailure(Call call, IOException e)
+			{
+				log.warn("[07Flip] {} failed: {}", label, e.getMessage());
+				callback.accept(new ArrayList<>(), 0);
+			}
+
+			@Override
+			public void onResponse(Call call, Response response) throws IOException
+			{
+				parsePagedResponse(response, arrayKey, mapper, callback);
+			}
+		});
+	}
+
+	// GET an endpoint that yields a plain list (no total), with log-and-empty-on-failure +
+	// parseArray-on-success. label is used only for the failure warn line.
+	private <T> void fetchList(String url, String label, String arrayKey,
+	                           JsonMapper<T> mapper, Consumer<List<T>> callback)
+	{
+		fetch(url, new Callback()
+		{
+			@Override
+			public void onFailure(Call call, IOException e)
+			{
+				log.warn("[07Flip] {} failed: {}", label, e.getMessage());
+				callback.accept(new ArrayList<>());
+			}
+
+			@Override
+			public void onResponse(Call call, Response response) throws IOException
+			{
+				callback.accept(parseArray(response, arrayKey, mapper));
+			}
+		});
+	}
+
+	@FunctionalInterface
+	private interface ResponseParser<T>
+	{
+		T parse(Response response) throws IOException;
+	}
+
+	// GET an endpoint parsed via a custom Response parser, with log-and-default-on-failure.
+	// The parser owns success/HTTP handling; the default is only used when the request itself
+	// fails. label is used only for the failure warn line.
+	private <T> void fetchParsed(String url, String label,
+	                             ResponseParser<T> parser,
+	                             T emptyDefault, Consumer<T> callback)
+	{
+		fetch(url, new Callback()
+		{
+			@Override
+			public void onFailure(Call call, IOException e)
+			{
+				log.warn("[07Flip] {} failed: {}", label, e.getMessage());
+				callback.accept(emptyDefault);
+			}
+
+			@Override
+			public void onResponse(Call call, Response response) throws IOException
+			{
+				callback.accept(parser.parse(response));
+			}
+		});
+	}
+
 
 	public void fetchSearch(String query, Consumer<List<SearchResultItem>> callback)
 	{
 		try
 		{
 			String encoded = java.net.URLEncoder.encode(query.trim(), "UTF-8");
-			fetch(BASE_URL + "/v2/search?q=" + encoded + "&limit=10", new Callback()
+			fetchList(BASE_URL + "/v2/search?q=" + encoded + "&limit=10", "fetchSearch", "items", obj ->
 			{
-				@Override
-				public void onFailure(Call call, IOException e)
-				{
-					log.warn("[07Flip] fetchSearch failed: {}", e.getMessage());
-					callback.accept(new ArrayList<>());
-				}
-
-				@Override
-				public void onResponse(Call call, Response response) throws IOException
-				{
-					callback.accept(parseArray(response, "items", obj ->
-					{
-						SearchResultItem item = new SearchResultItem();
-						item.itemId         = getInt(obj, "item_id", 0);
-						item.name           = getString(obj, "name", "Unknown");
-						item.buyPrice       = getLongOrNull(obj, "buy_price");
-						item.sellPrice      = getLongOrNull(obj, "sell_price");
-						item.margin         = getLongOrNull(obj, "margin");
-						item.profit         = getLongOrNull(obj, "profit");
-						item.roi            = getDoubleOrNull(obj, "roi");
-						item.recBuyPrice    = getLongOrNull(obj, "rec_buy_price");
-						item.recSellPrice   = getLongOrNull(obj, "rec_sell_price");
-						item.recProfit      = getLongOrNull(obj, "rec_profit");
-						item.hourlyVolume   = getIntOrNull(obj, "hourly_volume");
-						item.dailyVolume    = getIntOrNull(obj, "daily_volume");
-						item.buyLimit       = getInt(obj, "buy_limit", 0);
-						item.members        = getBool(obj, "members", false);
-						item.highAlch       = getIntOrNull(obj, "high_alch");
-						item.lastUpdated    = getString(obj, "last_updated", "");
-						item.dataAgeMinutes = getIntOrNull(obj, "data_age_minutes");
-						return item;
-					}));
-				}
-			});
+				SearchResultItem item = new SearchResultItem();
+				item.itemId         = getInt(obj, "item_id", 0);
+				item.name           = getString(obj, "name", "Unknown");
+				item.buyPrice       = getLongOrNull(obj, "buy_price");
+				item.sellPrice      = getLongOrNull(obj, "sell_price");
+				item.margin         = getLongOrNull(obj, "margin");
+				item.profit         = getLongOrNull(obj, "profit");
+				item.roi            = getDoubleOrNull(obj, "roi");
+				item.recBuyPrice    = getLongOrNull(obj, "rec_buy_price");
+				item.recSellPrice   = getLongOrNull(obj, "rec_sell_price");
+				item.recProfit      = getLongOrNull(obj, "rec_profit");
+				item.hourlyVolume   = getIntOrNull(obj, "hourly_volume");
+				item.dailyVolume    = getIntOrNull(obj, "daily_volume");
+				item.buyLimit       = getInt(obj, "buy_limit", 0);
+				item.members        = getBool(obj, "members", false);
+				item.highAlch       = getIntOrNull(obj, "high_alch");
+				item.lastUpdated    = getString(obj, "last_updated", "");
+				item.dataAgeMinutes = getIntOrNull(obj, "data_age_minutes");
+				return item;
+			}, callback);
 		}
 		catch (Exception e)
 		{
@@ -1132,21 +1192,7 @@ public class O7FlipApiClient
 		{
 			url.append("&activity_window=").append(window);
 		}
-		fetch(url.toString(), new Callback()
-		{
-			@Override
-			public void onFailure(Call call, IOException e)
-			{
-				log.warn("[07Flip] fetchDips failed: {}", e.getMessage());
-				callback.accept(new ArrayList<>(), 0);
-			}
-
-			@Override
-			public void onResponse(Call call, Response response) throws IOException
-			{
-				parsePagedResponse(response, "dips", O7FlipApiClient.this::parseDipItem, callback);
-			}
-		});
+		fetchPaged(url.toString(), "fetchDips", "dips", this::parseDipItem, callback);
 	}
 
 
@@ -2097,21 +2143,7 @@ public class O7FlipApiClient
 		{
 			url.append("&sort=").append(sort);
 		}
-		fetch(url.toString(), new Callback()
-		{
-			@Override
-			public void onFailure(Call call, IOException e)
-			{
-				log.warn("[07Flip] fetchSpikes failed: {}", e.getMessage());
-				callback.accept(new ArrayList<>(), 0);
-			}
-
-			@Override
-			public void onResponse(Call call, Response response) throws IOException
-			{
-				parsePagedResponse(response, "spikes", O7FlipApiClient.this::parseSpikeItem, callback);
-			}
-		});
+		fetchPaged(url.toString(), "fetchSpikes", "spikes", this::parseSpikeItem, callback);
 	}
 
 	public void fetchDumps(String sort, long minProfit, long priceMin, long priceMax,
@@ -2148,21 +2180,7 @@ public class O7FlipApiClient
 		{
 			url.append("&tier=").append(tier);
 		}
-		fetch(url.toString(), new Callback()
-		{
-			@Override
-			public void onFailure(Call call, IOException e)
-			{
-				log.warn("[07Flip] fetchDumps failed: {}", e.getMessage());
-				callback.accept(emptyDumpsResponse());
-			}
-
-			@Override
-			public void onResponse(Call call, Response response) throws IOException
-			{
-				callback.accept(parseDumpsResponse(response));
-			}
-		});
+		fetchParsed(url.toString(), "fetchDumps", this::parseDumpsResponse, emptyDumpsResponse(), callback);
 	}
 
 	private static DumpItem.Response emptyDumpsResponse()
@@ -2238,21 +2256,7 @@ public class O7FlipApiClient
 		{
 			url.append("&tier=").append(tier);
 		}
-		fetch(url.toString(), new Callback()
-		{
-			@Override
-			public void onFailure(Call call, IOException e)
-			{
-				log.warn("[07Flip] fetchBotDumps failed: {}", e.getMessage());
-				callback.accept(emptyDumpsResponse());
-			}
-
-			@Override
-			public void onResponse(Call call, Response response) throws IOException
-			{
-				callback.accept(parseDumpsResponse(response));
-			}
-		});
+		fetchParsed(url.toString(), "fetchBotDumps", this::parseDumpsResponse, emptyDumpsResponse(), callback);
 	}
 
 

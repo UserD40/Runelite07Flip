@@ -1502,19 +1502,6 @@ public class InsightsPanel extends JPanel
 		return l;
 	}
 
-	private static JLabel wrappedCenter(String text, Color colour, java.awt.Font font)
-	{
-		String html = "<html><div style='text-align:center;width:240px'>"
-			+ text.replace("<", "&lt;").replace(">", "&gt;")
-			+ "</div></html>";
-		JLabel l = new JLabel(html, SwingConstants.CENTER);
-		l.setFont(font);
-		l.setForeground(colour);
-		l.setAlignmentX(Component.CENTER_ALIGNMENT);
-		l.setBorder(new EmptyBorder(0, 16, 0, 16));
-		return l;
-	}
-
 	private static Color margingColor(long amount)
 	{
 		if (amount > 0)

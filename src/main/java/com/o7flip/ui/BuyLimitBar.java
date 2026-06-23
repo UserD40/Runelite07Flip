@@ -26,7 +26,6 @@ package com.o7flip.ui;
 
 import com.o7flip.O7FlipPlugin;
 import com.o7flip.util.Fonts;
-import net.runelite.client.ui.ColorScheme;
 import javax.swing.JPanel;
 import javax.swing.border.EmptyBorder;
 import java.awt.Color;

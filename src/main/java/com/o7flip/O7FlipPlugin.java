@@ -25,7 +25,6 @@
 package com.o7flip;
 
 import com.google.gson.Gson;
-import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.inject.Provides;
 import com.o7flip.model.DumpItem;
@@ -77,7 +76,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.Executors;
-import java.util.function.BiConsumer;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
@@ -735,11 +733,6 @@ public class O7FlipPlugin extends Plugin
 			return ins.current.recBuy;
 		}
 		return null;
-	}
-
-	private void kickoffSellAutoFillFetch(int itemId)
-	{
-		getOverlayInsights(itemId);
 	}
 
 	private void armSellPriceIfStillRelevant(int itemId)
@@ -2496,20 +2489,6 @@ public class O7FlipPlugin extends Plugin
 		for (com.o7flip.util.ProfitCalculator.CompletedFlip f : r.completedFlips)
 		{
 			if (f.sellTimestamp == virtualSell.timestamp && f.buyTotal > 0)
-			{
-				total += f.profit;
-			}
-		}
-		return total;
-	}
-
-	private long computeProfitForSell(long sellTimestamp)
-	{
-		com.o7flip.util.ProfitCalculator.Result r = com.o7flip.util.ProfitCalculator.compute(tradeHistory);
-		long total = 0L;
-		for (com.o7flip.util.ProfitCalculator.CompletedFlip f : r.completedFlips)
-		{
-			if (f.sellTimestamp == sellTimestamp)
 			{
 				total += f.profit;
 			}
