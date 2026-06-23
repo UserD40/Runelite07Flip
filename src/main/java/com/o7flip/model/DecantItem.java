@@ -24,11 +24,15 @@
  */
 package com.o7flip.model;
 
+import com.google.gson.annotations.SerializedName;
+
 public class DecantItem
 {
 	public int    itemId;
-	public String potionName;
-	public String strategy;
+	public String potionName = "Unknown";
+	public String strategy = "";
+	// JSON key is profit_per_4dose; the snake_case policy would yield profit_per4dose.
+	@SerializedName("profit_per_4dose")
 	public long   profitPer4dose;
 	public long   profitPerDose;
 	public double roiPct;

@@ -24,7 +24,9 @@
  */
 package com.o7flip;
 
+import com.google.gson.FieldNamingPolicy;
 import com.google.gson.Gson;
+import com.google.gson.GsonBuilder;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
@@ -65,6 +67,14 @@ public class O7FlipApiClient
 	private static final String    USER_AGENT      = "07Flip-RuneLite/1.0";
 	private static final int       PAGE_LIMIT      = 10;   // items per page — must match O7FlipPanel.PAGE_SIZE
 	private static final MediaType MEDIA_TYPE_JSON = MediaType.get("application/json; charset=utf-8");
+
+	// Auto-deserialization for plain DTO endpoints whose JSON keys are the snake_case
+	// form of the field name. Gson's internal reflection is permitted; only OUR code
+	// must avoid java.lang.reflect. Use @SerializedName on any field whose JSON key is
+	// not the lower_underscore form of its name (e.g. digit boundaries).
+	private static final Gson PARSER = new GsonBuilder()
+		.setFieldNamingPolicy(FieldNamingPolicy.LOWER_CASE_WITH_UNDERSCORES)
+		.create();
 
 	@Inject
 	private OkHttpClient okHttpClient;
@@ -2242,18 +2252,10 @@ public class O7FlipApiClient
 
 	private DecantItem parseDecantItem(JsonObject obj)
 	{
-		DecantItem item = new DecantItem();
-		item.itemId           = getInt(obj, "item_id", 0);
-		item.potionName       = getString(obj, "potion_name", "Unknown");
-		item.strategy         = getString(obj, "strategy", "");
-		item.profitPer4dose   = getLong(obj, "profit_per_4dose", 0);
-		item.profitPerDose    = getLong(obj, "profit_per_dose", 0);
-		item.roiPct           = getDouble(obj, "roi_pct", 0);
-		item.minHourlyVolume  = getInt(obj, "min_hourly_volume", 0);
-		item.dailyVolume      = getInt(obj, "daily_volume", 0);
-		item.buyDose          = getInt(obj, "buy_dose", 0);
-		item.sellDose         = getInt(obj, "sell_dose", 0);
-		return item;
+		// Plain DTO: keys are the snake_case form of the field names. potion_name and
+		// strategy default to "Unknown"/"" (set as field initializers on DecantItem);
+		// profit_per_4dose needs @SerializedName since the policy yields profit_per4dose.
+		return PARSER.fromJson(obj, DecantItem.class);
 	}
 
 
@@ -2324,14 +2326,9 @@ public class O7FlipApiClient
 
 	private RecommendedPrices parseRecommendedPrices(JsonObject obj)
 	{
-		RecommendedPrices rp = new RecommendedPrices();
-		rp.itemId       = getInt(obj, "item_id", 0);
-		rp.recBuyPrice  = getLongOrNull(obj, "rec_buy_price");
-		rp.recSellPrice = getLongOrNull(obj, "rec_sell_price");
-		rp.geTax        = getLongOrNull(obj, "ge_tax");
-		rp.recProfit    = getLongOrNull(obj, "rec_profit");
-		rp.sampleSize   = getIntOrNull(obj, "sample_size");
-		return rp;
+		// Plain DTO: all keys are the snake_case form of the field names
+		// (item_id, rec_buy_price, rec_sell_price, ge_tax, rec_profit, sample_size).
+		return PARSER.fromJson(obj, RecommendedPrices.class);
 	}
 
 	private FlipItem parseFlipItem(JsonObject obj)
