@@ -32,7 +32,6 @@ import com.o7flip.model.AuthStatus;
 import com.o7flip.model.DumpItem;
 import com.o7flip.model.FlipItem;
 import com.o7flip.model.DipItem;
-import com.o7flip.model.HighAlchItem;
 import com.o7flip.model.ItemInsights;
 import com.o7flip.model.OptimizeResult;
 import com.o7flip.model.RecommendedPrices;
@@ -1186,95 +1185,6 @@ public class O7FlipApiClient
 			url.append("&activity_window=").append(window);
 		}
 		fetchPaged(url.toString(), "fetchDips", "dips", this::parseDipItem, callback);
-	}
-
-
-	public void fetchHighAlch(String sort, int page, boolean fireStaff, boolean bryophyta,
-	                          Consumer<HighAlchItem.Response> callback)
-	{
-		StringBuilder url = new StringBuilder(BASE_URL + "/high-alch?limit=").append(PAGE_LIMIT)
-			.append("&page=").append(page);
-		if (sort != null && !sort.isEmpty())
-		{
-			url.append("&sort=").append(sort);
-		}
-		if (fireStaff)
-		{
-			url.append("&fireStaff=true");
-		}
-		if (bryophyta)
-		{
-			url.append("&bryophyta=true");
-		}
-		fetch(url.toString(), new Callback()
-		{
-			@Override
-			public void onFailure(Call call, IOException e)
-			{
-				log.warn("[07Flip] fetchHighAlch failed: {}", e.getMessage());
-				callback.accept(emptyHighAlchResponse());
-			}
-
-			@Override
-			public void onResponse(Call call, Response response) throws IOException
-			{
-				if (response.code() == 429)
-				{
-					markRateLimited(response);
-				}
-				if (!response.isSuccessful() || response.body() == null)
-				{
-					log.warn("[07Flip] fetchHighAlch HTTP {}", response.code());
-					callback.accept(emptyHighAlchResponse());
-					return;
-				}
-				try
-				{
-					JsonObject root = gson.fromJson(response.body().string(), JsonObject.class);
-					HighAlchItem.Response out = new HighAlchItem.Response();
-					if (root.has("rune_prices") && root.get("rune_prices").isJsonObject())
-					{
-						JsonObject rp = root.getAsJsonObject("rune_prices");
-						out.natureRunePrice = getLong(rp, "nature_rune_price", 0);
-						out.fireRunePrice   = getLong(rp, "fire_rune_price", 0);
-						out.alchCost        = getLong(rp, "alch_cost", 0);
-						out.fireStaff       = getBool(rp, "fire_staff", false);
-						out.bryophytaStaff  = getBool(rp, "bryophyta_staff", false);
-					}
-					out.items = parseArray(root, "items", O7FlipApiClient.this::parseHighAlchItem);
-					out.total = getInt(root, "total", out.items.size());
-					callback.accept(out);
-				}
-				catch (Exception e)
-				{
-					log.warn("[07Flip] fetchHighAlch parse error: {}", e.getMessage());
-					callback.accept(emptyHighAlchResponse());
-				}
-			}
-		});
-	}
-
-	private static HighAlchItem.Response emptyHighAlchResponse()
-	{
-		HighAlchItem.Response r = new HighAlchItem.Response();
-		r.items = new ArrayList<>();
-		return r;
-	}
-
-	private HighAlchItem parseHighAlchItem(JsonObject obj)
-	{
-		HighAlchItem item = new HighAlchItem();
-		item.itemId        = getInt(obj, "item_id", 0);
-		item.name          = getString(obj, "name", "Unknown");
-		item.buyPrice      = getLong(obj, "buy_price", 0);
-		item.highAlchValue = getLong(obj, "high_alch_value", 0);
-		item.runeCost      = getLong(obj, "rune_cost", 0);
-		item.profit        = getLong(obj, "profit", 0);
-		item.roiPct        = getDouble(obj, "roi_pct", 0);
-		item.buyLimit      = getInt(obj, "buy_limit", 0);
-		item.dailyVolume   = getInt(obj, "daily_volume", 0);
-		item.lastUpdated   = getString(obj, "last_updated", "");
-		return item;
 	}
 
 

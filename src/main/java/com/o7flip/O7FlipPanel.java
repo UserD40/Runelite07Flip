@@ -31,7 +31,6 @@ import com.o7flip.model.SpikeItem;
 import com.o7flip.model.TradeRecord;
 import com.o7flip.ui.DipItemPanel;
 import com.o7flip.ui.DumpItemPanel;
-import com.o7flip.ui.HighAlchPanel;
 import com.o7flip.ui.FlipItemPanel;
 import com.o7flip.ui.SearchResultPanel;
 import com.o7flip.ui.SpikeItemPanel;
@@ -247,7 +246,6 @@ public class O7FlipPanel extends PluginPanel
 	private List<SpikeItem>   allSpikes  = new ArrayList<>();
 	private List<DumpItem>    allDumps   = new ArrayList<>();
 	private List<com.o7flip.model.DipItem> allDips = new ArrayList<>();
-	private List<com.o7flip.model.HighAlchItem> allHighAlch = new ArrayList<>();
 	private List<FlipItem>    allFavourites = new ArrayList<>();
 	private JButton[] favouritesSortBtns;
 	private int favouritesSortIdx = 0;
@@ -274,9 +272,7 @@ public class O7FlipPanel extends PluginPanel
 	private JPanel spikesListPanel;
 	private JPanel dumpsListPanel;
 	private JPanel dipsListPanel;
-	private JPanel highAlchListPanel;
 	private JPanel favouritesListPanel;
-	private JLabel highAlchCostLabel;
 	private JPanel optimizerListPanel;       // results column (cards + summary)
 	private com.o7flip.model.OptimizeResult lastOptimize;
 	private int     optSlots         = 8;
@@ -312,17 +308,7 @@ public class O7FlipPanel extends PluginPanel
 	private JLabel  spikesPageLabel;  private JButton spikesPrev,   spikesNext;
 	private JLabel  dumpsPageLabel;   private JButton dumpsPrev,    dumpsNext;
 	private JLabel  dipsPageLabel;    private JButton dipsPrev,     dipsNext;
-	private JLabel  highAlchPageLabel; private JButton highAlchPrev, highAlchNext;
 	private int     dipsSortIdx = 0;
-	private int     highAlchSortIdx = 0;
-	private int     highAlchPage    = 0;
-	private int     highAlchTotal   = 0;
-	private String  highAlchSortKey = "profit";
-	private JButton[] highAlchSortBtns;
-	private JButton   highAlchFireStaffBtn;
-	private JButton   highAlchBryophytaBtn;
-	private boolean highAlchFireStaff;
-	private boolean highAlchBryophyta;
 
 	private JComboBox<String> flipsCapitalCombo;
 	private JComboBox<String> flipsSortCombo;
@@ -728,40 +714,6 @@ public class O7FlipPanel extends PluginPanel
 		return dipsPage;
 	}
 
-	public void updateHighAlch(com.o7flip.model.HighAlchItem.Response resp, int page)
-	{
-		allHighAlch    = resp.items;
-		highAlchTotal  = resp.total;
-		highAlchPage   = page;
-		if (highAlchCostLabel != null)
-		{
-			highAlchCostLabel.setText("Cost / cast: " + FlipItemPanel.formatGp(resp.alchCost) + " gp"
-				+ (resp.fireStaff ? "  · Fire staff" : "")
-				+ (resp.bryophytaStaff ? "  · Bryophyta" : ""));
-		}
-		renderHighAlch(filtered());
-	}
-
-	public String getHighAlchSortKey()
-	{
-		return highAlchSortKey;
-	}
-
-	public int getHighAlchPage()
-	{
-		return highAlchPage;
-	}
-
-	public boolean getHighAlchFireStaff()
-	{
-		return highAlchFireStaff;
-	}
-
-	public boolean getHighAlchBryophyta()
-	{
-		return highAlchBryophyta;
-	}
-
 	public void updateFavourites(List<FlipItem> items)
 	{
 		allFavourites = items;
@@ -844,7 +796,6 @@ public class O7FlipPanel extends PluginPanel
 			renderSpikes("");
 			renderDumps("");
 			renderDips("");
-			renderHighAlch("");
 			renderFavourites("");
 			return;
 		}
@@ -933,15 +884,6 @@ public class O7FlipPanel extends PluginPanel
 	private List<com.o7flip.model.DipItem> fDips(String q)
 	{
 		return allDips.stream()
-			.filter(i -> notBlocked(i.itemId))
-			.filter(i -> affordable(i.buyPrice))
-			.filter(i -> q.isEmpty() || matches(i.name, q))
-			.collect(Collectors.toList());
-	}
-
-	private List<com.o7flip.model.HighAlchItem> fHighAlch(String q)
-	{
-		return allHighAlch.stream()
 			.filter(i -> notBlocked(i.itemId))
 			.filter(i -> affordable(i.buyPrice))
 			.filter(i -> q.isEmpty() || matches(i.name, q))
@@ -1176,19 +1118,6 @@ public class O7FlipPanel extends PluginPanel
 			(item, odd) -> new DipItemPanel(item, itemManager, odd, plugin, window),
 			"No dip signals", "Items below the " + window + " average or near ATL will appear here");
 		hiliteFilter(dipsSortBtns, dipsSortIdx);
-	}
-
-	private void renderHighAlch(String q)
-	{
-		if (highAlchListPanel == null)
-		{
-			return;
-		}
-		fillListPaged(highAlchListPanel, fHighAlch(q), highAlchPage, highAlchTotal,
-			highAlchPageLabel, highAlchPrev, highAlchNext,
-			(item, odd) -> new HighAlchPanel(item, itemManager, odd, plugin),
-			"No alch-profitable items", "Try toggling Fire staff or Bryophyta");
-		hiliteFilter(highAlchSortBtns, highAlchSortIdx);
 	}
 
 	private void renderFavourites(String q)
@@ -2164,7 +2093,6 @@ public class O7FlipPanel extends PluginPanel
 		renderDumps(q);
 		renderSpikes(q);
 		renderDips(q);
-		renderHighAlch(q);
 		renderFavourites(q);
 	}
 
@@ -2282,7 +2210,6 @@ public class O7FlipPanel extends PluginPanel
 			case "Dumps":
 			case "Dips":
 			case "Favs":
-			case "Alch":
 			case "Plan":
 				return subFeatureEnabled(name);
 			default:          return false;
@@ -2302,7 +2229,7 @@ public class O7FlipPanel extends PluginPanel
 
 	public static final List<String> MOVABLE_POOL = java.util.Arrays.asList(
 		"Dumps",
-		"Dips", "Favs", "Alch", "Plan"
+		"Dips", "Favs", "Plan"
 	);
 
 	public static final List<String> DEFAULT_TOP_ROW = java.util.Arrays.asList(
@@ -2356,7 +2283,6 @@ public class O7FlipPanel extends PluginPanel
 			case "Dumps":   return config.showDumps();
 			case "Dips":    return config.showDips();
 			case "Favs":    return config.showFavourites() && hasApiKey();
-			case "Alch":    return config.showHighAlch();
 			case "Plan":    return hasApiKey();   // optimizer is premium-only; signing in is the gate
 			default:        return false;
 		}
@@ -2383,7 +2309,6 @@ public class O7FlipPanel extends PluginPanel
 		JPanel spikesContent   = buildSpikesTab();
 		JPanel insightsContent = buildInsightsTab();
 		JPanel dipsContent       = buildDipsTab();
-		JPanel highAlchContent   = buildHighAlchTab();
 		JPanel favouritesContent = buildFavouritesTab();
 		JPanel planContent       = buildPlanTab();
 
@@ -2396,7 +2321,7 @@ public class O7FlipPanel extends PluginPanel
 		}
 
 		JPanel otherContent      = buildOtherTab(dipsContent,
-			highAlchContent, favouritesContent,
+			favouritesContent,
 			planContent,
 			dumpsContent);
 		JPanel myFlipsContent  = buildMyFlipsTab();
@@ -2408,7 +2333,6 @@ public class O7FlipPanel extends PluginPanel
 		contentByName.put("Other",     otherContent);
 		contentByName.put("Trades",    myFlipsContent);
 		contentByName.put("Dips",    dipsContent);
-		contentByName.put("Alch",    highAlchContent);
 		contentByName.put("Favs",    favouritesContent);
 		contentByName.put("Plan",    planContent);
 
@@ -2944,7 +2868,6 @@ public class O7FlipPanel extends PluginPanel
 		renderSpikes(q);
 		renderDumps(q);
 		renderDips(q);
-		renderHighAlch(q);
 		renderFavourites(q);
 		refreshBlocklistFooter();
 
@@ -3696,100 +3619,6 @@ public class O7FlipPanel extends PluginPanel
 		return assembleTab(topBar, dipsListPanel, buildPageBar(dipsPageLabel, dipsPrev, dipsNext));
 	}
 
-	private JPanel buildHighAlchTab()
-	{
-		highAlchFireStaff = config != null && config.highAlchFireStaff();
-		highAlchBryophyta = config != null && config.highAlchBryophyta();
-
-		highAlchSortBtns  = new JButton[4];
-		highAlchListPanel = listPanel();
-		highAlchPageLabel = pageLabel();
-		highAlchPrev      = pageBtn("‹");
-		highAlchNext      = pageBtn("›");
-		highAlchPrev.addActionListener(e ->
-		{
-			if (plugin != null) plugin.onHighAlchPageChanged(--highAlchPage);
-		});
-		highAlchNext.addActionListener(e ->
-		{
-			if (plugin != null) plugin.onHighAlchPageChanged(++highAlchPage);
-		});
-
-		String[] labels = {"Profit", "ROI", "Buy", "Volume"};
-		String[] keys   = {"profit", "roi", "buyPrice", "dailyVolume"};
-		JPanel sortRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 4));
-		sortRow.setBackground(ColorScheme.DARKER_GRAY_COLOR);
-		sortRow.setBorder(new MatteBorder(0, 0, 1, 0, new Color(0x3A3A3A)));
-		for (int i = 0; i < labels.length; i++)
-		{
-			final int idx = i;
-			JButton btn = pillButton(labels[i]);
-			applySortStyle(btn, idx == highAlchSortIdx);
-			btn.addActionListener(e ->
-			{
-				highAlchSortIdx = idx;
-				highAlchSortKey = keys[idx];
-				highAlchPage    = 0;
-				hiliteFilter(highAlchSortBtns, highAlchSortIdx);
-				if (plugin != null) plugin.onHighAlchSortChanged(highAlchSortKey);
-			});
-			highAlchSortBtns[i] = btn;
-			sortRow.add(btn);
-		}
-
-		highAlchFireStaffBtn = pillButton("Fire staff");
-		highAlchBryophytaBtn = pillButton("Bryophyta");
-		applyToggleStyle(highAlchFireStaffBtn, highAlchFireStaff);
-		applyToggleStyle(highAlchBryophytaBtn, highAlchBryophyta);
-		highAlchFireStaffBtn.addActionListener(e ->
-		{
-			highAlchFireStaff = !highAlchFireStaff;
-			if (highAlchFireStaff) highAlchBryophyta = false;
-			applyToggleStyle(highAlchFireStaffBtn, highAlchFireStaff);
-			applyToggleStyle(highAlchBryophytaBtn, highAlchBryophyta);
-			if (plugin != null)
-			{
-				plugin.persistHighAlchModifier("highAlchFireStaff", highAlchFireStaff);
-				plugin.persistHighAlchModifier("highAlchBryophyta", highAlchBryophyta);
-				highAlchPage = 0;
-				plugin.onHighAlchModifierChanged();
-			}
-		});
-		highAlchBryophytaBtn.addActionListener(e ->
-		{
-			highAlchBryophyta = !highAlchBryophyta;
-			if (highAlchBryophyta) highAlchFireStaff = false;
-			applyToggleStyle(highAlchBryophytaBtn, highAlchBryophyta);
-			applyToggleStyle(highAlchFireStaffBtn, highAlchFireStaff);
-			if (plugin != null)
-			{
-				plugin.persistHighAlchModifier("highAlchBryophyta", highAlchBryophyta);
-				plugin.persistHighAlchModifier("highAlchFireStaff", highAlchFireStaff);
-				highAlchPage = 0;
-				plugin.onHighAlchModifierChanged();
-			}
-		});
-
-		highAlchCostLabel = new JLabel(" ");
-		highAlchCostLabel.setFont(Fonts.SM);
-		highAlchCostLabel.setForeground(new Color(0x888888));
-
-		JPanel toggleRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 2));
-		toggleRow.setBackground(ColorScheme.DARKER_GRAY_COLOR);
-		toggleRow.setBorder(new MatteBorder(0, 0, 1, 0, new Color(0x3A3A3A)));
-		toggleRow.add(highAlchFireStaffBtn);
-		toggleRow.add(highAlchBryophytaBtn);
-		toggleRow.add(highAlchCostLabel);
-
-		JPanel topBar = new JPanel();
-		topBar.setLayout(new BoxLayout(topBar, BoxLayout.Y_AXIS));
-		topBar.setBackground(ColorScheme.DARKER_GRAY_COLOR);
-		topBar.add(sortRow);
-		topBar.add(toggleRow);
-
-		return assembleTab(topBar, highAlchListPanel, buildPageBar(highAlchPageLabel, highAlchPrev, highAlchNext));
-	}
-
 	private void applyToggleStyle(JButton btn, boolean on)
 	{
 		btn.setBackground(on ? new Color(0x00C27A) : new Color(0x3E3E3E));
@@ -4401,7 +4230,6 @@ public class O7FlipPanel extends PluginPanel
 	}
 
 	private JPanel buildOtherTab(JPanel dipsContent,
-	                             JPanel highAlchContent,
 	                             JPanel favouritesContent,
 	                             JPanel planContent,
 	                             JPanel dumpsContent)
@@ -4414,7 +4242,6 @@ public class O7FlipPanel extends PluginPanel
 
 		java.util.Map<String, JPanel> byName = new java.util.HashMap<>();
 		byName.put("Dips",    dipsContent);
-		byName.put("Alch",    highAlchContent);
 		byName.put("Favs",    favouritesContent);
 		byName.put("Plan",    planContent);
 		byName.put("Dumps",   dumpsContent);

@@ -258,45 +258,6 @@ public interface O7FlipConfig extends Config
 	}
 
 	@ConfigItem(
-		keyName = "showHighAlch",
-		name = "",
-		description = "",
-		section = tabsSection,
-		position = 10,
-		hidden = true
-	)
-	default boolean showHighAlch()
-	{
-		return true;
-	}
-
-	@ConfigItem(
-		keyName = "highAlchFireStaff",
-		name = "",
-		description = "",
-		hidden = true,
-		section = tabsSection,
-		position = 13
-	)
-	default boolean highAlchFireStaff()
-	{
-		return false;
-	}
-
-	@ConfigItem(
-		keyName = "highAlchBryophyta",
-		name = "",
-		description = "",
-		hidden = true,
-		section = tabsSection,
-		position = 14
-	)
-	default boolean highAlchBryophyta()
-	{
-		return false;
-	}
-
-	@ConfigItem(
 		keyName = "showMyFlips",
 		name = "",
 		description = "",

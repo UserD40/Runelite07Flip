@@ -1485,7 +1485,6 @@ public class O7FlipPlugin extends Plugin
 			case "showItem":
 			case "showDips":
 			case "showFavourites":
-			case "showHighAlch":
 			case "showMyFlips":
 			case "tabOrder":
 			case "topRowTabs":
@@ -1636,10 +1635,6 @@ public class O7FlipPlugin extends Plugin
 			fetchDumpsAtPage(panel.getDumpsSortKey(), panel.getDumpsPage());
 		}
 
-		if (config.showHighAlch())
-		{
-			fetchHighAlchAtPage(panel.getHighAlchSortKey(), panel.getHighAlchPage());
-		}
 		if (config.showFavourites() && hasApiKey())
 		{
 			apiClient.fetchFavourites(items ->
@@ -1736,13 +1731,6 @@ public class O7FlipPlugin extends Plugin
 		{
 			final List<com.o7flip.model.DipItem> snap = cdips;
 			SwingUtilities.invokeLater(() -> panel.updateDips(snap, snap.size(), 0));
-		}
-
-		com.o7flip.model.HighAlchItem.Response ca = loadCache("highAlch", com.o7flip.model.HighAlchItem.Response.class);
-		if (ca != null && ca.items != null && !ca.items.isEmpty())
-		{
-			final com.o7flip.model.HighAlchItem.Response snap = ca;
-			SwingUtilities.invokeLater(() -> panel.updateHighAlch(snap, 0));
 		}
 
 		loadBuyLimitState();
@@ -3352,35 +3340,6 @@ public class O7FlipPlugin extends Plugin
 	}
 
 
-	void onHighAlchPageChanged(int page)
-	{
-		executor.execute(() -> fetchHighAlchAtPage(panel.getHighAlchSortKey(), page));
-	}
-
-	void onHighAlchSortChanged(String sort)
-	{
-		executor.execute(() -> fetchHighAlchAtPage(sort, 0));
-	}
-
-	void onHighAlchModifierChanged()
-	{
-		executor.execute(() -> fetchHighAlchAtPage(panel.getHighAlchSortKey(), 0));
-	}
-
-	private void fetchHighAlchAtPage(String sort, int page)
-	{
-		apiClient.fetchHighAlch(sort, page,
-			panel.getHighAlchFireStaff(), panel.getHighAlchBryophyta(),
-			resp ->
-			{
-				if (resp != null && resp.items != null && !resp.items.isEmpty())
-				{
-					saveCache("highAlch", resp);
-				}
-				SwingUtilities.invokeLater(() -> panel.updateHighAlch(resp, page));
-			});
-	}
-
 	private final java.util.Map<String, Long> lastTabSelectFetchMs = new java.util.concurrent.ConcurrentHashMap<>();
 	private static final long TAB_SELECT_FRESHNESS_MS = 30_000L;
 
@@ -3401,9 +3360,6 @@ public class O7FlipPlugin extends Plugin
 		{
 			case "Dips":
 				executor.execute(() -> fetchDipsAtPage(panel.getDipsSortKey(), panel.getDipsPage()));
-				break;
-			case "Alch":
-				executor.execute(() -> fetchHighAlchAtPage(panel.getHighAlchSortKey(), panel.getHighAlchPage()));
 				break;
 			default:
 				break;
@@ -4671,11 +4627,6 @@ public class O7FlipPlugin extends Plugin
 		{
 			if (list != null) setCompletedPositions(list);
 		}));
-	}
-
-	public void persistHighAlchModifier(String keyName, boolean value)
-	{
-		configManager.setConfiguration("o7flip", keyName, value);
 	}
 
 	public boolean hasApiKeyPublic()

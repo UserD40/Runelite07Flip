@@ -43,6 +43,9 @@ credentials.properties
 build07flip.bat
 run07flip.bat
 run07flip.ps1
+token-count.js
+all-source.txt
+.pr_number.tmp
 
 # AI assistant files (not part of the plugin)
 CLAUDE.md
