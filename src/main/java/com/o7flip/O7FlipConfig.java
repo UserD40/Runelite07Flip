@@ -285,48 +285,6 @@ public interface O7FlipConfig extends Config
 
 
 	@ConfigItem(
-		keyName = "openTabReorderDialog",
-		name = "Customise top row tabs",
-		description = "<html>Tick this box to open the top-row picker. Pick which 4 tabs<br>"
-			+ "live on the top row of the panel; anything you leave out shows<br>"
-			+ "inside the <b>Other</b> tab on the bottom row. The bottom row<br>"
-			+ "(Flips · Trades · Item · Other) is always fixed.</html>",
-		section = tabsSection,
-		position = 0
-	)
-	default boolean openTabReorderDialog()
-	{
-		return false;
-	}
-
-	@ConfigItem(
-		keyName = "tabOrder",
-		name = "",
-		description = "",
-		section = tabsSection,
-		position = 50,
-		hidden = true
-	)
-	default String tabOrder()
-	{
-		return "";
-	}
-
-	@ConfigItem(
-		keyName = "topRowTabs",
-		name = "",
-		description = "",
-		section = tabsSection,
-		position = 51,
-		hidden = true
-	)
-	default String topRowTabs()
-	{
-		return "Dumps";
-	}
-
-
-	@ConfigItem(
 		keyName = "autoFillGePrice",
 		name = "Auto-fill GE price",
 		description = "<html>Automatically type the recommended price into the GE custom price input "

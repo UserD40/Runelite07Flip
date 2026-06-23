@@ -239,9 +239,7 @@ public class O7FlipPanel extends PluginPanel
 
 	public boolean isPlanTabActive()
 	{
-		String top = currentTabName();
-		if ("Plan".equals(top)) return true;
-		return "Other".equals(top) && "Plan".equals(lastOtherSubTab);
+		return "Plan".equals(currentTabName());
 	}
 
 	private List<FlipItem>    allFlips   = new ArrayList<>();
@@ -2271,12 +2269,8 @@ public class O7FlipPanel extends PluginPanel
 			case "Item":      return config.showInsights();
 			case "Trades":    return config.showMyFlips();
 			case "Other":     return otherTabHasContent();
-			case "Dumps":
-			case "Dips":
-			case "Decant":
-			case "Favs":
-			case "Plan":
-				return subFeatureEnabled(name);
+			case "Favs":      return config.showFavourites() && hasApiKey();
+			case "Plan":      return hasApiKey();   // optimizer is premium-only; signing in is the gate
 			default:          return false;
 		}
 	}
@@ -2284,56 +2278,24 @@ public class O7FlipPanel extends PluginPanel
 	private boolean otherTabHasContent()
 	{
 		if (config == null) return false;
-		for (String name : MOVABLE_POOL)
+		for (String name : OTHER_SUB_TABS)
 		{
-			if (resolveTopRow().contains(name)) continue;
 			if (subFeatureEnabled(name)) return true;
 		}
 		return false;
 	}
 
-	public static final List<String> MOVABLE_POOL = java.util.Arrays.asList(
-		"Dumps",
-		"Dips", "Decant", "Favs", "Plan"
+	// The flip-finder sub-tabs shown inside the "Other" tab, in display order.
+	public static final List<String> OTHER_SUB_TABS = java.util.Arrays.asList(
+		"Dips", "Dumps", "Decant"
 	);
 
-	public static final List<String> DEFAULT_TOP_ROW = java.util.Arrays.asList(
-		"Dumps"
+	// Fixed main-tab order. The JTabbedPane uses WRAP_TAB_LAYOUT, which renders the
+	// first-added tabs as the bottom run and later-added as the top run — so this list
+	// yields bottom=[Flips, Trades, Other], top=[Plan, Item, Favs].
+	public static final List<String> MAIN_TAB_ORDER = java.util.Arrays.asList(
+		"Flips", "Trades", "Other", "Plan", "Item", "Favs"
 	);
-
-	public static final List<String> FIXED_BOTTOM_ROW = java.util.Arrays.asList(
-		"Flips", "Trades", "Item", "Other"
-	);
-
-	public static final List<String> DEFAULT_TAB_ORDER;
-	static
-	{
-		List<String> combined = new ArrayList<>(8);
-		combined.addAll(DEFAULT_TOP_ROW);
-		combined.addAll(FIXED_BOTTOM_ROW);
-		DEFAULT_TAB_ORDER = java.util.Collections.unmodifiableList(combined);
-	}
-
-	public List<String> resolveTopRow()
-	{
-		String raw = config != null ? config.topRowTabs() : "";
-		if (raw == null || raw.trim().isEmpty())
-		{
-			return new ArrayList<>(DEFAULT_TOP_ROW);
-		}
-		List<String> out = new ArrayList<>(4);
-		java.util.Set<String> seen = new java.util.HashSet<>();
-		for (String token : raw.split(","))
-		{
-			String name = token.trim();
-			if (MOVABLE_POOL.contains(name) && seen.add(name))
-			{
-				out.add(name);
-				if (out.size() >= 4) break;
-			}
-		}
-		return out.isEmpty() ? new ArrayList<>(DEFAULT_TOP_ROW) : out;
-	}
 
 	private boolean hasApiKey()
 	{
@@ -2348,18 +2310,14 @@ public class O7FlipPanel extends PluginPanel
 			case "Dumps":   return config.showDumps();
 			case "Dips":    return config.showDips();
 			case "Decant":  return config.showDecant();
-			case "Favs":    return config.showFavourites() && hasApiKey();
-			case "Plan":    return hasApiKey();   // optimizer is premium-only; signing in is the gate
+			case "Spikes":  return config.showSpikes();
 			default:        return false;
 		}
 	}
 
 	public List<String> resolveTabOrder()
 	{
-		List<String> out = new ArrayList<>(8);
-		out.addAll(FIXED_BOTTOM_ROW);
-		out.addAll(resolveTopRow());
-		return out;
+		return new ArrayList<>(MAIN_TAB_ORDER);
 	}
 
 	private JTabbedPane buildTabs()
@@ -2390,8 +2348,6 @@ public class O7FlipPanel extends PluginPanel
 
 		JPanel otherContent      = buildOtherTab(dipsContent,
 			decantContent,
-			favouritesContent,
-			planContent,
 			dumpsContent);
 		JPanel myFlipsContent  = buildMyFlipsTab();
 
@@ -2425,7 +2381,7 @@ public class O7FlipPanel extends PluginPanel
 			int idx = tabs.getSelectedIndex();
 			if (idx < 0) return;
 			String title = tabs.getTitleAt(idx);
-			if (MOVABLE_POOL.contains(title))
+			if (OTHER_SUB_TABS.contains(title))
 			{
 				lastOtherSubTab = title;
 			}
@@ -2436,6 +2392,11 @@ public class O7FlipPanel extends PluginPanel
 			else if ("Plan".equals(title) && plugin != null)
 			{
 				plugin.onPlanTabSelected();
+			}
+			else if ("Favs".equals(title) && plugin != null)
+			{
+				plugin.onPlanTabDeselected();
+				plugin.onFavouritesTabSelected();
 			}
 			else if (plugin != null && !"Other".equals(title))
 			{
@@ -2945,7 +2906,7 @@ public class O7FlipPanel extends PluginPanel
 		if (previouslySelected != null)
 		{
 			boolean restored = selectTab(previouslySelected);
-			if (!restored && MOVABLE_POOL.contains(previouslySelected))
+			if (!restored && OTHER_SUB_TABS.contains(previouslySelected))
 			{
 				lastOtherSubTab = previouslySelected;
 				selectTab("Other");
@@ -4338,8 +4299,6 @@ public class O7FlipPanel extends PluginPanel
 
 	private JPanel buildOtherTab(JPanel dipsContent,
 	                             JPanel decantContent,
-	                             JPanel favouritesContent,
-	                             JPanel planContent,
 	                             JPanel dumpsContent)
 	{
 		JTabbedPane inner = new JTabbedPane(JTabbedPane.TOP, JTabbedPane.WRAP_TAB_LAYOUT);
@@ -4351,14 +4310,10 @@ public class O7FlipPanel extends PluginPanel
 		java.util.Map<String, JPanel> byName = new java.util.HashMap<>();
 		byName.put("Dips",    dipsContent);
 		byName.put("Decant",  decantContent);
-		byName.put("Favs",    favouritesContent);
-		byName.put("Plan",    planContent);
 		byName.put("Dumps",   dumpsContent);
 
-		java.util.Set<String> topRow = new java.util.HashSet<>(resolveTopRow());
-		for (String name : MOVABLE_POOL)
+		for (String name : OTHER_SUB_TABS)
 		{
-			if (topRow.contains(name)) continue;
 			if (!subFeatureEnabled(name)) continue;
 			JPanel content = byName.get(name);
 			if (content == null) continue;
@@ -4391,22 +4346,8 @@ public class O7FlipPanel extends PluginPanel
 			int idx = inner.getSelectedIndex();
 			if (idx < 0 || plugin == null) return;
 			String title = inner.getTitleAt(idx);
-			if ("Plan".equals(lastOtherSubTab) && !"Plan".equals(title))
-			{
-				plugin.onPlanTabDeselected();
-			}
 			lastOtherSubTab = title;
-			switch (title)
-			{
-				case "Favs":
-					plugin.onFavouritesTabSelected();
-					return;
-				case "Plan":
-					plugin.onPlanTabSelected();
-					return;
-				default:
-					plugin.onOtherSubTabSelected(title);
-			}
+			plugin.onOtherSubTabSelected(title);
 		});
 
 		JPanel wrap = new JPanel(new BorderLayout());

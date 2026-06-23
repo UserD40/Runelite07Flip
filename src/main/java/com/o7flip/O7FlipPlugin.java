@@ -1458,12 +1458,6 @@ public class O7FlipPlugin extends Plugin
 			executor.execute(this::fetchAuthStatus);
 			return;
 		}
-		if ("openTabReorderDialog".equals(key) && Boolean.parseBoolean(event.getNewValue()))
-		{
-			configManager.setConfiguration("o7flip", "openTabReorderDialog", false);
-			SwingUtilities.invokeLater(this::openTabReorderDialog);
-			return;
-		}
 		if (key.startsWith("itemTab"))
 		{
 			SwingUtilities.invokeLater(() -> panel.refreshInsightsSections());
@@ -1487,27 +1481,11 @@ public class O7FlipPlugin extends Plugin
 			case "showDecant":
 			case "showFavourites":
 			case "showMyFlips":
-			case "tabOrder":
-			case "topRowTabs":
 				return true;
 			default:
 				return false;
 		}
 	}
-
-	public void openTabReorderDialog()
-	{
-		java.util.List<String> topRow = panel.resolveTopRow();
-		com.o7flip.ui.TabOrderDialog.show(panel, topRow,
-			O7FlipPanel.MOVABLE_POOL, O7FlipPanel.DEFAULT_TOP_ROW,
-			selected ->
-			{
-				String csv = String.join(",", selected);
-				configManager.setConfiguration("o7flip", "topRowTabs", csv);
-				panel.rebuildTabs();
-			});
-	}
-
 
 	void fetchAuthStatus()
 	{
