@@ -30,25 +30,16 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.o7flip.model.AlertItem;
 import com.o7flip.model.AuthStatus;
-import com.o7flip.model.BarrowsItem;
-import com.o7flip.model.BarrowsSet;
-import com.o7flip.model.DecantItem;
 import com.o7flip.model.DumpItem;
 import com.o7flip.model.FlipItem;
 import com.o7flip.model.DipItem;
 import com.o7flip.model.HighAlchItem;
 import com.o7flip.model.ItemInsights;
-import com.o7flip.model.MoonItem;
-import com.o7flip.model.MoonSet;
-import com.o7flip.model.NewsItem;
 import com.o7flip.model.PriceAlert;
 import com.o7flip.model.OptimizeResult;
 import com.o7flip.model.RecommendedPrices;
-import com.o7flip.model.ScreenerMatch;
-import com.o7flip.model.ScreenerPreset;
 import com.o7flip.model.SearchResultItem;
 import com.o7flip.model.SpikeItem;
-import com.o7flip.model.TeleTablet;
 import com.o7flip.model.TrackerStats;
 import com.o7flip.model.TradeRecord;
 import org.slf4j.Logger;
@@ -1458,85 +1449,6 @@ public class O7FlipApiClient
 	}
 
 	// -------------------------------------------------------------------------
-	// /tele-tablets — Tablet crafting profitability (anon, no auth)
-	// -------------------------------------------------------------------------
-
-	public void fetchTeleTablets(String sort, String spellbook, boolean profitableOnly,
-	                             Consumer<List<TeleTablet>> callback)
-	{
-		StringBuilder url = new StringBuilder(BASE_URL + "/tele-tablets?");
-		boolean first = true;
-		if (sort != null && !sort.isEmpty())
-		{
-			url.append("sort=").append(sort);
-			first = false;
-		}
-		if (spellbook != null && !spellbook.isEmpty())
-		{
-			if (!first) url.append('&');
-			url.append("spellbook=").append(spellbook);
-			first = false;
-		}
-		if (profitableOnly)
-		{
-			if (!first) url.append('&');
-			url.append("profitable=true");
-		}
-		fetch(url.toString(), new Callback()
-		{
-			@Override
-			public void onFailure(Call call, IOException e)
-			{
-				log.warn("[07Flip] fetchTeleTablets failed: {}", e.getMessage());
-				callback.accept(new ArrayList<>());
-			}
-
-			@Override
-			public void onResponse(Call call, Response response) throws IOException
-			{
-				callback.accept(parseArray(response, "tablets", O7FlipApiClient.this::parseTeleTablet));
-			}
-		});
-	}
-
-	private TeleTablet parseTeleTablet(JsonObject obj)
-	{
-		TeleTablet t = new TeleTablet();
-		t.name         = getString(obj, "name", "Unknown");
-		t.tabletId     = getInt(obj, "tablet_id", 0);
-		t.spellbook    = getString(obj, "spellbook", "Standard");
-		t.materialCost = getLong(obj, "material_cost", 0);
-		t.sellPrice    = getLong(obj, "sell_price", 0);
-		t.sellAfterTax = getLong(obj, "sell_after_tax", 0);
-		t.profit       = getLong(obj, "profit", 0);
-		t.roiPct       = getDouble(obj, "roi_pct", 0);
-		t.dailyVolume  = getIntOrNull(obj, "daily_volume");
-		JsonArray arr  = obj.getAsJsonArray("ingredients");
-		if (arr != null)
-		{
-			for (int i = 0; i < arr.size(); i++)
-			{
-				try
-				{
-					JsonObject io = arr.get(i).getAsJsonObject();
-					TeleTablet.Ingredient ing = new TeleTablet.Ingredient();
-					ing.name       = getString(io, "name", "");
-					ing.itemId     = getInt(io, "item_id", 0);
-					ing.qty        = getInt(io, "qty", 0);
-					ing.unitPrice  = getLong(io, "unit_price", 0);
-					ing.totalPrice = getLong(io, "total_price", 0);
-					t.ingredients.add(ing);
-				}
-				catch (Exception e)
-				{
-					log.warn("[07Flip] tele-tablet ingredient parse skipped: {}", e.getMessage());
-				}
-			}
-		}
-		return t;
-	}
-
-	// -------------------------------------------------------------------------
 	// /favourites — user's saved item list (auth required)
 	// -------------------------------------------------------------------------
 
@@ -2522,145 +2434,6 @@ public class O7FlipApiClient
 		return o;
 	}
 
-	// -------------------------------------------------------------------------
-	// /screeners — technical screeners (premium gates matches)
-	// -------------------------------------------------------------------------
-
-	/**
-	 * Fetches the list of all available screener presets and their current
-	 * matches. For free / anonymous callers, {@code matches} is empty on every
-	 * preset and the per-preset {@code premiumRequired} flag is set.
-	 */
-	public void fetchScreeners(Consumer<ScreenerPreset.Bundle> callback)
-	{
-		fetch(BASE_URL + "/screeners?limit=25", new Callback()
-		{
-			@Override
-			public void onFailure(Call call, IOException e)
-			{
-				log.warn("[07Flip] fetchScreeners failed: {}", e.getMessage());
-				callback.accept(new ScreenerPreset.Bundle());
-			}
-
-			@Override
-			public void onResponse(Call call, Response response) throws IOException
-			{
-				if (response.code() == 429)
-				{
-					markRateLimited(response);
-				}
-				if (!response.isSuccessful() || response.body() == null)
-				{
-					log.warn("[07Flip] fetchScreeners HTTP {}", response.code());
-					callback.accept(new ScreenerPreset.Bundle());
-					return;
-				}
-				try
-				{
-					JsonObject root = gson.fromJson(response.body().string(), JsonObject.class);
-					ScreenerPreset.Bundle bundle = new ScreenerPreset.Bundle();
-					bundle.premium       = getBool(root, "premium", false);
-					bundle.authenticated = getBool(root, "authenticated", false);
-					bundle.updatedAt     = getString(root, "updated_at", "");
-					bundle.systemPresets = parsePresetArray(root, "system_presets", false, bundle.premium);
-					bundle.userPresets   = parsePresetArray(root, "user_presets",   true,  bundle.premium);
-					callback.accept(bundle);
-				}
-				catch (Exception e)
-				{
-					log.warn("[07Flip] fetchScreeners parse error: {}", e.getMessage());
-					callback.accept(new ScreenerPreset.Bundle());
-				}
-			}
-		});
-	}
-
-	private List<ScreenerPreset> parsePresetArray(JsonObject root, String key, boolean userScope, boolean premium)
-	{
-		List<ScreenerPreset> out = new ArrayList<>();
-		if (!root.has(key) || !root.get(key).isJsonArray())
-		{
-			return out;
-		}
-		JsonArray arr = root.getAsJsonArray(key);
-		for (int i = 0; i < arr.size(); i++)
-		{
-			try
-			{
-				JsonObject obj = arr.get(i).getAsJsonObject();
-				ScreenerPreset p = new ScreenerPreset();
-				p.key         = getString(obj, "key", "");
-				p.name        = getString(obj, "name", "Untitled");
-				p.description = getString(obj, "description", "");
-				p.timeframe   = getString(obj, "timeframe", "daily");
-				p.scope       = getString(obj, "scope", userScope ? "user" : "system");
-				p.count       = getInt(obj, "count", 0);
-				// matches array may legitimately be empty for premium-gated rows.
-				JsonArray m = obj.getAsJsonArray("matches");
-				if (m != null)
-				{
-					for (int j = 0; j < m.size(); j++)
-					{
-						try
-						{
-							p.matches.add(parseScreenerMatch(m.get(j).getAsJsonObject()));
-						}
-						catch (Exception e)
-						{
-							log.warn("[07Flip] screener match parse skipped: {}", e.getMessage());
-						}
-					}
-				}
-				// Server marks per-row gating via a top-level premium_required on single-mode,
-				// and implicit empty-matches on list-mode for non-premium callers.
-				p.premiumRequired = !premium && p.count == 0 && p.matches.isEmpty();
-				p.upgradeUrl      = getString(obj, "upgrade_url", "https://07flip.com/premium");
-				out.add(p);
-			}
-			catch (Exception e)
-			{
-				log.warn("[07Flip] screener preset parse skipped: {}", e.getMessage());
-			}
-		}
-		return out;
-	}
-
-	private ScreenerMatch parseScreenerMatch(JsonObject obj)
-	{
-		ScreenerMatch m = new ScreenerMatch();
-		m.itemId       = getInt(obj, "item_id", 0);
-		m.name         = getString(obj, "name", "Unknown");
-		m.macdHist     = getDoubleOrNull(obj, "macd_hist");
-		String cross   = getString(obj, "macd_cross", "");
-		m.macdCross    = cross.isEmpty() ? null : cross;
-		m.volSurge     = getDoubleOrNull(obj, "vol_surge");
-		m.bbPosition   = getDoubleOrNull(obj, "bb_position");
-		m.pricePos30d  = getDoubleOrNull(obj, "price_pos_30d");
-		m.pricePos90d  = getDoubleOrNull(obj, "price_pos_90d");
-		m.pct1d        = getDoubleOrNull(obj, "pct_1d");
-		m.pct7d        = getDoubleOrNull(obj, "pct_7d");
-		m.pct30d       = getDoubleOrNull(obj, "pct_30d");
-		// Optional market-data fields — null when the server doesn't ship
-		// them. The plugin enriches from cached Flip data as a fallback.
-		m.buyPrice     = getLongOrNull(obj,   "buy_price");
-		m.sellPrice    = getLongOrNull(obj,   "sell_price");
-		m.profit       = getLongOrNull(obj,   "profit");
-		m.roiPct       = getDoubleOrNull(obj, "roi_pct");
-		m.flip07Score  = getIntOrNull(obj,    "flip07_score");
-		// Band Flip engine fields (null on other presets).
-		m.bandFloor      = getLongOrNull(obj,   "band_floor");
-		m.bandCeiling    = getLongOrNull(obj,   "band_ceiling");
-		m.bandRecurrence = getIntOrNull(obj,    "band_recurrence");
-		m.bandMarginPct  = getDoubleOrNull(obj, "band_margin_pct");
-		// Event Recovery engine fields. recovery_window is a bucketed string
-		// label (en dash, render verbatim); recovery_from_floor is a float ratio.
-		m.drawdownPct       = getDoubleOrNull(obj, "drawdown_pct");
-		m.recoveryTarget    = getLongOrNull(obj,   "recovery_target");
-		m.recoveryWindow    = getStringOrNull(obj, "recovery_window");
-		m.recoveryFromFloor = getDoubleOrNull(obj, "recovery_from_floor");
-		return m;
-	}
-
 	public void fetchSpikes(String sort, int page, BiConsumer<List<SpikeItem>, Integer> callback)
 	{
 		StringBuilder url = new StringBuilder(BASE_URL + "/spikes?limit=").append(PAGE_LIMIT)
@@ -2868,87 +2641,6 @@ public class O7FlipApiClient
 	}
 
 	/**
-	 * News feed — OSRS game-update / blog posts with the server's AI summary
-	 * and any items the post is expected to move. Open to everyone (no key
-	 * required); routes through {@link #fetch} for 429 backoff protection.
-	 * Callback gets an empty list on any failure.
-	 */
-	public void fetchNews(Consumer<List<NewsItem>> callback)
-	{
-		fetch(BASE_URL + "/v2/news?limit=30", new Callback()
-		{
-			@Override
-			public void onFailure(Call call, IOException e)
-			{
-				log.warn("[07Flip] fetchNews failed: {}", e.getMessage());
-				callback.accept(new ArrayList<>());
-			}
-
-			@Override
-			public void onResponse(Call call, Response response) throws IOException
-			{
-				try
-				{
-					if (response.code() == 429)
-					{
-						markRateLimited(response);
-					}
-					if (!response.isSuccessful() || response.body() == null)
-					{
-						log.warn("[07Flip] fetchNews HTTP {}", response.code());
-						callback.accept(new ArrayList<>());
-						return;
-					}
-					JsonObject root = gson.fromJson(response.body().string(), JsonObject.class);
-					callback.accept(parseArray(root, "news", O7FlipApiClient.this::parseNewsItem));
-				}
-				catch (Exception e)
-				{
-					log.warn("[07Flip] fetchNews parse error: {}", e.getMessage());
-					callback.accept(new ArrayList<>());
-				}
-				finally
-				{
-					response.close();
-				}
-			}
-		});
-	}
-
-	private NewsItem parseNewsItem(JsonObject o)
-	{
-		NewsItem n = new NewsItem();
-		n.id          = getStringOrNull(o, "id");
-		n.title       = getString(o, "title", "");
-		n.summary     = getString(o, "summary", "");
-		n.url         = getString(o, "url", "");
-		n.category    = getStringOrNull(o, "category");
-		n.publishedAt = getString(o, "published_at", "");
-		if (o.has("items") && o.get("items").isJsonArray())
-		{
-			n.items = new ArrayList<>();
-			JsonArray arr = o.getAsJsonArray("items");
-			for (int i = 0; i < arr.size(); i++)
-			{
-				JsonElement el = arr.get(i);
-				if (el == null || !el.isJsonObject())
-				{
-					continue;
-				}
-				JsonObject io = el.getAsJsonObject();
-				NewsItem.Related r = new NewsItem.Related();
-				r.itemId = getInt(io, "item_id", 0);
-				r.name   = getString(io, "name", "");
-				if (r.itemId > 0)
-				{
-					n.items.add(r);
-				}
-			}
-		}
-		return n;
-	}
-
-	/**
 	 * User-created price alerts (the "Watch" tab). All three operations are
 	 * per-user and require an API key; no key → empty list / failure callback
 	 * without hitting the network.
@@ -3124,9 +2816,6 @@ public class O7FlipApiClient
 		BiConsumer<List<SpikeItem>, Integer> onSpikes,
 		BiConsumer<List<DumpItem>, Integer>  onDumps,
 		BiConsumer<List<AlertItem>, Integer> onAlerts,
-		Consumer<List<BarrowsSet>>           onBarrows,
-		Consumer<List<MoonSet>>              onMoon,
-		Consumer<List<DecantItem>>           onDecanting,
 		Consumer<String>                     onConnectUrl
 	)
 	{
@@ -3203,18 +2892,6 @@ public class O7FlipApiClient
 						List<AlertItem> items = parseArray(sec, "alerts", O7FlipApiClient.this::parseAlertItem);
 						onAlerts.accept(items, getInt(sec, "total", items.size()));
 					}
-					if (onBarrows != null && root.has("barrows"))
-					{
-						onBarrows.accept(parseArray(root.getAsJsonObject("barrows"), "sets", O7FlipApiClient.this::parseBarrowsSet));
-					}
-					if (onMoon != null && root.has("moon"))
-					{
-						onMoon.accept(parseArray(root.getAsJsonObject("moon"), "sets", O7FlipApiClient.this::parseMoonSet));
-					}
-					if (onDecanting != null && root.has("decanting"))
-					{
-						onDecanting.accept(parseArray(root.getAsJsonObject("decanting"), "decants", O7FlipApiClient.this::parseDecantItem));
-					}
 					if (onConnectUrl != null && root.has("_auth"))
 					{
 						JsonObject auth = root.getAsJsonObject("_auth");
@@ -3226,161 +2903,6 @@ public class O7FlipApiClient
 				{
 					log.warn("[07Flip] fetchBundle parse error: {}", e.getMessage());
 				}
-			}
-		});
-	}
-
-	// -------------------------------------------------------------------------
-	// Non-paginated endpoints (full dataset loaded once, client-side pagination)
-	// -------------------------------------------------------------------------
-
-	public void fetchBarrows(int smithingLevel, Consumer<List<BarrowsSet>> callback)
-	{
-		fetch(BASE_URL + "/barrows?set=all&smithingLevel=" + smithingLevel, new Callback()
-		{
-			@Override
-			public void onFailure(Call call, IOException e)
-			{
-				log.warn("[07Flip] fetchBarrows failed: {}", e.getMessage());
-				callback.accept(new ArrayList<>());
-			}
-
-			@Override
-			public void onResponse(Call call, Response response) throws IOException
-			{
-				callback.accept(parseArray(response, "sets", O7FlipApiClient.this::parseBarrowsSet));
-			}
-		});
-	}
-
-	public void fetchBarrowsDetail(String setParam, int smithingLevel, Consumer<BarrowsSet> callback)
-	{
-		fetch(BASE_URL + "/barrows?set=" + setParam + "&smithingLevel=" + smithingLevel, new Callback()
-		{
-			@Override
-			public void onFailure(Call call, IOException e)
-			{
-				log.warn("[07Flip] fetchBarrowsDetail failed: {}", e.getMessage());
-				callback.accept(null);
-			}
-
-			@Override
-			public void onResponse(Call call, Response response) throws IOException
-			{
-				List<BarrowsSet> sets = parseArray(response, "sets", O7FlipApiClient.this::parseBarrowsSet);
-				callback.accept(sets.isEmpty() ? null : sets.get(0));
-			}
-		});
-	}
-
-	private BarrowsSet parseBarrowsSet(JsonObject obj)
-	{
-		BarrowsSet s = new BarrowsSet();
-		s.iconItemId         = getInt(obj, "icon_item_id", 0);
-		s.setName            = getString(obj, "set_name", "");
-		s.shortName          = getString(obj, "short_name", "");
-		s.setParam           = getString(obj, "set_param", "");
-		s.totalBrokenCost    = getLong(obj, "total_broken_cost", 0);
-		s.totalNpcRepairCost = getLong(obj, "total_npc_repair_cost", 0);
-		s.totalPohRepairCost = getLong(obj, "total_poh_repair_cost", 0);
-		s.npcProfit          = getLong(obj, "npc_profit", 0);
-		s.pohProfit          = getLong(obj, "poh_profit", 0);
-		s.setProfit          = getLong(obj, "set_profit", 0);
-		s.bestProfit         = getLong(obj, "best_profit", 0);
-		s.bestStrategy       = getString(obj, "best_strategy", "sell_individual");
-		s.dailyVolume        = getInt(obj, "daily_volume", 0);
-
-		// 07Flip recommended-price aggregates — null-together when set has no rec data
-		s.recTotalBrokenCost    = getLongOrNull(obj, "rec_total_broken_cost");
-		s.recTotalNpcRepairCost = getLongOrNull(obj, "rec_total_npc_repair_cost");
-		s.recTotalPohRepairCost = getLongOrNull(obj, "rec_total_poh_repair_cost");
-		s.recNpcProfit          = getLongOrNull(obj, "rec_npc_profit");
-		s.recPohProfit          = getLongOrNull(obj, "rec_poh_profit");
-		s.recSetProfit          = getLongOrNull(obj, "rec_set_profit");
-		s.recBestProfit         = getLongOrNull(obj, "rec_best_profit");
-		String recStrat         = getString(obj, "rec_best_strategy", "");
-		s.recBestStrategy       = recStrat.isEmpty() ? null : recStrat;
-
-		// Derive setParam if server did not return it
-		if (s.setParam.isEmpty() && !s.shortName.isEmpty())
-		{
-			s.setParam = s.shortName.replace("'s", "").toLowerCase() + "s";
-		}
-
-		// Items — present in detail response (?set=X), absent in list response (?set=all)
-		JsonArray itemsArr = obj.getAsJsonArray("items");
-		if (itemsArr != null)
-		{
-			for (int i = 0; i < itemsArr.size(); i++)
-			{
-				try
-				{
-					JsonObject io = itemsArr.get(i).getAsJsonObject();
-					BarrowsItem item = new BarrowsItem();
-					item.itemIdBroken      = getInt(io, "item_id_broken", 0);
-					item.itemIdRepaired    = getInt(io, "item_id_repaired", 0);
-					item.name              = getString(io, "name", "");
-					item.slot              = getString(io, "slot", "");
-					item.brokenBuyPrice    = getLong(io, "broken_buy_price", 0);
-					item.repairedSellPrice = getLong(io, "repaired_sell_price", 0);
-					item.repairedAfterTax  = getLong(io, "repaired_after_tax", 0);
-					item.npcRepairCost     = getLong(io, "npc_repair_cost", 0);
-					item.pohRepairCost     = getLong(io, "poh_repair_cost", 0);
-					item.npcProfit         = getLong(io, "npc_profit", 0);
-					item.pohProfit         = getLong(io, "poh_profit", 0);
-					item.npcRoiPct         = getDouble(io, "npc_roi_pct", 0);
-					item.pohRoiPct         = getDouble(io, "poh_roi_pct", 0);
-					item.dailyVolume       = getInt(io, "daily_volume", 0);
-					item.recBrokenBuyPrice    = getLongOrNull(io, "rec_broken_buy_price");
-					item.recRepairedSellPrice = getLongOrNull(io, "rec_repaired_sell_price");
-					item.recRepairedAfterTax  = getLongOrNull(io, "rec_repaired_after_tax");
-					item.recNpcProfit         = getLongOrNull(io, "rec_npc_profit");
-					item.recPohProfit         = getLongOrNull(io, "rec_poh_profit");
-					s.items.add(item);
-				}
-				catch (Exception e)
-				{
-					log.warn("[07Flip] Skipping malformed barrows item at index {}: {}", i, e.getMessage());
-				}
-			}
-		}
-		return s;
-	}
-
-	public void fetchMoon(int smithingLevel, Consumer<List<MoonSet>> callback)
-	{
-		fetch(BASE_URL + "/moon?smithingLevel=" + smithingLevel, new Callback()
-		{
-			@Override
-			public void onFailure(Call call, IOException e)
-			{
-				log.warn("[07Flip] fetchMoon failed: {}", e.getMessage());
-				callback.accept(new ArrayList<>());
-			}
-
-			@Override
-			public void onResponse(Call call, Response response) throws IOException
-			{
-				callback.accept(parseArray(response, "sets", O7FlipApiClient.this::parseMoonSet));
-			}
-		});
-	}
-
-	public void fetchDecanting(Consumer<List<DecantItem>> callback)
-	{
-		fetch(BASE_URL + "/decanting", new Callback()
-		{
-			@Override
-			public void onFailure(Call call, IOException e)
-			{
-				log.warn("[07Flip] fetchDecanting failed: {}", e.getMessage());
-				callback.accept(new ArrayList<>());
-			}
-
-			@Override
-			public void onResponse(Call call, Response response) throws IOException
-			{
-				callback.accept(parseArray(response, "decants", O7FlipApiClient.this::parseDecantItem));
 			}
 		});
 	}
@@ -3656,89 +3178,6 @@ public class O7FlipApiClient
 		alert.sparklineSell  = parseNullableLongArray(obj, "sparkline_sell");
 		alert.sparklineStart = getString(obj, "sparkline_start", "");
 		return alert;
-	}
-
-	private MoonSet parseMoonSet(JsonObject obj)
-	{
-		MoonSet s = new MoonSet();
-		s.setName             = getString(obj, "set_name", "");
-		s.shortName           = getString(obj, "short_name", "");
-		s.combatStyle         = getString(obj, "combat_style", "");
-		s.setId               = getInt(obj, "set_id", 0);
-		s.iconItemId          = getInt(obj, "icon_item_id", 0);
-		s.totalBrokenCost     = getLong(obj, "total_broken_cost", 0);
-		s.totalNpcRepairCost  = getLong(obj, "total_npc_repair_cost", 0);
-		s.totalPohRepairCost  = getLong(obj, "total_poh_repair_cost", 0);
-		s.npcProfit           = getLong(obj, "npc_profit", 0);
-		s.pohProfit           = getLong(obj, "poh_profit", 0);
-		s.setPrice            = getLong(obj, "set_price", 0);
-		s.setProfit           = getLong(obj, "set_profit", 0);
-		s.bestStrategy        = getString(obj, "best_strategy", "sell_individual");
-		s.bestProfit          = getLong(obj, "best_profit", 0);
-
-		s.recTotalBrokenCost    = getLongOrNull(obj, "rec_total_broken_cost");
-		s.recTotalNpcRepairCost = getLongOrNull(obj, "rec_total_npc_repair_cost");
-		s.recTotalPohRepairCost = getLongOrNull(obj, "rec_total_poh_repair_cost");
-		s.recNpcProfit          = getLongOrNull(obj, "rec_npc_profit");
-		s.recPohProfit          = getLongOrNull(obj, "rec_poh_profit");
-		s.recSetProfit          = getLongOrNull(obj, "rec_set_profit");
-		s.recBestProfit         = getLongOrNull(obj, "rec_best_profit");
-		String recStrat         = getString(obj, "rec_best_strategy", "");
-		s.recBestStrategy       = recStrat.isEmpty() ? null : recStrat;
-
-		JsonArray itemsArr = obj.getAsJsonArray("items");
-		if (itemsArr != null)
-		{
-			for (int i = 0; i < itemsArr.size(); i++)
-			{
-				try
-				{
-					JsonObject io = itemsArr.get(i).getAsJsonObject();
-					MoonItem mi = new MoonItem();
-					mi.itemIdBroken      = getInt(io, "item_id_broken", 0);
-					mi.itemIdRepaired    = getInt(io, "item_id_repaired", 0);
-					mi.name              = getString(io, "name", "");
-					mi.slot              = getString(io, "slot", "");
-					mi.degrades          = getBool(io, "degrades", false);
-					mi.brokenBuyPrice    = getLong(io, "broken_buy_price", 0);
-					mi.repairedSellPrice = getLong(io, "repaired_sell_price", 0);
-					mi.repairedAfterTax  = getLong(io, "repaired_after_tax", 0);
-					mi.npcRepairCost     = getLong(io, "npc_repair_cost", 0);
-					mi.pohRepairCost     = getLong(io, "poh_repair_cost", 0);
-					mi.npcProfit         = getLong(io, "npc_profit", 0);
-					mi.pohProfit         = getLong(io, "poh_profit", 0);
-					mi.npcRoiPct         = getDouble(io, "npc_roi_pct", 0);
-					mi.pohRoiPct         = getDouble(io, "poh_roi_pct", 0);
-					mi.recBrokenBuyPrice    = getLongOrNull(io, "rec_broken_buy_price");
-					mi.recRepairedSellPrice = getLongOrNull(io, "rec_repaired_sell_price");
-					mi.recRepairedAfterTax  = getLongOrNull(io, "rec_repaired_after_tax");
-					mi.recNpcProfit         = getLongOrNull(io, "rec_npc_profit");
-					mi.recPohProfit         = getLongOrNull(io, "rec_poh_profit");
-					s.items.add(mi);
-				}
-				catch (Exception e)
-				{
-					log.warn("[07Flip] Skipping malformed moon item at index {}: {}", i, e.getMessage());
-				}
-			}
-		}
-		return s;
-	}
-
-	private DecantItem parseDecantItem(JsonObject obj)
-	{
-		DecantItem item = new DecantItem();
-		item.itemId           = getInt(obj, "item_id", 0);
-		item.potionName       = getString(obj, "potion_name", "Unknown");
-		item.strategy         = getString(obj, "strategy", "");
-		item.profitPer4dose   = getLong(obj, "profit_per_4dose", 0);
-		item.profitPerDose    = getLong(obj, "profit_per_dose", 0);
-		item.roiPct           = getDouble(obj, "roi_pct", 0);
-		item.minHourlyVolume  = getInt(obj, "min_hourly_volume", 0);
-		item.dailyVolume      = getInt(obj, "daily_volume", 0);
-		item.buyDose          = getInt(obj, "buy_dose", 0);
-		item.sellDose         = getInt(obj, "sell_dose", 0);
-		return item;
 	}
 
 	// -------------------------------------------------------------------------

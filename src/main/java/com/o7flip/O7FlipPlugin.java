@@ -29,7 +29,6 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.inject.Provides;
 import com.o7flip.model.AlertItem;
-import com.o7flip.model.BarrowsSet;
 import com.o7flip.model.DumpItem;
 import com.o7flip.model.FlipItem;
 import com.o7flip.model.SpikeItem;
@@ -86,8 +85,8 @@ import java.util.concurrent.TimeUnit;
 
 @PluginDescriptor(
 	name = "07Flip - GE Flip Finder",
-	description = "Live GE flips, price dump signals, Barrows/Moon repair profits, decanting, and price alerts from 07flip.com",
-	tags = {"flipping", "grand exchange", "ge", "money making", "merching", "barrows", "decanting", "07flip"}
+	description = "Live GE flips, price dump signals, and price alerts from 07flip.com",
+	tags = {"flipping", "grand exchange", "ge", "money making", "merching", "07flip"}
 )
 public class O7FlipPlugin extends Plugin
 {
@@ -138,15 +137,6 @@ public class O7FlipPlugin extends Plugin
 	private ScheduledExecutorService executor;
 	private ScheduledFuture<?> refreshTask;
 	private ScheduledFuture<?> authRefreshTask;
-
-	// Barrows/Moon/Decanting change with GE prices (hourly), not every minute.
-	// Only refresh them every SLOW_EVERY cycles to reduce server load.
-	// Initial value SLOW_EVERY (not 0) so the first refresh after startup
-	// already pulls Moons / Barrows / Decant — otherwise the user opens the
-	// panel and stares at empty premium tabs for ~6 minutes (5 × 90s) until
-	// the slow tick rolls over for the first time.
-	private static final int SLOW_EVERY = 5;
-	private int slowTick = SLOW_EVERY;
 
 	// -------------------------------------------------------------------------
 	// Pending GE pre-fill state (set by panel right-click, cleared after use)
@@ -2099,12 +2089,6 @@ public class O7FlipPlugin extends Plugin
 			executor.execute(this::fetchAuthStatus);
 			return;
 		}
-		// Re-fetch repair costs when smithing level changes.
-		if ("smithingLevel".equals(key))
-		{
-			executor.execute(this::fetchSlow);
-			return;
-		}
 		// One-shot trigger for the tab reorder dialog.
 		if ("openTabReorderDialog".equals(key) && Boolean.parseBoolean(event.getNewValue()))
 		{
@@ -2140,15 +2124,9 @@ public class O7FlipPlugin extends Plugin
 			case "showSpikes":
 			case "showItem":
 			case "showAlerts":
-			case "showMoon":
-			case "showBarrows":
-			case "showDecant":
 			case "showDips":
 			case "showFavourites":
 			case "showHighAlch":
-			case "showTeleTablets":
-			case "showScreeners":
-			case "showNews":
 			case "showMyFlips":
 			case "tabOrder":
 			case "topRowTabs":
@@ -2310,31 +2288,6 @@ public class O7FlipPlugin extends Plugin
 			sections.add("alerts", p);
 		}
 
-		// Slow sections (Barrows, Moon, Decanting) update hourly — include only every SLOW_EVERY cycles.
-		slowTick++;
-		boolean includeSlow = slowTick >= SLOW_EVERY;
-		if (includeSlow)
-		{
-			slowTick = 0;
-			if (config.showBarrows())
-			{
-				JsonObject p = new JsonObject();
-				p.addProperty("smithingLevel", config.smithingLevel());
-				p.addProperty("set", "all");
-				sections.add("barrows", p);
-			}
-			if (config.showMoon())
-			{
-				JsonObject p = new JsonObject();
-				p.addProperty("smithingLevel", config.smithingLevel());
-				sections.add("moon", p);
-			}
-			if (config.showDecant())
-			{
-				sections.add("decanting", new JsonObject());
-			}
-		}
-
 		final int flipsPage   = panel.getFlipsPage();
 		final int spikesPage  = panel.getSpikesPage();
 		final int dumpsPage   = panel.getDumpsPage();
@@ -2359,21 +2312,6 @@ public class O7FlipPlugin extends Plugin
 				lastAlerts = items;
 				rebuildTrackedItems();
 				SwingUtilities.invokeLater(() -> panel.updateAlerts(items));
-			} : null,
-			(config.showBarrows() && includeSlow) ? sets ->
-			{
-				if (sets != null && !sets.isEmpty()) saveCache("barrows", sets);
-				SwingUtilities.invokeLater(() -> panel.updateBarrows(sets));
-			} : null,
-			(config.showMoon()    && includeSlow) ? sets ->
-			{
-				if (sets != null && !sets.isEmpty()) saveCache("moon", sets);
-				SwingUtilities.invokeLater(() -> panel.updateMoon(sets));
-			} : null,
-			(config.showDecant()  && includeSlow) ? decants ->
-			{
-				if (decants != null && !decants.isEmpty()) saveCache("decant", decants);
-				SwingUtilities.invokeLater(() -> panel.updateDecanting(decants));
 			} : null,
 			connectUrl ->
 			{
@@ -2403,15 +2341,11 @@ public class O7FlipPlugin extends Plugin
 			fetchDumpsAtPage(panel.getDumpsSortKey(), panel.getDumpsPage());
 		}
 
-		// High Alch, Tele Tablets, Favourites — all on their own /runelite
+		// High Alch, Favourites — all on their own /runelite
 		// endpoints, polled at the same 60s cadence.
 		if (config.showHighAlch())
 		{
 			fetchHighAlchAtPage(panel.getHighAlchSortKey(), panel.getHighAlchPage());
-		}
-		if (config.showTeleTablets())
-		{
-			fetchTeleTabletsCurrent();
 		}
 		if (config.showFavourites() && hasApiKey())
 		{
@@ -2421,12 +2355,6 @@ public class O7FlipPlugin extends Plugin
 				pushFavouritesToPanel(items);
 			});
 		}
-		// Screeners poll on a 2-min floor — fire only when due.
-		if (config.showScreeners() && shouldPollScreeners())
-		{
-			fetchScreenersNow();
-		}
-
 		// Bot-dumps lives on a dedicated endpoint outside the bundle. When
 		// the Dumps tab is in bot mode, fire the additional fetch in parallel.
 		if (config.showDumps() && panel.dumpsUsesBotEndpoint())
@@ -2444,37 +2372,6 @@ public class O7FlipPlugin extends Plugin
 					SwingUtilities.invokeLater(() -> panel.updateDumps(resp, botDumpsPage));
 				});
 		}
-	}
-
-	// Called when smithingLevel config changes — fires a bundle with just the slow sections.
-	void fetchSlow()
-	{
-		JsonObject sections = new JsonObject();
-		if (config.showBarrows())
-		{
-			JsonObject p = new JsonObject();
-			p.addProperty("smithingLevel", config.smithingLevel());
-			p.addProperty("set", "all");
-			sections.add("barrows", p);
-		}
-		if (config.showMoon())
-		{
-			JsonObject p = new JsonObject();
-			p.addProperty("smithingLevel", config.smithingLevel());
-			sections.add("moon", p);
-		}
-		if (config.showDecant())
-		{
-			sections.add("decanting", new JsonObject());
-		}
-		apiClient.fetchBundle(
-			sections,
-			null, null, null, null,
-			config.showBarrows() ? sets    -> SwingUtilities.invokeLater(() -> panel.updateBarrows(sets))      : null,
-			config.showMoon()    ? sets    -> SwingUtilities.invokeLater(() -> panel.updateMoon(sets))         : null,
-			config.showDecant()  ? decants -> SwingUtilities.invokeLater(() -> panel.updateDecanting(decants)) : null,
-			null
-		);
 	}
 
 	// -------------------------------------------------------------------------
@@ -2578,14 +2475,6 @@ public class O7FlipPlugin extends Plugin
 			SwingUtilities.invokeLater(() -> panel.updateHighAlch(snap, 0));
 		}
 
-		// Tele Tablets
-		List<com.o7flip.model.TeleTablet> ct = loadListCache("tablets", com.o7flip.model.TeleTablet.class);
-		if (ct != null && !ct.isEmpty())
-		{
-			final List<com.o7flip.model.TeleTablet> snap = ct;
-			SwingUtilities.invokeLater(() -> panel.updateTeleTablets(snap));
-		}
-
 		// Buy-limit cooldown state (windows still within their 4h life + the
 		// learned item→limit map).
 		loadBuyLimitState();
@@ -2597,36 +2486,6 @@ public class O7FlipPlugin extends Plugin
 			pushFavouritesToPanel(cf);
 		}
 
-		// Screeners
-		com.o7flip.model.ScreenerPreset.Bundle cs = loadCache("screeners", com.o7flip.model.ScreenerPreset.Bundle.class);
-		if (cs != null && (cs.systemPresets != null || cs.userPresets != null))
-		{
-			final com.o7flip.model.ScreenerPreset.Bundle snap = cs;
-			SwingUtilities.invokeLater(() -> panel.updateScreeners(snap));
-		}
-
-		// Decant
-		List<com.o7flip.model.DecantItem> cdec = loadListCache("decant", com.o7flip.model.DecantItem.class);
-		if (cdec != null && !cdec.isEmpty())
-		{
-			final List<com.o7flip.model.DecantItem> snap = cdec;
-			SwingUtilities.invokeLater(() -> panel.updateDecanting(snap));
-		}
-
-		// Barrows + Moons — slow-refresh feeds, especially worth caching since
-		// their full cycle is ~15 minutes.
-		List<com.o7flip.model.BarrowsSet> cb = loadListCache("barrows", com.o7flip.model.BarrowsSet.class);
-		if (cb != null && !cb.isEmpty())
-		{
-			final List<com.o7flip.model.BarrowsSet> snap = cb;
-			SwingUtilities.invokeLater(() -> panel.updateBarrows(snap));
-		}
-		List<com.o7flip.model.MoonSet> cm = loadListCache("moon", com.o7flip.model.MoonSet.class);
-		if (cm != null && !cm.isEmpty())
-		{
-			final List<com.o7flip.model.MoonSet> snap = cm;
-			SwingUtilities.invokeLater(() -> panel.updateMoon(snap));
-		}
 	}
 
 	// -------------------------------------------------------------------------
@@ -4724,7 +4583,7 @@ public class O7FlipPlugin extends Plugin
 				fetchFlipsAtPage(panel.getFlipsPage());
 			}
 		});
-		// Client-side-filtered tabs (Dips / Alch / Tablets / Favourites / Spikes
+		// Client-side-filtered tabs (Dips / Alch / Favourites / Spikes
 		// / Dumps) don't need a refetch — they already have the rows, the filter
 		// just changed. Trigger a re-render on the EDT so the new ceiling
 		// applies immediately.
@@ -4857,13 +4716,8 @@ public class O7FlipPlugin extends Plugin
 	}
 
 	// -------------------------------------------------------------------------
-	// High Alch / Tele Tablets / Favourites / Screeners — "Other" tab feeds
+	// High Alch / Favourites — "Other" tab feeds
 	// -------------------------------------------------------------------------
-
-	/** Last screeners-fetch time in epoch ms. Honoured by {@link #shouldPollScreeners}. */
-	private volatile long lastScreenersFetchMs = 0L;
-	/** Minimum interval between /screeners requests — spec says ≥ 2 minutes. */
-	private static final long SCREENERS_MIN_INTERVAL_MS = 2 * 60 * 1000L;
 
 	void onHighAlchPageChanged(int page)
 	{
@@ -4891,24 +4745,6 @@ public class O7FlipPlugin extends Plugin
 					saveCache("highAlch", resp);
 				}
 				SwingUtilities.invokeLater(() -> panel.updateHighAlch(resp, page));
-			});
-	}
-
-	void onTeleTabletsFilterChanged()
-	{
-		executor.execute(this::fetchTeleTabletsCurrent);
-	}
-
-	private void fetchTeleTabletsCurrent()
-	{
-		apiClient.fetchTeleTablets(
-			panel.getTabletsSortKey(),
-			panel.getTabletsSpellbook(),
-			panel.getTabletsProfitableOnly(),
-			items ->
-			{
-				if (items != null && !items.isEmpty()) saveCache("tablets", items);
-				SwingUtilities.invokeLater(() -> panel.updateTeleTablets(items));
 			});
 	}
 
@@ -4943,25 +4779,14 @@ public class O7FlipPlugin extends Plugin
 		if (!tabSelectFresh(name)) return;
 		switch (name)
 		{
-			case "Tablets":
-				executor.execute(this::fetchTeleTabletsCurrent);
-				break;
 			case "Dips":
 				executor.execute(() -> fetchDipsAtPage(panel.getDipsSortKey(), panel.getDipsPage()));
 				break;
 			case "Alch":
 				executor.execute(() -> fetchHighAlchAtPage(panel.getHighAlchSortKey(), panel.getHighAlchPage()));
 				break;
-			case "Decant":
-				// Decant lives in the bundle, so a select triggers fetchSlow
-				// (cheap: only the slow sections come back).
-				executor.execute(this::fetchSlow);
-				break;
-			case "News":
-				executor.execute(this::fetchNewsNow);
-				break;
-			// Favs + Screener have their own dedicated handlers below — keep
-			// them out of this switch so the throttle doesn't double-count.
+			// Favs has its own dedicated handler below — keep it out of this
+			// switch so the throttle doesn't double-count.
 			default:
 				break;
 		}
@@ -4978,13 +4803,6 @@ public class O7FlipPlugin extends Plugin
 			if (items != null && !items.isEmpty()) saveCache("favourites", items);
 			pushFavouritesToPanel(items);
 		}));
-	}
-
-	/** Fetches the news feed and pushes it to the News tab. Open to everyone. */
-	private void fetchNewsNow()
-	{
-		apiClient.fetchNews(news ->
-			SwingUtilities.invokeLater(() -> panel.updateNews(news)));
 	}
 
 	/** Watch tab selected — refresh the user's price alerts (auth required). */
@@ -6838,36 +6656,6 @@ public class O7FlipPlugin extends Plugin
 		}));
 	}
 
-	void onScreenersTabSelected()
-	{
-		// Screeners are premium-only — the tab shows the upsell card for
-		// non-premium users, so don't fetch matches for them.
-		if (panel == null || !panel.isPremium()) return;
-		if (!shouldPollScreeners())
-		{
-			return;
-		}
-		executor.execute(this::fetchScreenersNow);
-	}
-
-	private boolean shouldPollScreeners()
-	{
-		return System.currentTimeMillis() - lastScreenersFetchMs >= SCREENERS_MIN_INTERVAL_MS;
-	}
-
-	private void fetchScreenersNow()
-	{
-		lastScreenersFetchMs = System.currentTimeMillis();
-		apiClient.fetchScreeners(bundle ->
-		{
-			boolean hasContent = bundle != null
-				&& ((bundle.systemPresets != null && !bundle.systemPresets.isEmpty())
-				||  (bundle.userPresets   != null && !bundle.userPresets.isEmpty()));
-			if (hasContent) saveCache("screeners", bundle);
-			SwingUtilities.invokeLater(() -> panel.updateScreeners(bundle));
-		});
-	}
-
 	/**
 	 * Persists a High Alch staff-modifier toggle through RuneLite's config
 	 * system. Called from the panel so the UI doesn't need to inject
@@ -6969,19 +6757,6 @@ public class O7FlipPlugin extends Plugin
 	void onPresetChanged()
 	{
 		executor.execute(() -> fetchFlipsAtPage(0));
-	}
-
-	void onBarrowsSetClicked(BarrowsSet set)
-	{
-		executor.execute(() ->
-			apiClient.fetchBarrowsDetail(set.setParam, config.smithingLevel(),
-				fullSet -> SwingUtilities.invokeLater(() ->
-				{
-					if (fullSet != null)
-					{
-						panel.showBarrowsDetail(fullSet);
-					}
-				})));
 	}
 
 	void searchItems(String query)

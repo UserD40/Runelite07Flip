@@ -25,26 +25,16 @@
 package com.o7flip;
 
 import com.o7flip.model.AlertItem;
-import com.o7flip.model.BarrowsSet;
-import com.o7flip.model.DecantItem;
 import com.o7flip.model.DumpItem;
 import com.o7flip.model.FlipItem;
-import com.o7flip.model.MoonSet;
 import com.o7flip.model.SearchResultItem;
 import com.o7flip.model.SpikeItem;
 import com.o7flip.model.TradeRecord;
 import com.o7flip.ui.AlertItemPanel;
-import com.o7flip.ui.BarrowsItemPanel;
-import com.o7flip.ui.BarrowsSetPanel;
-import com.o7flip.ui.DecantItemPanel;
 import com.o7flip.ui.DipItemPanel;
 import com.o7flip.ui.DumpItemPanel;
 import com.o7flip.ui.HighAlchPanel;
-import com.o7flip.ui.ScreenerMatchPanel;
-import com.o7flip.ui.ScreenerPresetCard;
-import com.o7flip.ui.TeleTabletPanel;
 import com.o7flip.ui.FlipItemPanel;
-import com.o7flip.ui.MoonSetPanel;
 import com.o7flip.ui.SearchResultPanel;
 import com.o7flip.ui.SpikeItemPanel;
 import com.o7flip.ui.TradeRecordPanel;
@@ -334,18 +324,13 @@ public class O7FlipPanel extends PluginPanel
 	private List<FlipItem>    allFlips   = new ArrayList<>();
 	private List<SpikeItem>   allSpikes  = new ArrayList<>();
 	private List<DumpItem>    allDumps   = new ArrayList<>();
-	private List<BarrowsSet>  allBarrows = new ArrayList<>();
-	private List<MoonSet>     allMoon    = new ArrayList<>();
-	private List<DecantItem>  allDecants = new ArrayList<>();
 	private List<com.o7flip.model.DipItem> allDips = new ArrayList<>();
 	private List<com.o7flip.model.HighAlchItem> allHighAlch = new ArrayList<>();
-	private List<com.o7flip.model.TeleTablet>   allTablets  = new ArrayList<>();
 	private List<FlipItem>    allFavourites = new ArrayList<>();
 	// Favourites local sort: 0 Default · 1 Margin · 2 Profit · 3 Available (buy-limit).
 	private JButton[] favouritesSortBtns;
 	private int favouritesSortIdx = 0;
 	private javax.swing.Timer favCooldownTimer;
-	private com.o7flip.model.ScreenerPreset.Bundle screenersBundle = new com.o7flip.model.ScreenerPreset.Bundle();
 	private List<AlertItem>   allAlerts  = new ArrayList<>();
 	private List<TradeRecord> allMyFlips = new ArrayList<>();
 
@@ -355,9 +340,6 @@ public class O7FlipPanel extends PluginPanel
 	private int flipsSortIdx   = 0;
 	private int spikesSortIdx  = 0;
 	private int dumpsSortIdx   = 0;
-	private int barrowsSortIdx = 0;
-	private int moonFilterIdx  = 0;  // 0=Blood 1=Blue 2=Eclipse
-	private int decantSortIdx  = 0;
 	private int alertsSortIdx  = 0;
 	private int myFlipsSortIdx = 0;  // 0=Active 1=Recent 2=Margin
 	private int myFlipsPage    = 0;
@@ -377,9 +359,6 @@ public class O7FlipPanel extends PluginPanel
 	private int spikesPage  = 0;  private int spikesTotal = 0;
 	private int dumpsPage   = 0;  private int dumpsTotal  = 0;
 	private int dipsPage    = 0;  private int dipsTotal   = 0;
-	private int barrowsPage = 0;
-	private int moonPage    = 0;
-	private int decantPage  = 0;
 
 	// -------------------------------------------------------------------------
 	// List panels
@@ -389,30 +368,13 @@ public class O7FlipPanel extends PluginPanel
 	private JPanel dumpsListPanel;
 	private JPanel dipsListPanel;
 	private JPanel highAlchListPanel;
-	private JPanel tabletsListPanel;
 	private JPanel favouritesListPanel;
-	private JPanel screenersListPanel;
-	private JPanel newsListPanel;
-	private JPanel newsTabCard;        // CardLayout: "list" / "detail"
-	private JPanel newsDetailPanel;
-	private com.o7flip.model.NewsItem activeNewsItem;
-	private java.util.List<com.o7flip.model.NewsItem> newsItems = new ArrayList<>();
 	private JPanel watchListPanel;
 	private java.util.List<com.o7flip.model.PriceAlert> priceAlerts = new ArrayList<>();
 	// Alerts tab sub-nav: card switcher + the two toggle pills (Alerts / Watch).
 	private JPanel alertsTabCard;
 	private JButton[] alertsSubNavBtns;
 	private JLabel highAlchCostLabel;
-	private JPanel barrowsListPanel;
-	private JPanel barrowsDetailPanel;
-	private JPanel barrowsTabCard;
-	private JLabel barrowsDetailTitle;
-	// Screener master-detail state. screenersTabCard is the CardLayout shell;
-	// screenersListPanel is the preset cards, screenersDetailPanel hosts one
-	// preset's matches. activeScreenerPreset == null means we're on the list.
-	private JPanel screenersTabCard;
-	private JPanel screenersDetailPanel;
-	private JLabel screenersDetailTitle;
 	// Optimizer ("Plan") sub-tab state — ephemeral, lives only while the
 	// panel is alive. Inputs are kept in fields so the user's settings
 	// survive sub-tab switches within the session.
@@ -435,14 +397,11 @@ public class O7FlipPanel extends PluginPanel
 	private boolean optFormCollapsed;
 	private JPanel  optCollapsedPanel;    // the "Active plan · Reconfigure" header strip
 	private JPanel  optInputsHost;        // hosts the strip while a plan is live, empty otherwise
-	private com.o7flip.model.ScreenerPreset activeScreenerPreset;
 	// Inner Other-tab selection — preserved across rebuildTabs so the user
 	// doesn't get snapped back to the first sub-tab whenever data refreshes
 	// or an auth-status poll triggers a rebuild. Null until the user
 	// actually clicks something inside Other.
 	private String lastOtherSubTab;
-	private JPanel moonListPanel;
-	private JPanel decantListPanel;
 	private JPanel alertsListPanel;
 	private JPanel myFlipsListPanel;
 	private com.o7flip.ui.MyTradesStatsPanel myFlipsStatsPanel;
@@ -460,15 +419,12 @@ public class O7FlipPanel extends PluginPanel
 	private JButton[] dumpsTierBtns;       // [All, Confirmed, Likely]
 	private JPanel    dumpsTierBar;        // container for the segmented control
 	private JButton[] dipsSortBtns;
-	private JButton[] barrowsSortBtns;
 	private JButton[] myFlipsSortBtns;
 	private JButton[] myFlipsMarginSortBtns;
 	private JButton[] myFlipsRecentSortBtns;
 	private JPanel    myFlipsMarginSortBar;
 	private JPanel    myFlipsRecentSortBar;
 	private JButton   myFlipsPeriodButton;
-	private JButton[] moonFilterBtns;
-	private JButton[] decantSortBtns;
 	private JButton[] alertsSortBtns;
 
 	// -------------------------------------------------------------------------
@@ -484,18 +440,11 @@ public class O7FlipPanel extends PluginPanel
 	private int     highAlchPage    = 0;
 	private int     highAlchTotal   = 0;
 	private String  highAlchSortKey = "profit";
-	private int     tabletsSortIdx = 0;
-	private int     tabletsSpellbookIdx = 0;        // 0=All, 1=Standard, 2=Lunar, 3=Ancient, 4=Arceuus
-	private boolean tabletsProfitableOnly = true;
-	private JButton[] tabletsSortBtns;
 	private JButton[] highAlchSortBtns;
 	private JButton   highAlchFireStaffBtn;
 	private JButton   highAlchBryophytaBtn;
 	private boolean highAlchFireStaff;
 	private boolean highAlchBryophyta;
-	private JLabel  barrowsPageLabel; private JButton barrowsPrev,  barrowsNext;
-	private JLabel  moonPageLabel;    private JButton moonPrev,     moonNext;
-	private JLabel  decantPageLabel;  private JButton decantPrev,   decantNext;
 
 	// -------------------------------------------------------------------------
 	// Other UI
@@ -965,27 +914,6 @@ public class O7FlipPanel extends PluginPanel
 		renderMyFlips();
 	}
 
-	public void updateBarrows(List<BarrowsSet> i)
-	{
-		allBarrows = i;
-		barrowsPage = 0;
-		renderBarrows(filtered());
-	}
-
-	public void updateMoon(List<MoonSet> i)
-	{
-		allMoon = i;
-		moonPage = 0;
-		renderMoon(filtered());
-	}
-
-	public void updateDecanting(List<DecantItem> i)
-	{
-		allDecants = i;
-		decantPage = 0;
-		renderDecants(filtered());
-	}
-
 	public void updateDips(List<com.o7flip.model.DipItem> items, int total, int page)
 	{
 		allDips = items;
@@ -1041,33 +969,6 @@ public class O7FlipPanel extends PluginPanel
 	public boolean getHighAlchBryophyta()
 	{
 		return highAlchBryophyta;
-	}
-
-	public void updateTeleTablets(List<com.o7flip.model.TeleTablet> items)
-	{
-		allTablets = items;
-		renderTeleTablets(filtered());
-	}
-
-	public String getTabletsSortKey()
-	{
-		// Two-option sort: Volume · Profit. Volume is the default (index 0) —
-		// high-volume tablets sell fastest, so it's what most flippers want
-		// to see first. Server may not yet understand "dailyVolume"; we
-		// sort client-side too so the UI is always deterministic.
-		final String[] keys = {"dailyVolume", "profit"};
-		return keys[Math.max(0, Math.min(tabletsSortIdx, keys.length - 1))];
-	}
-
-	public String getTabletsSpellbook()
-	{
-		final String[] books = {"", "Standard", "Lunar", "Ancient", "Arceuus"};
-		return books[Math.max(0, Math.min(tabletsSpellbookIdx, books.length - 1))];
-	}
-
-	public boolean getTabletsProfitableOnly()
-	{
-		return tabletsProfitableOnly;
 	}
 
 	public void updateFavourites(List<FlipItem> items)
@@ -1136,12 +1037,6 @@ public class O7FlipPanel extends PluginPanel
 		}
 	}
 
-	public void updateScreeners(com.o7flip.model.ScreenerPreset.Bundle bundle)
-	{
-		screenersBundle = bundle == null ? new com.o7flip.model.ScreenerPreset.Bundle() : bundle;
-		renderScreeners();
-	}
-
 	// =========================================================================
 	// Search
 	// =========================================================================
@@ -1167,12 +1062,8 @@ public class O7FlipPanel extends PluginPanel
 			renderFlips("");
 			renderSpikes("");
 			renderDumps("");
-			renderBarrows("");
-			renderMoon("");
-			renderDecants("");
 			renderDips("");
 			renderHighAlch("");
-			renderTeleTablets("");
 			renderFavourites("");
 			renderAlerts("");
 			return;
@@ -1289,16 +1180,6 @@ public class O7FlipPanel extends PluginPanel
 			.filter(i -> notBlocked(i.itemId))
 			.filter(i -> affordable(i.buyPrice))
 			.filter(i -> q.isEmpty() || matches(i.name, q))
-			.collect(Collectors.toList());
-	}
-
-	private List<com.o7flip.model.TeleTablet> fTablets(String q)
-	{
-		return allTablets.stream()
-			// Tablets gate on material cost, not buy price — the user pays for
-			// the runes + soft clay upfront and the GE proceeds come later.
-			.filter(t -> affordable(t.materialCost))
-			.filter(t -> q.isEmpty() || matches(t.name, q))
 			.collect(Collectors.toList());
 	}
 
@@ -1420,38 +1301,6 @@ public class O7FlipPanel extends PluginPanel
 		}
 	}
 
-	private List<BarrowsSet> fBarrows(String q)
-	{
-		return q.isEmpty() ? allBarrows : allBarrows.stream().filter(i -> matches(i.setName + " " + i.shortName, q)).collect(Collectors.toList());
-	}
-
-	private List<MoonSet> fMoon(String q)
-	{
-		List<MoonSet> base = allMoon;
-		if (moonFilterIdx == 0)
-		{
-			base = base.stream().filter(s -> s.setName.contains("Blood")).collect(Collectors.toList());
-		}
-		else if (moonFilterIdx == 1)
-		{
-			base = base.stream().filter(s -> s.setName.contains("Blue")).collect(Collectors.toList());
-		}
-		else if (moonFilterIdx == 2)
-		{
-			base = base.stream().filter(s -> s.setName.contains("Eclipse")).collect(Collectors.toList());
-		}
-		if (!q.isEmpty())
-		{
-			base = base.stream().filter(s -> matches(s.setName, q)).collect(Collectors.toList());
-		}
-		return base;
-	}
-
-	private List<DecantItem> fDecants(String q)
-	{
-		return q.isEmpty() ? allDecants : allDecants.stream().filter(i -> matches(i.potionName, q)).collect(Collectors.toList());
-	}
-
 	private List<AlertItem>  fAlerts(String q)
 	{
 		return allAlerts.stream()
@@ -1475,51 +1324,6 @@ public class O7FlipPanel extends PluginPanel
 	private List<DumpItem> sortDumps(List<DumpItem> items)
 	{
 		return items;
-	}
-
-	private List<BarrowsSet> sortBarrows(List<BarrowsSet> items)
-	{
-		Comparator<BarrowsSet> c = barrowsSortIdx == 1 ? Comparator.comparingLong((BarrowsSet x) -> x.totalBrokenCost)
-			: Comparator.comparingLong((BarrowsSet x) -> x.bestProfit);
-		return barrowsSortIdx == 1 ? items.stream().sorted(c).collect(Collectors.toList())
-			: items.stream().sorted(c.reversed()).collect(Collectors.toList());
-	}
-
-	private List<DecantItem> sortDecants(List<DecantItem> items)
-	{
-		Comparator<DecantItem> c = decantSortIdx == 1 ? Comparator.comparingDouble((DecantItem x) -> x.roiPct)
-			: decantSortIdx == 2 ? Comparator.comparingInt((DecantItem x) -> x.dailyVolume)
-			: Comparator.comparingLong((DecantItem x) -> x.profitPer4dose);
-		return items.stream().sorted(c.reversed()).collect(Collectors.toList());
-	}
-
-	/**
-	 * Client-side sort for the Tablets list. The server may or may not
-	 * understand the {@code dailyVolume} sort key (it's new), so we sort
-	 * locally too — the dataset is small enough that this is essentially
-	 * free, and the UI stays deterministic regardless of server support.
-	 *
-	 * Tablets without a known daily volume sort to the bottom of the
-	 * Volume order.
-	 */
-	private List<com.o7flip.model.TeleTablet> sortTablets(List<com.o7flip.model.TeleTablet> items)
-	{
-		if (tabletsSortIdx == 1) // Profit
-		{
-			return items.stream()
-				.sorted(Comparator.comparingLong((com.o7flip.model.TeleTablet x) -> x.profit).reversed())
-				.collect(Collectors.toList());
-		}
-		// Volume (default, index 0) — desc by daily GE volume. Tablets
-		// without a known daily volume sort to the bottom.
-		return items.stream()
-			.sorted((a, b) ->
-			{
-				int va = a.dailyVolume != null ? a.dailyVolume : -1;
-				int vb = b.dailyVolume != null ? b.dailyVolume : -1;
-				return Integer.compare(vb, va);
-			})
-			.collect(Collectors.toList());
 	}
 
 	private List<AlertItem> sortAlerts(List<AlertItem> items)
@@ -1685,34 +1489,6 @@ public class O7FlipPanel extends PluginPanel
 		hiliteFilter(highAlchSortBtns, highAlchSortIdx);
 	}
 
-	private void renderTeleTablets(String q)
-	{
-		if (tabletsListPanel == null)
-		{
-			return;
-		}
-		// Tablets endpoint isn't paginated and the dataset is tiny — render in
-		// a single client-side pass. Sort is applied here (not server-side)
-		// so "Volume" works even before the server supports sort=dailyVolume.
-		tabletsListPanel.removeAll();
-		List<com.o7flip.model.TeleTablet> shown = sortTablets(fTablets(q));
-		if (shown.isEmpty())
-		{
-			tabletsListPanel.add(emptyLabel("No tablets to craft", "Try a different spellbook or turn off 'Profitable only'"));
-		}
-		else
-		{
-			for (int i = 0; i < shown.size(); i++)
-			{
-				tabletsListPanel.add(new TeleTabletPanel(shown.get(i), itemManager, i % 2 != 0, plugin));
-				tabletsListPanel.add(sep());
-			}
-		}
-		tabletsListPanel.revalidate();
-		tabletsListPanel.repaint();
-		hiliteFilter(tabletsSortBtns, tabletsSortIdx);
-	}
-
 	private void renderFavourites(String q)
 	{
 		if (favouritesListPanel == null)
@@ -1804,287 +1580,6 @@ public class O7FlipPanel extends PluginPanel
 		{
 			favCooldownTimer.stop();
 		}
-	}
-
-	private void renderScreeners()
-	{
-		// Master-detail dispatcher: list of preset cards by default, drill-down
-		// for one preset's matches when {@link #activeScreenerPreset} is set.
-		if (screenersTabCard == null)
-		{
-			return;
-		}
-		if (activeScreenerPreset != null)
-		{
-			renderScreenersDetail(activeScreenerPreset);
-		}
-		else
-		{
-			renderScreenersList();
-		}
-	}
-
-	/** Renders the list view — custom presets on top, system below. */
-	private void renderScreenersList()
-	{
-		if (screenersListPanel == null)
-		{
-			return;
-		}
-		screenersListPanel.removeAll();
-
-		List<com.o7flip.model.ScreenerPreset> system = screenersBundle.systemPresets;
-		List<com.o7flip.model.ScreenerPreset> user   = screenersBundle.userPresets;
-
-		// ── Custom screeners — shown FIRST per UX ask ────────────────────────
-		screenersListPanel.add(buildScreenerSectionHeader("My screeners"));
-		if (!screenersBundle.authenticated)
-		{
-			screenersListPanel.add(emptyLabel("Sign in required",
-				"Add an API key in plugin config to see your custom screeners."));
-		}
-		else if (user == null || user.isEmpty())
-		{
-			// Empty-state CTA — links to the website's screener editor.
-			screenersListPanel.add(ScreenerPresetCard.buildCreateOwnCard(
-				() -> openUrl("https://07flip.com/alerts?tab=screener")));
-		}
-		else
-		{
-			for (int i = 0; i < user.size(); i++)
-			{
-				final com.o7flip.model.ScreenerPreset p = user.get(i);
-				screenersListPanel.add(new ScreenerPresetCard(p, i % 2 != 0, this::onScreenerPresetClicked));
-				screenersListPanel.add(sep());
-			}
-		}
-
-		// ── System screeners — the 5 defaults ────────────────────────────────
-		screenersListPanel.add(buildScreenerSectionHeader("System screeners"));
-		if (system == null || system.isEmpty())
-		{
-			screenersListPanel.add(emptyLabel("Screeners loading…",
-				"Indicators update hourly. Pull-to-refresh isn't needed."));
-		}
-		else
-		{
-			for (int i = 0; i < system.size(); i++)
-			{
-				final com.o7flip.model.ScreenerPreset p = system.get(i);
-				screenersListPanel.add(new ScreenerPresetCard(p, i % 2 != 0, this::onScreenerPresetClicked));
-				screenersListPanel.add(sep());
-			}
-		}
-
-		screenersListPanel.revalidate();
-		screenersListPanel.repaint();
-		((CardLayout) screenersTabCard.getLayout()).show(screenersTabCard, "list");
-	}
-
-	/** Renders the detail view for a single preset's matches. */
-	private void renderScreenersDetail(com.o7flip.model.ScreenerPreset preset)
-	{
-		if (screenersDetailPanel == null || screenersDetailTitle == null)
-		{
-			return;
-		}
-		screenersDetailTitle.setText(preset.name);
-		screenersDetailPanel.removeAll();
-
-		// Preset description strip at the top of the detail view.
-		if (preset.description != null && !preset.description.isEmpty())
-		{
-			JLabel desc = new JLabel("<html><font color='#888888'>" + escapeHtml(preset.description) + "</font></html>");
-			desc.setFont(Fonts.SM);
-			desc.setBorder(new EmptyBorder(8, 12, 8, 12));
-			desc.setAlignmentX(Component.LEFT_ALIGNMENT);
-			screenersDetailPanel.add(desc);
-			screenersDetailPanel.add(sep());
-		}
-
-		if (preset.premiumRequired)
-		{
-			JLabel locked = new JLabel("<html><b>Matches are premium-only.</b><br>"
-				+ "<font color='#888888'>Upgrade on 07flip.com to see which items hit this preset.</font></html>");
-			locked.setFont(Fonts.SM);
-			locked.setBorder(new EmptyBorder(12, 12, 8, 12));
-			locked.setAlignmentX(Component.LEFT_ALIGNMENT);
-			screenersDetailPanel.add(locked);
-
-			JButton upgrade = pillButton("Unlock with Premium");
-			upgrade.setBackground(ORANGE);
-			upgrade.setForeground(Color.BLACK);
-			upgrade.setAlignmentX(Component.LEFT_ALIGNMENT);
-			upgrade.addActionListener(e -> openUrl(preset.upgradeUrl != null ? preset.upgradeUrl : "https://07flip.com/premium"));
-			JPanel wrap = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 4));
-			wrap.setBackground(ColorScheme.DARK_GRAY_COLOR);
-			wrap.setBorder(new EmptyBorder(0, 12, 12, 12));
-			wrap.setAlignmentX(Component.LEFT_ALIGNMENT);
-			wrap.add(upgrade);
-			screenersDetailPanel.add(wrap);
-		}
-		else if (preset.matches == null || preset.matches.isEmpty())
-		{
-			screenersDetailPanel.add(emptyLabel("No items match",
-				"This preset has no current hits. Check back later."));
-		}
-		else
-		{
-			// Enrich matches with market data from cached Flips before render
-			// so the rows show price + score + margin when available.
-			enrichScreenerMatches(preset.matches);
-			for (int i = 0; i < preset.matches.size(); i++)
-			{
-				screenersDetailPanel.add(new ScreenerMatchPanel(
-					preset.matches.get(i), itemManager, i % 2 != 0, plugin));
-				screenersDetailPanel.add(sep());
-			}
-		}
-
-		screenersDetailPanel.revalidate();
-		screenersDetailPanel.repaint();
-		((CardLayout) screenersTabCard.getLayout()).show(screenersTabCard, "detail");
-	}
-
-	/**
-	 * Fills in {@link com.o7flip.model.ScreenerMatch#buyPrice}, sellPrice,
-	 * profit, roiPct and flip07Score from the plugin's cached Flips list
-	 * when the server didn't ship them. Best-effort — items the user
-	 * doesn't have cached data for stay at null and render as "—".
-	 */
-	private void enrichScreenerMatches(List<com.o7flip.model.ScreenerMatch> matches)
-	{
-		if (plugin == null || matches == null || matches.isEmpty()) return;
-		java.util.Map<Integer, FlipItem> byId = new java.util.HashMap<>();
-		for (FlipItem f : plugin.lastFlips) byId.put(f.itemId, f);
-		// Also fall back to our locally-rendered Flips list (in-memory in panel)
-		// which may have items the plugin's lastFlips no longer caches.
-		for (FlipItem f : allFlips) byId.putIfAbsent(f.itemId, f);
-		for (FlipItem f : allFavourites) byId.putIfAbsent(f.itemId, f);
-		for (com.o7flip.model.ScreenerMatch m : matches)
-		{
-			FlipItem f = byId.get(m.itemId);
-			if (f == null) continue;
-			if (m.buyPrice    == null) m.buyPrice    = f.buyPrice;
-			if (m.sellPrice   == null) m.sellPrice   = f.sellPrice;
-			if (m.profit      == null) m.profit      = f.profit;
-			if (m.roiPct      == null) m.roiPct      = f.roiPct;
-			if (m.flip07Score == null) m.flip07Score = f.flip07Score;
-		}
-	}
-
-	private void onScreenerPresetClicked(com.o7flip.model.ScreenerPreset preset)
-	{
-		// Premium-locked rows route to the upgrade URL instead of detail.
-		if (preset.premiumRequired)
-		{
-			openUrl(preset.upgradeUrl != null ? preset.upgradeUrl : "https://07flip.com/premium");
-			return;
-		}
-		activeScreenerPreset = preset;
-		renderScreenersDetail(preset);
-	}
-
-	private JComponent buildScreenerSectionHeader(String title)
-	{
-		JLabel lbl = new JLabel(title);
-		lbl.setFont(Fonts.BOLD);
-		lbl.setForeground(ORANGE);
-		lbl.setBorder(new EmptyBorder(10, 10, 4, 10));
-		lbl.setAlignmentX(Component.LEFT_ALIGNMENT);
-		return lbl;
-	}
-
-	private void renderBarrows(String q)
-	{
-		fillList(barrowsListPanel, sortBarrows(fBarrows(q)), barrowsPage, barrowsPageLabel, barrowsPrev, barrowsNext,
-			(item, odd) -> new BarrowsSetPanel(item, itemManager, odd, plugin,
-				() ->
-				{
-					if (plugin != null)
-					{
-						plugin.onBarrowsSetClicked(item);
-					}
-				}),
-			"No Barrows data", "");
-		hilite(barrowsSortBtns, barrowsSortIdx);
-	}
-
-	/** Switches the Barrows tab to the detail view and renders per-item rows. */
-	public void showBarrowsDetail(BarrowsSet set)
-	{
-		barrowsDetailTitle.setText(set.setName != null && !set.setName.isEmpty() ? set.setName : set.shortName);
-		barrowsDetailPanel.removeAll();
-
-		// Set summary strip
-		barrowsDetailPanel.add(buildBarrowsDetailSummary(set));
-		barrowsDetailPanel.add(sep());
-
-		// Per-item rows
-		for (int i = 0; i < set.items.size(); i++)
-		{
-			barrowsDetailPanel.add(new BarrowsItemPanel(set.items.get(i), itemManager, i % 2 != 0, plugin));
-			barrowsDetailPanel.add(sep());
-		}
-
-		barrowsDetailPanel.revalidate();
-		barrowsDetailPanel.repaint();
-
-		((CardLayout) barrowsTabCard.getLayout()).show(barrowsTabCard, "detail");
-	}
-
-	/** Switches the Barrows tab back to the list view. */
-	private void showBarrowsList()
-	{
-		((CardLayout) barrowsTabCard.getLayout()).show(barrowsTabCard, "list");
-	}
-
-	/** Small summary panel shown at the top of the drill-down detail view. */
-	private JPanel buildBarrowsDetailSummary(BarrowsSet set)
-	{
-		JPanel p = new JPanel(new GridLayout(2, 2, 8, 2));
-		p.setBackground(ColorScheme.DARK_GRAY_COLOR);
-		p.setBorder(new EmptyBorder(8, 10, 8, 10));
-		p.setAlignmentX(Component.LEFT_ALIGNMENT);
-
-		boolean profitable = set.bestProfit > 0;
-		String profitColor = profitable ? "#00C27A" : "#FF5555";
-		String profitSign  = profitable ? "+" : "";
-		String strat = "sell_set".equals(set.bestStrategy) ? "sell as set" : "sell individual";
-
-		p.add(detailCell("<html><font color='#888888'>Buy all: </font>"
-			+ "<font color='#FF7070'>" + FlipItemPanel.formatGp(set.totalBrokenCost) + "</font></html>"));
-		p.add(detailCell("<html><font color='#888888'>NPC rpr: </font>"
-			+ FlipItemPanel.formatGp(set.totalNpcRepairCost) + "</html>"));
-		p.add(detailCell("<html><font color='#888888'>Best: </font>"
-			+ "<font color='" + profitColor + "'><b>" + profitSign + FlipItemPanel.formatGp(set.bestProfit) + "</b></font></html>"));
-		p.add(detailCell("<html><font color='#888888'>POH rpr: </font>"
-			+ FlipItemPanel.formatGp(set.totalPohRepairCost) + "</html>"));
-
-		return p;
-	}
-
-	private static JLabel detailCell(String html)
-	{
-		JLabel l = new JLabel(html);
-		l.setFont(Fonts.SM);
-		return l;
-	}
-
-	private void renderMoon(String q)
-	{
-		fillList(moonListPanel, fMoon(q), moonPage, moonPageLabel, moonPrev, moonNext,
-			(item, odd) -> new MoonSetPanel(item, itemManager, odd, plugin),
-			"No Moon armour data", "");
-		hiliteFilter(moonFilterBtns, moonFilterIdx);
-	}
-
-	private void renderDecants(String q)
-	{
-		fillList(decantListPanel, sortDecants(fDecants(q)), decantPage, decantPageLabel, decantPrev, decantNext,
-			(item, odd) -> new DecantItemPanel(item, itemManager, odd, plugin),
-			"No decanting opportunities", "");
-		hilite(decantSortBtns, decantSortIdx);
 	}
 
 	private void renderAlerts(String q)
@@ -2701,8 +2196,8 @@ public class O7FlipPanel extends PluginPanel
 
 	/**
 	 * Builds a standalone tab whose entire content is the premium-gate card.
-	 * Used by {@link #buildTabs()} to replace premium-only features (Screener,
-	 * Plan, Dumps, Dips, Moons, Barrows, Tablets, Decant) for non-premium users
+	 * Used by {@link #buildTabs()} to replace premium-only features (Plan,
+	 * Dumps, Dips) for non-premium users
 	 * so no data is shown — only the upsell card. {@code rebuildTabs()} runs
 	 * whenever premium status changes, so the real content returns on upgrade.
 	 */
@@ -3263,7 +2758,6 @@ public class O7FlipPanel extends PluginPanel
 		renderSpikes(q);
 		renderDips(q);
 		renderHighAlch(q);
-		renderTeleTablets(q);
 		renderFavourites(q);
 	}
 
@@ -3402,16 +2896,10 @@ public class O7FlipPanel extends PluginPanel
 			// on Row 1 (top-level) or inside Other (sub-tab).
 			case "Dumps":
 			case "Alerts":
-			case "Moons":
-			case "Barrows":
 			case "Dips":
 			case "Favs":
 			case "Alch":
-			case "Tablets":
-			case "Screener":
-			case "Decant":
 			case "Plan":
-			case "News":
 				return subFeatureEnabled(name);
 			default:          return false;
 		}
@@ -3438,13 +2926,13 @@ public class O7FlipPanel extends PluginPanel
 	 * dialog; the user's saved {@code topRowTabs} drives the actual layout.
 	 */
 	public static final List<String> MOVABLE_POOL = java.util.Arrays.asList(
-		"Moons", "Barrows", "Dumps", "Alerts",
-		"Dips", "Favs", "Alch", "Tablets", "Screener", "Decant", "Plan", "News"
+		"Dumps", "Alerts",
+		"Dips", "Favs", "Alch", "Plan"
 	);
 
 	/** Default top-row pick when {@code topRowTabs} is empty. */
 	public static final List<String> DEFAULT_TOP_ROW = java.util.Arrays.asList(
-		"Moons", "Barrows", "Dumps", "Alerts"
+		"Dumps", "Alerts"
 	);
 
 	/** Fixed Row 2 — non-customisable, non-reorderable. */
@@ -3481,9 +2969,6 @@ public class O7FlipPanel extends PluginPanel
 		for (String token : raw.split(","))
 		{
 			String name = token.trim();
-			// Migration: the old "Screen" short label is now "Screener" — map
-			// any saved config entry transparently so users don't lose a slot.
-			if ("Screen".equals(name)) name = "Screener";
 			if (MOVABLE_POOL.contains(name) && seen.add(name))
 			{
 				out.add(name);
@@ -3505,18 +2990,12 @@ public class O7FlipPanel extends PluginPanel
 		if (config == null) return true;
 		switch (name)
 		{
-			case "Moons":   return config.showMoon()      && isSignedIn;
-			case "Barrows": return config.showBarrows()   && isSignedIn;
 			case "Dumps":   return config.showDumps();
 			case "Alerts":  return config.showAlerts();
 			case "Dips":    return config.showDips();
 			case "Favs":    return config.showFavourites() && hasApiKey();
 			case "Alch":    return config.showHighAlch();
-			case "Tablets": return config.showTeleTablets();
-			case "Screener":return config.showScreeners();
-			case "Decant":  return config.showDecant();
 			case "Plan":    return hasApiKey();   // optimizer is premium-only; signing in is the gate
-			case "News":    return config.showNews();   // free, no auth required
 			default:        return false;
 		}
 	}
@@ -3550,7 +3029,7 @@ public class O7FlipPanel extends PluginPanel
 		// Pin the row order: Swing's default behaviour rotates runs so the
 		// SELECTED tab's row sits adjacent to the content area (i.e. at the
 		// bottom of the tab strip). That breaks the design contract of
-		// "customisable row on top, fixed row below" — selecting Moons would
+		// "customisable row on top, fixed row below" — selecting Dumps would
 		// shove its row below Flips. The override below is a no-op
 		// rotateTabRuns so the runs stay in insertion order.
 		applyStaticOrderUI(tabs);
@@ -3562,16 +3041,10 @@ public class O7FlipPanel extends PluginPanel
 		JPanel spikesContent   = buildSpikesTab();
 		JPanel insightsContent = buildInsightsTab();
 		JPanel alertsContent   = buildGenericTab("Merch");
-		JPanel moonContent     = buildMoonTab();
-		JPanel barrowsContent  = buildGenericTab("Barrows");
-		JPanel decantContent     = buildGenericTab("Decant");
 		JPanel dipsContent       = buildDipsTab();
 		JPanel highAlchContent   = buildHighAlchTab();
-		JPanel tabletsContent    = buildTeleTabletsTab();
 		JPanel favouritesContent = buildFavouritesTab();
-		JPanel screenersContent  = buildScreenersTab();
 		JPanel planContent       = buildPlanTab();
-		JPanel newsContent       = buildNewsTab();
 
 		// Premium gate: the recommended-price feeds and the optimiser are
 		// premium features, so for non-premium users these tabs show an upsell
@@ -3585,20 +3058,14 @@ public class O7FlipPanel extends PluginPanel
 		{
 			final String gate = "To view this feature you need to be a member and link your API key.";
 			dumpsContent     = buildPremiumGateTab("Dumps",     gate);
-			moonContent      = buildPremiumGateTab("Moons",     gate);
-			barrowsContent   = buildPremiumGateTab("Barrows",   gate);
-			decantContent    = buildPremiumGateTab("Decant",    gate);
 			dipsContent      = buildPremiumGateTab("Dips",      gate);
-			tabletsContent   = buildPremiumGateTab("Tablets",   gate);
 			planContent      = buildPremiumGateTab("Plan",      gate);
-			screenersContent = buildPremiumGateTab("Screeners",
-				"To use screeners, sign up and link your API key.");
 		}
 
-		JPanel otherContent      = buildOtherTab(decantContent, dipsContent,
-			highAlchContent, tabletsContent, favouritesContent, screenersContent,
-			planContent, newsContent,
-			moonContent, barrowsContent, dumpsContent, alertsContent);
+		JPanel otherContent      = buildOtherTab(dipsContent,
+			highAlchContent, favouritesContent,
+			planContent,
+			dumpsContent, alertsContent);
 		JPanel myFlipsContent  = buildMyFlipsTab();
 
 		// Map each tab name to its (content, visibility predicate) — the
@@ -3609,21 +3076,15 @@ public class O7FlipPanel extends PluginPanel
 		contentByName.put("Dumps",     dumpsContent);
 		contentByName.put("Item",      insightsContent);
 		contentByName.put("Alerts",    alertsContent);
-		contentByName.put("Moons",     moonContent);
-		contentByName.put("Barrows",   barrowsContent);
 		contentByName.put("Other",     otherContent);
 		contentByName.put("Trades",    myFlipsContent);
 		// New movable-pool entries: can appear EITHER in Row 1 (top-level tab)
 		// OR inside Other (sub-tab). Building each panel once and slotting it
 		// into the right pane keeps state coherent across the swap.
-		contentByName.put("Decant",  decantContent);
 		contentByName.put("Dips",    dipsContent);
 		contentByName.put("Alch",    highAlchContent);
-		contentByName.put("Tablets", tabletsContent);
 		contentByName.put("Favs",    favouritesContent);
-		contentByName.put("Screener",screenersContent);
 		contentByName.put("Plan",    planContent);
-		contentByName.put("News",    newsContent);
 		// Spikes intentionally not registered: feature retired from the panel
 		// per design feedback. The buildSpikesTab() call above still runs to
 		// initialise listPanel state used by sortFlips/filtered fallbacks.
@@ -4337,14 +3798,9 @@ public class O7FlipPanel extends PluginPanel
 		renderFlips(q);
 		renderSpikes(q);
 		renderDumps(q);
-		renderBarrows(q);
-		renderMoon(q);
-		renderDecants(q);
 		renderDips(q);
 		renderHighAlch(q);
-		renderTeleTablets(q);
 		renderFavourites(q);
-		renderScreeners();
 		renderAlerts(q);
 		refreshBlocklistFooter();
 
@@ -4829,48 +4285,6 @@ public class O7FlipPanel extends PluginPanel
 		return chip;
 	}
 
-	private JPanel buildMoonTab()
-	{
-		// Filter bar: Blood Moon | Blue Moon | Eclipse Moon
-		moonFilterBtns = new JButton[3];
-		String[] labels = {"Blood", "Blue", "Eclipse"};
-		JPanel filterBar = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 4));
-		filterBar.setBackground(ColorScheme.DARKER_GRAY_COLOR);
-		filterBar.setBorder(new MatteBorder(0, 0, 1, 0, new Color(0x3A3A3A)));
-		for (int i = 0; i < labels.length; i++)
-		{
-			final int idx = i;
-			JButton btn = pillButton(labels[i]);
-			applySortStyle(btn, idx == moonFilterIdx);
-			btn.addActionListener(e ->
-			{
-				moonFilterIdx = idx;
-				hiliteFilter(moonFilterBtns, moonFilterIdx);
-				moonPage = 0;
-				renderMoon(filtered());
-			});
-			moonFilterBtns[i] = btn;
-			filterBar.add(btn);
-		}
-
-		moonListPanel = listPanel();
-		moonPageLabel = pageLabel();
-		moonPrev      = pageBtn("\u2039");
-		moonNext      = pageBtn("\u203A");
-		moonPrev.addActionListener(e ->
-		{
-			moonPage--;
-			renderMoon(filtered());
-		});
-		moonNext.addActionListener(e ->
-		{
-			moonPage++;
-			renderMoon(filtered());
-		});
-
-		return assembleTab(filterBar, moonListPanel, buildPageBar(moonPageLabel, moonPrev, moonNext));
-	}
-
 	private JPanel buildSpikesTab()
 	{
 		spikesSortBtns = new JButton[2];
@@ -5119,97 +4533,6 @@ public class O7FlipPanel extends PluginPanel
 	{
 		switch (name)
 		{
-			case "Barrows":
-			{
-				// ── List view ─────────────────────────────────────────────────
-				barrowsSortBtns  = new JButton[2];
-				barrowsListPanel = listPanel();
-				barrowsPageLabel = pageLabel();
-				barrowsPrev      = pageBtn("\u2039");
-				barrowsNext      = pageBtn("\u203A");
-				barrowsPrev.addActionListener(e ->
-				{
-					barrowsPage--;
-					renderBarrows(filtered());
-				});
-				barrowsNext.addActionListener(e ->
-				{
-					barrowsPage++;
-					renderBarrows(filtered());
-				});
-				JPanel barrowsListView = assembleTab(
-					buildSortBar(barrowsSortBtns, new String[]{"Best Profit", "Cost"},
-						() -> barrowsSortIdx, i ->
-						{
-							barrowsSortIdx = i;
-							barrowsPage = 0;
-							renderBarrows(filtered());
-						}),
-					barrowsListPanel,
-					buildPageBar(barrowsPageLabel, barrowsPrev, barrowsNext));
-
-				// ── Detail view ───────────────────────────────────────────────
-				barrowsDetailPanel = listPanel();
-				barrowsDetailTitle = new JLabel("");
-				barrowsDetailTitle.setFont(Fonts.BOLD);
-				barrowsDetailTitle.setForeground(Color.WHITE);
-
-				JButton backBtn = pillButton("\u2190 Back");
-				backBtn.setBackground(new Color(0x3E3E3E));
-				backBtn.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
-				backBtn.addActionListener(e -> showBarrowsList());
-
-				JPanel detailHeader = new JPanel(new BorderLayout(8, 0));
-				detailHeader.setBackground(ColorScheme.DARKER_GRAY_COLOR);
-				detailHeader.setBorder(new EmptyBorder(6, 8, 6, 8));
-				detailHeader.add(backBtn,            BorderLayout.WEST);
-				detailHeader.add(barrowsDetailTitle, BorderLayout.CENTER);
-
-				ListWrapperPanel detailWrapper = new ListWrapperPanel(barrowsDetailPanel);
-				detailWrapper.setBackground(ColorScheme.DARK_GRAY_COLOR);
-				JScrollPane detailSp = new JScrollPane(detailWrapper);
-				detailSp.setBorder(BorderFactory.createEmptyBorder());
-				detailSp.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
-				detailSp.getViewport().setBackground(ColorScheme.DARK_GRAY_COLOR);
-				detailSp.getVerticalScrollBar().setPreferredSize(new Dimension(6, 0));
-
-				JPanel barrowsDetailView = new JPanel(new BorderLayout());
-				barrowsDetailView.setBackground(ColorScheme.DARK_GRAY_COLOR);
-				barrowsDetailView.add(detailHeader, BorderLayout.NORTH);
-				barrowsDetailView.add(detailSp,     BorderLayout.CENTER);
-
-				// ── Card panel ────────────────────────────────────────────────
-				barrowsTabCard = new JPanel(new CardLayout());
-				barrowsTabCard.add(barrowsListView,   "list");
-				barrowsTabCard.add(barrowsDetailView, "detail");
-				return barrowsTabCard;
-			}
-
-			case "Decant":
-				decantSortBtns  = new JButton[3];
-				decantListPanel = listPanel();
-				decantPageLabel = pageLabel();
-				decantPrev      = pageBtn("\u2039");
-				decantNext      = pageBtn("\u203A");
-				decantPrev.addActionListener(e ->
-				{
-					decantPage--;
-					renderDecants(filtered());
-				});
-				decantNext.addActionListener(e ->
-				{
-					decantPage++;
-					renderDecants(filtered());
-				});
-				return assembleTab(buildSortBar(decantSortBtns, new String[]{"Profit", "ROI %", "Volume"},
-					() -> decantSortIdx, i ->
-					{
-						decantSortIdx = i;
-						decantPage = 0;
-						renderDecants(filtered());
-					}),
-					decantListPanel, buildPageBar(decantPageLabel, decantPrev, decantNext));
-
 			default: // Alerts tab: "Alerts" (merch feed) + "Watch" (user price alerts) sub-views
 			{
 				// Merch-feed view (the original Alerts content, with its sort bar).
@@ -5471,72 +4794,6 @@ public class O7FlipPanel extends PluginPanel
 		btn.setForeground(on ? Color.BLACK : ColorScheme.LIGHT_GRAY_COLOR);
 	}
 
-	/**
-	 * Tablets sub-tab — non-paginated (dataset is small). Sort + spellbook
-	 * filter + "profitable only" toggle drive the request.
-	 */
-	private JPanel buildTeleTabletsTab()
-	{
-		// Two sort options: Volume (daily GE volume) and Profit (margin
-		// between cost and post-tax sell). Volume leads — high-volume
-		// tablets are the actionable ones; profit-per-tablet matters less
-		// when a niche tablet sells once a day.
-		tabletsSortBtns  = new JButton[2];
-		tabletsListPanel = listPanel();
-
-		String[] labels = {"Volume", "Profit"};
-		JPanel sortRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 4));
-		sortRow.setBackground(ColorScheme.DARKER_GRAY_COLOR);
-		sortRow.setBorder(new MatteBorder(0, 0, 1, 0, new Color(0x3A3A3A)));
-		for (int i = 0; i < labels.length; i++)
-		{
-			final int idx = i;
-			JButton btn = pillButton(labels[i]);
-			applySortStyle(btn, idx == tabletsSortIdx);
-			btn.addActionListener(e ->
-			{
-				tabletsSortIdx = idx;
-				hiliteFilter(tabletsSortBtns, tabletsSortIdx);
-				if (plugin != null) plugin.onTeleTabletsFilterChanged();
-			});
-			tabletsSortBtns[i] = btn;
-			sortRow.add(btn);
-		}
-
-		// Spellbook filter dropdown + Profitable-only pill.
-		String[] books = {"All books", "Standard", "Lunar", "Ancient", "Arceuus"};
-		JComboBox<String> bookCombo = styledCombo(books);
-		bookCombo.setSelectedIndex(tabletsSpellbookIdx);
-		bookCombo.addActionListener(e ->
-		{
-			tabletsSpellbookIdx = bookCombo.getSelectedIndex();
-			if (plugin != null) plugin.onTeleTabletsFilterChanged();
-		});
-
-		JButton profitableBtn = pillButton("Profitable only");
-		applyToggleStyle(profitableBtn, tabletsProfitableOnly);
-		profitableBtn.addActionListener(e ->
-		{
-			tabletsProfitableOnly = !tabletsProfitableOnly;
-			applyToggleStyle(profitableBtn, tabletsProfitableOnly);
-			if (plugin != null) plugin.onTeleTabletsFilterChanged();
-		});
-
-		JPanel filterRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 2));
-		filterRow.setBackground(ColorScheme.DARKER_GRAY_COLOR);
-		filterRow.setBorder(new MatteBorder(0, 0, 1, 0, new Color(0x3A3A3A)));
-		filterRow.add(bookCombo);
-		filterRow.add(profitableBtn);
-
-		JPanel topBar = new JPanel();
-		topBar.setLayout(new BoxLayout(topBar, BoxLayout.Y_AXIS));
-		topBar.setBackground(ColorScheme.DARKER_GRAY_COLOR);
-		topBar.add(sortRow);
-		topBar.add(filterRow);
-
-		return assembleTab(topBar, tabletsListPanel, null);
-	}
-
 	/** Favourites sub-tab — the user's saved item list, rendered as flip rows. */
 	private JPanel buildFavouritesTab()
 	{
@@ -5567,239 +4824,6 @@ public class O7FlipPanel extends PluginPanel
 		topBar.add(reorderWrap, BorderLayout.EAST);
 
 		return assembleTab(topBar, favouritesListPanel, null);
-	}
-
-	/**
-	 * News sub-tab — a master/detail pair behind a {@link CardLayout}: a list
-	 * of article cards, and a per-article detail view showing the relevant
-	 * items plus a link to the full post on 07flip.com.
-	 */
-	private JPanel buildNewsTab()
-	{
-		newsListPanel = listPanel();
-		JPanel listView = assembleTab(null, newsListPanel, null);
-
-		newsDetailPanel = listPanel();
-		JButton back = pillButton("← Back to news");
-		back.setBackground(new Color(0x2A2A2A));
-		back.setForeground(new Color(0xAAAAAA));
-		back.addActionListener(e -> showNewsList());
-
-		JPanel detailHeader = new JPanel(new BorderLayout());
-		detailHeader.setBackground(ColorScheme.DARKER_GRAY_COLOR);
-		detailHeader.setBorder(new EmptyBorder(6, 8, 6, 8));
-		detailHeader.add(back, BorderLayout.WEST);
-
-		ListWrapperPanel detailWrapper = new ListWrapperPanel(newsDetailPanel);
-		detailWrapper.setBackground(ColorScheme.DARK_GRAY_COLOR);
-		JScrollPane detailSp = new JScrollPane(detailWrapper);
-		detailSp.setBorder(BorderFactory.createEmptyBorder());
-		detailSp.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
-		detailSp.getViewport().setBackground(ColorScheme.DARK_GRAY_COLOR);
-		detailSp.getVerticalScrollBar().setPreferredSize(new Dimension(6, 0));
-
-		JPanel detailView = new JPanel(new BorderLayout());
-		detailView.setBackground(ColorScheme.DARK_GRAY_COLOR);
-		detailView.add(detailHeader, BorderLayout.NORTH);
-		detailView.add(detailSp,     BorderLayout.CENTER);
-
-		newsTabCard = new JPanel(new CardLayout());
-		newsTabCard.add(listView,   "list");
-		newsTabCard.add(detailView, "detail");
-
-		renderNews();   // restore cached list across a tab rebuild
-		// Restore the open article if the tab was rebuilt mid-read.
-		if (activeNewsItem != null)
-		{
-			renderNewsDetail(activeNewsItem);
-			((CardLayout) newsTabCard.getLayout()).show(newsTabCard, "detail");
-		}
-		return newsTabCard;
-	}
-
-	/** Pushes a fresh news feed into the News tab. Called from the plugin (EDT). */
-	public void updateNews(java.util.List<com.o7flip.model.NewsItem> items)
-	{
-		newsItems = items != null ? items : new ArrayList<>();
-		renderNews();
-	}
-
-	private void showNewsList()
-	{
-		activeNewsItem = null;
-		if (newsTabCard != null)
-		{
-			((CardLayout) newsTabCard.getLayout()).show(newsTabCard, "list");
-		}
-	}
-
-	private void showNewsDetail(com.o7flip.model.NewsItem n)
-	{
-		activeNewsItem = n;
-		renderNewsDetail(n);
-		if (newsTabCard != null)
-		{
-			((CardLayout) newsTabCard.getLayout()).show(newsTabCard, "detail");
-		}
-	}
-
-	private void renderNews()
-	{
-		if (newsListPanel == null)
-		{
-			return;
-		}
-		newsListPanel.removeAll();
-		if (newsItems.isEmpty())
-		{
-			newsListPanel.add(emptyLabel("No news yet",
-				"Game-update posts and market-moving news will appear here."));
-		}
-		else
-		{
-			newsListPanel.add(Box.createVerticalStrut(4));
-			int rendered = 0;
-			for (int i = 0; i < newsItems.size(); i++)
-			{
-				final com.o7flip.model.NewsItem n = newsItems.get(i);
-				if (n == null)
-				{
-					continue;
-				}
-				newsListPanel.add(new com.o7flip.ui.NewsItemPanel(n, rendered % 2 != 0, () -> showNewsDetail(n)));
-				newsListPanel.add(Box.createVerticalStrut(6));
-				rendered++;
-			}
-		}
-		newsListPanel.revalidate();
-		newsListPanel.repaint();
-	}
-
-	/** Detail view for one article: title, date, full summary, relevant items, and a link to the post. */
-	private void renderNewsDetail(com.o7flip.model.NewsItem n)
-	{
-		if (newsDetailPanel == null || n == null)
-		{
-			return;
-		}
-		newsDetailPanel.removeAll();
-
-		JLabel title = new JLabel("<html><div style='width:250px'>"
-			+ com.o7flip.ui.NewsItemPanel.escapeHtml(n.title) + "</div></html>");
-		title.setFont(Fonts.BOLD);
-		title.setForeground(Color.WHITE);
-		title.setAlignmentX(Component.LEFT_ALIGNMENT);
-		title.setBorder(new EmptyBorder(10, 10, 0, 10));
-		title.setMaximumSize(new Dimension(Integer.MAX_VALUE, Short.MAX_VALUE));
-		newsDetailPanel.add(title);
-
-		String meta = com.o7flip.ui.NewsItemPanel.relativeTime(n.publishedAt);
-		if (n.category != null && !n.category.isEmpty())
-		{
-			meta = com.o7flip.ui.NewsItemPanel.capitalise(n.category) + (meta.isEmpty() ? "" : "  ·  " + meta);
-		}
-		if (!meta.isEmpty())
-		{
-			JLabel metaLabel = new JLabel(meta);
-			metaLabel.setFont(Fonts.SM);
-			metaLabel.setForeground(new Color(0x888888));
-			metaLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
-			metaLabel.setBorder(new EmptyBorder(2, 10, 0, 10));
-			newsDetailPanel.add(metaLabel);
-		}
-
-		if (n.summary != null && !n.summary.isEmpty())
-		{
-			JLabel summary = new JLabel("<html><div style='width:250px'>"
-				+ com.o7flip.ui.NewsItemPanel.escapeHtml(n.summary) + "</div></html>");
-			summary.setFont(Fonts.SM);
-			summary.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
-			summary.setAlignmentX(Component.LEFT_ALIGNMENT);
-			summary.setBorder(new EmptyBorder(8, 10, 0, 10));
-			summary.setMaximumSize(new Dimension(Integer.MAX_VALUE, Short.MAX_VALUE));
-			newsDetailPanel.add(summary);
-		}
-
-		// Relevant items — clickable rows into each item's insights.
-		if (n.items != null && !n.items.isEmpty())
-		{
-			JLabel itemsHeader = new JLabel("Relevant items");
-			itemsHeader.setFont(Fonts.SM_BOLD);
-			itemsHeader.setForeground(new Color(0xC4A052));
-			itemsHeader.setAlignmentX(Component.LEFT_ALIGNMENT);
-			itemsHeader.setBorder(new EmptyBorder(12, 10, 4, 10));
-			itemsHeader.setMaximumSize(new Dimension(Integer.MAX_VALUE, itemsHeader.getPreferredSize().height));
-			newsDetailPanel.add(itemsHeader);
-
-			for (com.o7flip.model.NewsItem.Related r : n.items)
-			{
-				if (r == null || r.itemId <= 0)
-				{
-					continue;
-				}
-				newsDetailPanel.add(buildNewsItemRow(r));
-				newsDetailPanel.add(Box.createVerticalStrut(4));
-			}
-		}
-
-		// Link to the full post.
-		if (n.url != null && !n.url.isEmpty())
-		{
-			JButton openPost = pillButton("See the whole news post →");
-			openPost.setBackground(ORANGE);
-			openPost.setForeground(Color.BLACK);
-			openPost.setAlignmentX(Component.LEFT_ALIGNMENT);
-			openPost.addActionListener(e -> net.runelite.client.util.LinkBrowser.browse(n.url));
-			JPanel wrap = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
-			wrap.setBackground(ColorScheme.DARK_GRAY_COLOR);
-			wrap.setAlignmentX(Component.LEFT_ALIGNMENT);
-			wrap.setBorder(new EmptyBorder(14, 10, 10, 10));
-			wrap.setMaximumSize(new Dimension(Integer.MAX_VALUE, openPost.getPreferredSize().height + 24));
-			wrap.add(openPost);
-			newsDetailPanel.add(wrap);
-		}
-
-		newsDetailPanel.revalidate();
-		newsDetailPanel.repaint();
-	}
-
-	/** A single clickable item row in the news detail view (icon + name → insights). */
-	private JPanel buildNewsItemRow(com.o7flip.model.NewsItem.Related r)
-	{
-		JPanel row = new JPanel(new BorderLayout(8, 0));
-		row.setBackground(new Color(0x1F1F1F));
-		row.setBorder(new EmptyBorder(6, 10, 6, 10));
-		row.setAlignmentX(Component.LEFT_ALIGNMENT);
-		row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 40));
-		row.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
-
-		JLabel icon = com.o7flip.ui.FlipItemPanel.buildIcon(r.itemId, itemManager);
-		JLabel name = new JLabel(r.name != null && !r.name.isEmpty() ? r.name : "Item " + r.itemId);
-		name.setFont(Fonts.BOLD);
-		name.setForeground(Color.WHITE);
-
-		row.add(icon, BorderLayout.WEST);
-		row.add(name, BorderLayout.CENTER);
-
-		com.o7flip.ui.ClickRouter.attachInsightsOnly(row,  plugin, r.itemId, r.name);
-		com.o7flip.ui.ClickRouter.attachInsightsOnly(name, plugin, r.itemId, r.name);
-
-		final Color base = new Color(0x1F1F1F);
-		final Color hover = new Color(0x2A2A2A);
-		row.addMouseListener(new java.awt.event.MouseAdapter()
-		{
-			@Override
-			public void mouseEntered(java.awt.event.MouseEvent e)
-			{
-				row.setBackground(hover);
-			}
-			@Override
-			public void mouseExited(java.awt.event.MouseEvent e)
-			{
-				row.setBackground(base);
-			}
-		});
-		return row;
 	}
 
 	/** Pushes the user's price alerts into the Watch sub-view. Called from the plugin (EDT). */
@@ -5918,17 +4942,6 @@ public class O7FlipPanel extends PluginPanel
 				javax.swing.JOptionPane.WARNING_MESSAGE));
 	}
 
-	/**
-	 * Screeners sub-tab — two card layouts behind a {@link CardLayout}:
-	 *
-	 * <ul>
-	 *   <li>{@code "list"} — preset cards (Custom on top, System below).</li>
-	 *   <li>{@code "detail"} — drill-down for one preset's matches, with a
-	 *       Back button that flips the card layout back to the list.</li>
-	 * </ul>
-	 *
-	 * Same pattern as the Barrows tab so the navigation feels consistent.
-	 */
 	/**
 	 * Builds the Optimizer "Plan" sub-tab. Plans are BUILT on 07flip.com
 	 * (the in-panel slots/risk/window form is gone — the website is the
@@ -6648,53 +5661,6 @@ public class O7FlipPanel extends PluginPanel
 		return s + "h fill";
 	}
 
-	private JPanel buildScreenersTab()
-	{
-		// ── List view ────────────────────────────────────────────────────────
-		screenersListPanel = listPanel();
-		JPanel listView = assembleTab(null, screenersListPanel, null);
-
-		// ── Detail view ──────────────────────────────────────────────────────
-		screenersDetailPanel = listPanel();
-		screenersDetailTitle = new JLabel("");
-		screenersDetailTitle.setFont(Fonts.BOLD);
-		screenersDetailTitle.setForeground(Color.WHITE);
-
-		JButton backBtn = pillButton("← Back");
-		backBtn.setBackground(new Color(0x3E3E3E));
-		backBtn.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
-		backBtn.addActionListener(e ->
-		{
-			activeScreenerPreset = null;
-			renderScreenersList();
-		});
-
-		JPanel detailHeader = new JPanel(new BorderLayout(8, 0));
-		detailHeader.setBackground(ColorScheme.DARKER_GRAY_COLOR);
-		detailHeader.setBorder(new EmptyBorder(6, 8, 6, 8));
-		detailHeader.add(backBtn,              BorderLayout.WEST);
-		detailHeader.add(screenersDetailTitle, BorderLayout.CENTER);
-
-		ListWrapperPanel detailWrapper = new ListWrapperPanel(screenersDetailPanel);
-		detailWrapper.setBackground(ColorScheme.DARK_GRAY_COLOR);
-		JScrollPane detailSp = new JScrollPane(detailWrapper);
-		detailSp.setBorder(BorderFactory.createEmptyBorder());
-		detailSp.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
-		detailSp.getViewport().setBackground(ColorScheme.DARK_GRAY_COLOR);
-		detailSp.getVerticalScrollBar().setPreferredSize(new Dimension(6, 0));
-
-		JPanel detailView = new JPanel(new BorderLayout());
-		detailView.setBackground(ColorScheme.DARK_GRAY_COLOR);
-		detailView.add(detailHeader, BorderLayout.NORTH);
-		detailView.add(detailSp,     BorderLayout.CENTER);
-
-		// ── CardLayout shell ─────────────────────────────────────────────────
-		screenersTabCard = new JPanel(new CardLayout());
-		screenersTabCard.add(listView,   "list");
-		screenersTabCard.add(detailView, "detail");
-		return screenersTabCard;
-	}
-
 	/**
 	 * Returns the tab index that sits at the TOP-LEFT of the rendered tab
 	 * strip — i.e. the visually-first sub-tab the user sees. With our
@@ -6734,11 +5700,10 @@ public class O7FlipPanel extends PluginPanel
 	 * skip building them because list-panel fields like {@code dipsListPanel}
 	 * are read by render methods even when the tab isn't visible).
 	 */
-	private JPanel buildOtherTab(JPanel decantContent, JPanel dipsContent,
-	                             JPanel highAlchContent, JPanel tabletsContent,
-	                             JPanel favouritesContent, JPanel screenersContent,
-	                             JPanel planContent, JPanel newsContent,
-	                             JPanel moonContent, JPanel barrowsContent,
+	private JPanel buildOtherTab(JPanel dipsContent,
+	                             JPanel highAlchContent,
+	                             JPanel favouritesContent,
+	                             JPanel planContent,
 	                             JPanel dumpsContent, JPanel alertsContent)
 	{
 		JTabbedPane inner = new JTabbedPane(JTabbedPane.TOP, JTabbedPane.WRAP_TAB_LAYOUT);
@@ -6754,16 +5719,10 @@ public class O7FlipPanel extends PluginPanel
 		// only when (a) the feature isn't in Row 1, and (b) the user's
 		// visibility toggle for it is on.
 		java.util.Map<String, JPanel> byName = new java.util.HashMap<>();
-		byName.put("Decant",  decantContent);
 		byName.put("Dips",    dipsContent);
 		byName.put("Alch",    highAlchContent);
-		byName.put("Tablets", tabletsContent);
 		byName.put("Favs",    favouritesContent);
-		byName.put("Screener",screenersContent);
 		byName.put("Plan",    planContent);
-		byName.put("News",    newsContent);
-		byName.put("Moons",   moonContent);
-		byName.put("Barrows", barrowsContent);
 		byName.put("Dumps",   dumpsContent);
 		byName.put("Alerts",  alertsContent);
 
@@ -6806,8 +5765,7 @@ public class O7FlipPanel extends PluginPanel
 
 		// Tab-select hook — fetches fresh data for the sub-tab the user just
 		// opened, but only when the data is older than the throttle window
-		// (handled plugin-side). Screeners and Favs keep their dedicated
-		// handlers (Screeners has its own 2-min poll floor; Favs requires
+		// (handled plugin-side). Favs keeps its dedicated handler (it requires
 		// the auth check). Everyone else routes through the generic helper
 		// which enforces a 30-second floor per sub-tab.
 		inner.addChangeListener(e ->
@@ -6824,9 +5782,6 @@ public class O7FlipPanel extends PluginPanel
 			lastOtherSubTab = title;
 			switch (title)
 			{
-				case "Screener":
-					plugin.onScreenersTabSelected();
-					return;
 				case "Favs":
 					plugin.onFavouritesTabSelected();
 					return;

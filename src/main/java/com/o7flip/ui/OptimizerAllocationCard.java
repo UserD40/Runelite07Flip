@@ -351,7 +351,7 @@ public class OptimizerAllocationCard extends JPanel
 	 * point BoxLayout queries us. Capturing getPreferredSize() in the
 	 * constructor measures the profit/price lines BEFORE they wrap to the
 	 * sidebar's actual width, so wrapped cards came out too short and the
-	 * progress bar at the bottom was clipped. Same fix as MoonSetPanel.
+	 * progress bar at the bottom was clipped.
 	 */
 	@Override
 	public Dimension getMaximumSize()

@@ -129,7 +129,7 @@ public interface O7FlipConfig extends Config
 	@ConfigItem(
 		keyName = "smithingLevel",
 		name = "Smithing level",
-		description = "Your Smithing level, used to calculate PoH repair costs in the Barrows and Moons tabs.",
+		description = "Your Smithing level, used to calculate PoH repair costs.",
 		section = tabsSection,
 		position = 2
 	)
@@ -218,7 +218,7 @@ public interface O7FlipConfig extends Config
 	// "Customise top row tabs" dialog is the primary visibility control.
 	// Each flag still resolves to its default, so power users editing
 	// settings.properties directly can hard-disable a fetch (useful for the
-	// premium-gated features like Screeners / Alerts when free).
+	// premium-gated features like Alerts when free).
 
 	@ConfigItem(
 		keyName = "showFlips",
@@ -286,45 +286,6 @@ public interface O7FlipConfig extends Config
 	}
 
 	@ConfigItem(
-		keyName = "showMoon",
-		name = "",
-		description = "",
-		section = tabsSection,
-		position = 5,
-		hidden = true
-	)
-	default boolean showMoon()
-	{
-		return true;
-	}
-
-	@ConfigItem(
-		keyName = "showBarrows",
-		name = "",
-		description = "",
-		section = tabsSection,
-		position = 6,
-		hidden = true
-	)
-	default boolean showBarrows()
-	{
-		return true;
-	}
-
-	@ConfigItem(
-		keyName = "showDecant",
-		name = "",
-		description = "",
-		section = tabsSection,
-		position = 7,
-		hidden = true
-	)
-	default boolean showDecant()
-	{
-		return true;
-	}
-
-	@ConfigItem(
 		keyName = "showDips",
 		name = "",
 		description = "",
@@ -359,45 +320,6 @@ public interface O7FlipConfig extends Config
 		hidden = true
 	)
 	default boolean showHighAlch()
-	{
-		return true;
-	}
-
-	@ConfigItem(
-		keyName = "showTeleTablets",
-		name = "",
-		description = "",
-		section = tabsSection,
-		position = 11,
-		hidden = true
-	)
-	default boolean showTeleTablets()
-	{
-		return true;
-	}
-
-	@ConfigItem(
-		keyName = "showScreeners",
-		name = "",
-		description = "",
-		section = tabsSection,
-		position = 12,
-		hidden = true
-	)
-	default boolean showScreeners()
-	{
-		return true;
-	}
-
-	@ConfigItem(
-		keyName = "showNews",
-		name = "",
-		description = "",
-		section = tabsSection,
-		position = 14,
-		hidden = true
-	)
-	default boolean showNews()
 	{
 		return true;
 	}
@@ -473,7 +395,7 @@ public interface O7FlipConfig extends Config
 
 	/**
 	 * CSV of up to 4 tab names that occupy the customisable top row of the
-	 * panel. Defaults to {@code "Moons,Barrows,Dumps,Alerts"}. Anything from
+	 * panel. Defaults to {@code "Dumps,Alerts"}. Anything from
 	 * the candidate pool that isn't listed here shows up inside the Other
 	 * tab on the bottom row instead.
 	 */
@@ -487,7 +409,7 @@ public interface O7FlipConfig extends Config
 	)
 	default String topRowTabs()
 	{
-		return "Moons,Barrows,Dumps,Alerts";
+		return "Dumps,Alerts";
 	}
 
 	// ── Grand Exchange integration ─────────────────────────────────────────

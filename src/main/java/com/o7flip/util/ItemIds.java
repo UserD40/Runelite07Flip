@@ -38,12 +38,6 @@ import java.util.Map;
  */
 public final class ItemIds
 {
-	// Barrows set representative item IDs (helm / coif / hood)
-	private static final Map<String, Integer> BARROWS = new HashMap<>();
-
-	// Moon armour set representative item IDs (helm)
-	private static final Map<String, Integer> MOON = new HashMap<>();
-
 	// Potion base-name (lowercase, no dose) → int[4] {1-dose, 2-dose, 3-dose, 4-dose} item IDs.
 	// Keys are the exact OSRS Wiki base names in lowercase.
 	// forPotion() tries exact match first, then a startsWith fallback (longest key wins)
@@ -52,17 +46,6 @@ public final class ItemIds
 
 	static
 	{
-		BARROWS.put("Ahrim's",  4708);  // Ahrim's hood
-		BARROWS.put("Dharok's", 4716);  // Dharok's helm
-		BARROWS.put("Guthan's", 4724);  // Guthan's helm
-		BARROWS.put("Karil's",  4732);  // Karil's coif
-		BARROWS.put("Torag's",  4745);  // Torag's helm
-		BARROWS.put("Verac's",  4753);  // Verac's helm
-
-		MOON.put("Blood Moon",   29028); // Blood moon helm (repaired)
-		MOON.put("Blue Moon",    29019); // Blue moon helm (repaired)
-		MOON.put("Eclipse Moon", 29010); // Eclipse moon helm (repaired)
-
 		// All values: {1-dose, 2-dose, 3-dose, 4-dose}
 		// Keys are exact OSRS Wiki base names (lowercase), verified against the
 		// live Wiki mapping API.  Note: classic RS2-era potions have non-sequential
@@ -152,41 +135,6 @@ public final class ItemIds
 	}
 
 	private ItemIds() {}
-
-	/** Returns a Barrows helm/coif item ID for the given shortName, or 0. */
-	public static int forBarrows(String shortName)
-	{
-		if (shortName == null)
-		{
-			return 0;
-		}
-		for (Map.Entry<String, Integer> entry : BARROWS.entrySet())
-		{
-			if (shortName.startsWith(entry.getKey()))
-			{
-				return entry.getValue();
-			}
-		}
-		return 0;
-	}
-
-	/** Returns a Moon armour helm item ID for the given shortName, or 0. */
-	public static int forMoon(String shortName)
-	{
-		if (shortName == null)
-		{
-			return 0;
-		}
-		String lower = shortName.toLowerCase();
-		for (Map.Entry<String, Integer> entry : MOON.entrySet())
-		{
-			if (lower.contains(entry.getKey().toLowerCase()))
-			{
-				return entry.getValue();
-			}
-		}
-		return 0;
-	}
 
 	/**
 	 * Returns the item ID for the given potion name at the specified dose (1-4).
