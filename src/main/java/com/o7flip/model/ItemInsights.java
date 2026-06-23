@@ -37,13 +37,10 @@ public class ItemInsights
 	public Volume  volume;
 	public Ranges  ranges;
 	public Score   score;
-	public Alerts  alerts;
 	public Projection projection;   // null for free users or ineligible items
 	public Frozen  frozen;          // null when the requesting user has no freeze for this item
 	public Indicators indicators;   // premium-only, null when free
 	public Liquidity  liquidity;    // premium-only, null when free
-	public Quality    quality;      // premium-only, null when free
-	public Risk       risk;         // premium-only, null when free
 
 	public Long[]  sparkline24hBuy;
 	public Long[]  sparkline24hSell;
@@ -109,15 +106,6 @@ public class ItemInsights
 		public String signal;        // premium-only, null when locked
 	}
 
-	public static class Alerts
-	{
-		public boolean activeMerch;
-		public Long    merchTarget;
-		public String  merchTier;    // "shadow" | "validated" | null
-		public Double  spikePct24h;
-		public Double  dipPct24h;
-	}
-
 	public static class Projection
 	{
 		public Band band30d;
@@ -162,19 +150,4 @@ public class ItemInsights
 		public Double  estHoursToFillLimit;   // volume-throughput proxy, not a queue model
 	}
 
-	public static class Quality
-	{
-		public Long    avgMargin24h;          // mean hourly margin, pre-tax
-		public Long    avgProfit24h;          // post-tax at avg prices
-		public Integer marginConsistency;     // 0–100, 100 = rock-steady hourly margin
-		public Long    limitCycleProfit;      // per 4h GE buy-limit cycle, volume-capped
-		public Long    estGpPerHour;          // limitCycleProfit / 4, volume-capped
-	}
-
-	public static class Risk
-	{
-		public Integer dumpScore;             // 0–100 | null (outside warmed set)
-		public boolean activeDump;
-		public boolean unusualVolume;         // volume surge ≥ 3× baseline
-	}
 }

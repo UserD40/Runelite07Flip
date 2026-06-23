@@ -896,28 +896,6 @@ public class O7FlipApiClient
 			out.liquidity = l;
 		}
 
-		JsonObject qual = optObject(root, "quality");
-		if (qual != null)
-		{
-			ItemInsights.Quality q = new ItemInsights.Quality();
-			q.avgMargin24h      = getLongOrNull(qual, "avg_margin_24h");
-			q.avgProfit24h      = getLongOrNull(qual, "avg_profit_24h");
-			q.marginConsistency = getIntOrNull(qual, "margin_consistency");
-			q.limitCycleProfit  = getLongOrNull(qual, "limit_cycle_profit");
-			q.estGpPerHour      = getLongOrNull(qual, "est_gp_per_hour");
-			out.quality = q;
-		}
-
-		JsonObject risk = optObject(root, "risk");
-		if (risk != null)
-		{
-			ItemInsights.Risk rk = new ItemInsights.Risk();
-			rk.dumpScore     = getIntOrNull(risk, "dump_score");
-			rk.activeDump    = getBool(risk, "active_dump", false);
-			rk.unusualVolume = getBool(risk, "unusual_volume", false);
-			out.risk = rk;
-		}
-
 		JsonObject sc = optObject(root, "score");
 		if (sc != null)
 		{
@@ -926,18 +904,6 @@ public class O7FlipApiClient
 			s.tier       = getString(sc, "tier", "");
 			s.signal     = sc.has("signal") && !sc.get("signal").isJsonNull() ? sc.get("signal").getAsString() : null;
 			out.score = s;
-		}
-
-		JsonObject al = optObject(root, "alerts");
-		if (al != null)
-		{
-			ItemInsights.Alerts a = new ItemInsights.Alerts();
-			a.activeMerch = getBool(al, "active_merch", false);
-			a.merchTarget = getLongOrNull(al, "merch_target");
-			a.merchTier   = al.has("merch_tier") && !al.get("merch_tier").isJsonNull() ? al.get("merch_tier").getAsString() : null;
-			a.spikePct24h = getDoubleOrNull(al, "spike_pct_24h");
-			a.dipPct24h   = getDoubleOrNull(al, "dip_pct_24h");
-			out.alerts = a;
 		}
 
 		JsonObject proj = optObject(root, "projection");
