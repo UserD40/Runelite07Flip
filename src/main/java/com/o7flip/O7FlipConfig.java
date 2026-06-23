@@ -232,6 +232,19 @@ public interface O7FlipConfig extends Config
 	}
 
 	@ConfigItem(
+		keyName = "showDecant",
+		name = "",
+		description = "",
+		section = tabsSection,
+		position = 7,
+		hidden = true
+	)
+	default boolean showDecant()
+	{
+		return true;
+	}
+
+	@ConfigItem(
 		keyName = "showDips",
 		name = "",
 		description = "",

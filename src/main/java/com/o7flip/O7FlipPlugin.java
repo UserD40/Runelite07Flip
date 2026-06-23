@@ -1484,6 +1484,7 @@ public class O7FlipPlugin extends Plugin
 			case "showSpikes":
 			case "showItem":
 			case "showDips":
+			case "showDecant":
 			case "showFavourites":
 			case "showMyFlips":
 			case "tabOrder":
@@ -1630,6 +1631,11 @@ public class O7FlipPlugin extends Plugin
 			fetchDipsAtPage(panel.getDipsSortKey(), panel.getDipsPage());
 		}
 
+		if (config.showDecant())
+		{
+			fetchDecantingNow();
+		}
+
 		if (config.showDumps() && !panel.dumpsUsesBotEndpoint())
 		{
 			fetchDumpsAtPage(panel.getDumpsSortKey(), panel.getDumpsPage());
@@ -1731,6 +1737,13 @@ public class O7FlipPlugin extends Plugin
 		{
 			final List<com.o7flip.model.DipItem> snap = cdips;
 			SwingUtilities.invokeLater(() -> panel.updateDips(snap, snap.size(), 0));
+		}
+
+		List<com.o7flip.model.DecantItem> cdec = loadListCache("decant", com.o7flip.model.DecantItem.class);
+		if (cdec != null && !cdec.isEmpty())
+		{
+			final List<com.o7flip.model.DecantItem> snap = cdec;
+			SwingUtilities.invokeLater(() -> panel.updateDecanting(snap));
 		}
 
 		loadBuyLimitState();
@@ -3339,6 +3352,28 @@ public class O7FlipPlugin extends Plugin
 		});
 	}
 
+	// The /decanting endpoint ships the full list in one shot, so sort + paging
+	// are handled client-side in the panel — a page/sort change just re-renders
+	// the rows already held, no refetch needed.
+	void onDecantPageChanged(int page)
+	{
+		SwingUtilities.invokeLater(() -> panel.rerenderDecants());
+	}
+
+	void onDecantSortChanged(int sortIdx)
+	{
+		SwingUtilities.invokeLater(() -> panel.rerenderDecants());
+	}
+
+	private void fetchDecantingNow()
+	{
+		apiClient.fetchDecanting(items ->
+		{
+			if (items != null && !items.isEmpty()) saveCache("decant", items);
+			SwingUtilities.invokeLater(() -> panel.updateDecanting(items));
+		});
+	}
+
 
 	private final java.util.Map<String, Long> lastTabSelectFetchMs = new java.util.concurrent.ConcurrentHashMap<>();
 	private static final long TAB_SELECT_FRESHNESS_MS = 30_000L;
@@ -3360,6 +3395,9 @@ public class O7FlipPlugin extends Plugin
 		{
 			case "Dips":
 				executor.execute(() -> fetchDipsAtPage(panel.getDipsSortKey(), panel.getDipsPage()));
+				break;
+			case "Decant":
+				executor.execute(this::fetchDecantingNow);
 				break;
 			default:
 				break;

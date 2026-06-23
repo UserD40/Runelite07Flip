@@ -29,6 +29,7 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.o7flip.model.AuthStatus;
+import com.o7flip.model.DecantItem;
 import com.o7flip.model.DumpItem;
 import com.o7flip.model.FlipItem;
 import com.o7flip.model.DipItem;
@@ -2245,6 +2246,33 @@ public class O7FlipApiClient
 				}
 			}
 		});
+	}
+
+	// -------------------------------------------------------------------------
+	// /decanting — potion decant profitability (anon, no auth). Returns the
+	// full list once; the panel paginates client-side.
+	// -------------------------------------------------------------------------
+
+	public void fetchDecanting(Consumer<List<DecantItem>> callback)
+	{
+		fetchList(BASE_URL + "/decanting", "fetchDecanting", "decants",
+			this::parseDecantItem, callback);
+	}
+
+	private DecantItem parseDecantItem(JsonObject obj)
+	{
+		DecantItem item = new DecantItem();
+		item.itemId           = getInt(obj, "item_id", 0);
+		item.potionName       = getString(obj, "potion_name", "Unknown");
+		item.strategy         = getString(obj, "strategy", "");
+		item.profitPer4dose   = getLong(obj, "profit_per_4dose", 0);
+		item.profitPerDose    = getLong(obj, "profit_per_dose", 0);
+		item.roiPct           = getDouble(obj, "roi_pct", 0);
+		item.minHourlyVolume  = getInt(obj, "min_hourly_volume", 0);
+		item.dailyVolume      = getInt(obj, "daily_volume", 0);
+		item.buyDose          = getInt(obj, "buy_dose", 0);
+		item.sellDose         = getInt(obj, "sell_dose", 0);
+		return item;
 	}
 
 

@@ -24,11 +24,13 @@
  */
 package com.o7flip;
 
+import com.o7flip.model.DecantItem;
 import com.o7flip.model.DumpItem;
 import com.o7flip.model.FlipItem;
 import com.o7flip.model.SearchResultItem;
 import com.o7flip.model.SpikeItem;
 import com.o7flip.model.TradeRecord;
+import com.o7flip.ui.DecantItemPanel;
 import com.o7flip.ui.DipItemPanel;
 import com.o7flip.ui.DumpItemPanel;
 import com.o7flip.ui.FlipItemPanel;
@@ -246,6 +248,7 @@ public class O7FlipPanel extends PluginPanel
 	private List<SpikeItem>   allSpikes  = new ArrayList<>();
 	private List<DumpItem>    allDumps   = new ArrayList<>();
 	private List<com.o7flip.model.DipItem> allDips = new ArrayList<>();
+	private List<DecantItem>  allDecants = new ArrayList<>();
 	private List<FlipItem>    allFavourites = new ArrayList<>();
 	private JButton[] favouritesSortBtns;
 	private int favouritesSortIdx = 0;
@@ -267,11 +270,13 @@ public class O7FlipPanel extends PluginPanel
 	private int spikesPage  = 0;  private int spikesTotal = 0;
 	private int dumpsPage   = 0;  private int dumpsTotal  = 0;
 	private int dipsPage    = 0;  private int dipsTotal   = 0;
+	private int decantPage  = 0;
 
 	private JPanel flipsListPanel;
 	private JPanel spikesListPanel;
 	private JPanel dumpsListPanel;
 	private JPanel dipsListPanel;
+	private JPanel decantListPanel;
 	private JPanel favouritesListPanel;
 	private JPanel optimizerListPanel;       // results column (cards + summary)
 	private com.o7flip.model.OptimizeResult lastOptimize;
@@ -297,6 +302,7 @@ public class O7FlipPanel extends PluginPanel
 	private JButton[] dumpsTierBtns;       // [All, Confirmed, Likely]
 	private JPanel    dumpsTierBar;        // container for the segmented control
 	private JButton[] dipsSortBtns;
+	private JButton[] decantSortBtns;
 	private JButton[] myFlipsSortBtns;
 	private JButton[] myFlipsMarginSortBtns;
 	private JButton[] myFlipsRecentSortBtns;
@@ -309,6 +315,8 @@ public class O7FlipPanel extends PluginPanel
 	private JLabel  dumpsPageLabel;   private JButton dumpsPrev,    dumpsNext;
 	private JLabel  dipsPageLabel;    private JButton dipsPrev,     dipsNext;
 	private int     dipsSortIdx = 0;
+	private JLabel  decantPageLabel;  private JButton decantPrev,   decantNext;
+	private int     decantSortIdx = 0;
 
 	private JComboBox<String> flipsCapitalCombo;
 	private JComboBox<String> flipsSortCombo;
@@ -699,6 +707,23 @@ public class O7FlipPanel extends PluginPanel
 		renderDips(filtered());
 	}
 
+	public void updateDecanting(List<DecantItem> items)
+	{
+		allDecants = items != null ? items : new ArrayList<>();
+		decantPage = 0;
+		renderDecants(filtered());
+	}
+
+	public void rerenderDecants()
+	{
+		renderDecants(filtered());
+	}
+
+	public int getDecantPage()
+	{
+		return decantPage;
+	}
+
 	public String getDipsSortKey()
 	{
 		return dipsSortKey;
@@ -796,6 +821,7 @@ public class O7FlipPanel extends PluginPanel
 			renderSpikes("");
 			renderDumps("");
 			renderDips("");
+			renderDecants("");
 			renderFavourites("");
 			return;
 		}
@@ -888,6 +914,19 @@ public class O7FlipPanel extends PluginPanel
 			.filter(i -> affordable(i.buyPrice))
 			.filter(i -> q.isEmpty() || matches(i.name, q))
 			.collect(Collectors.toList());
+	}
+
+	private List<DecantItem> fDecants(String q)
+	{
+		return q.isEmpty() ? allDecants : allDecants.stream().filter(i -> matches(i.potionName, q)).collect(Collectors.toList());
+	}
+
+	private List<DecantItem> sortDecants(List<DecantItem> items)
+	{
+		java.util.Comparator<DecantItem> c = decantSortIdx == 1 ? java.util.Comparator.comparingDouble((DecantItem x) -> x.roiPct)
+			: decantSortIdx == 2 ? java.util.Comparator.comparingInt((DecantItem x) -> x.dailyVolume)
+			: java.util.Comparator.comparingLong((DecantItem x) -> x.profitPer4dose);
+		return items.stream().sorted(c.reversed()).collect(Collectors.toList());
 	}
 
 	private List<FlipItem> fFavourites(String q)
@@ -1118,6 +1157,31 @@ public class O7FlipPanel extends PluginPanel
 			(item, odd) -> new DipItemPanel(item, itemManager, odd, plugin, window),
 			"No dip signals", "Items below the " + window + " average or near ATL will appear here");
 		hiliteFilter(dipsSortBtns, dipsSortIdx);
+	}
+
+	private void renderDecants(String q)
+	{
+		if (decantListPanel == null)
+		{
+			return;
+		}
+		// The /decanting endpoint returns the full list once, so pagination is
+		// client-side: slice the sorted list to the current page window and let
+		// fillListPaged own the free-row / sign-in / page-label logic.
+		List<DecantItem> all = sortDecants(fDecants(q));
+		int total = all.size();
+		int ps    = isSignedIn ? PAGE_SIZE : FREE_ROWS;
+		int pages = Math.max(1, (int) Math.ceil(total / (double) PAGE_SIZE));
+		int safe  = isSignedIn ? Math.max(0, Math.min(decantPage, pages - 1)) : 0;
+		decantPage = safe;
+		int start = safe * PAGE_SIZE;
+		int end   = Math.min(start + ps, total);
+		List<DecantItem> window = start < end ? all.subList(start, end) : new ArrayList<>();
+		fillListPaged(decantListPanel, window, decantPage, total,
+			decantPageLabel, decantPrev, decantNext,
+			(item, odd) -> new DecantItemPanel(item, itemManager, odd, plugin),
+			"No decanting opportunities", "");
+		hiliteFilter(decantSortBtns, decantSortIdx);
 	}
 
 	private void renderFavourites(String q)
@@ -2209,6 +2273,7 @@ public class O7FlipPanel extends PluginPanel
 			case "Other":     return otherTabHasContent();
 			case "Dumps":
 			case "Dips":
+			case "Decant":
 			case "Favs":
 			case "Plan":
 				return subFeatureEnabled(name);
@@ -2229,7 +2294,7 @@ public class O7FlipPanel extends PluginPanel
 
 	public static final List<String> MOVABLE_POOL = java.util.Arrays.asList(
 		"Dumps",
-		"Dips", "Favs", "Plan"
+		"Dips", "Decant", "Favs", "Plan"
 	);
 
 	public static final List<String> DEFAULT_TOP_ROW = java.util.Arrays.asList(
@@ -2282,6 +2347,7 @@ public class O7FlipPanel extends PluginPanel
 		{
 			case "Dumps":   return config.showDumps();
 			case "Dips":    return config.showDips();
+			case "Decant":  return config.showDecant();
 			case "Favs":    return config.showFavourites() && hasApiKey();
 			case "Plan":    return hasApiKey();   // optimizer is premium-only; signing in is the gate
 			default:        return false;
@@ -2309,6 +2375,7 @@ public class O7FlipPanel extends PluginPanel
 		JPanel spikesContent   = buildSpikesTab();
 		JPanel insightsContent = buildInsightsTab();
 		JPanel dipsContent       = buildDipsTab();
+		JPanel decantContent     = buildDecantTab();
 		JPanel favouritesContent = buildFavouritesTab();
 		JPanel planContent       = buildPlanTab();
 
@@ -2317,10 +2384,12 @@ public class O7FlipPanel extends PluginPanel
 			final String gate = "To view this feature you need to be a member and link your API key.";
 			dumpsContent     = buildPremiumGateTab("Dumps",     gate);
 			dipsContent      = buildPremiumGateTab("Dips",      gate);
+			decantContent    = buildPremiumGateTab("Decant",    gate);
 			planContent      = buildPremiumGateTab("Plan",      gate);
 		}
 
 		JPanel otherContent      = buildOtherTab(dipsContent,
+			decantContent,
 			favouritesContent,
 			planContent,
 			dumpsContent);
@@ -2333,6 +2402,7 @@ public class O7FlipPanel extends PluginPanel
 		contentByName.put("Other",     otherContent);
 		contentByName.put("Trades",    myFlipsContent);
 		contentByName.put("Dips",    dipsContent);
+		contentByName.put("Decant",  decantContent);
 		contentByName.put("Favs",    favouritesContent);
 		contentByName.put("Plan",    planContent);
 
@@ -2868,6 +2938,7 @@ public class O7FlipPanel extends PluginPanel
 		renderSpikes(q);
 		renderDumps(q);
 		renderDips(q);
+		renderDecants(q);
 		renderFavourites(q);
 		refreshBlocklistFooter();
 
@@ -3619,6 +3690,42 @@ public class O7FlipPanel extends PluginPanel
 		return assembleTab(topBar, dipsListPanel, buildPageBar(dipsPageLabel, dipsPrev, dipsNext));
 	}
 
+	private JPanel buildDecantTab()
+	{
+		decantSortBtns  = new JButton[3];
+		decantListPanel = listPanel();
+		decantPageLabel = pageLabel();
+		decantPrev      = pageBtn("‹");
+		decantNext      = pageBtn("›");
+		decantPrev.addActionListener(e ->
+		{
+			decantPage--;
+			if (plugin != null)
+			{
+				plugin.onDecantPageChanged(decantPage);
+			}
+		});
+		decantNext.addActionListener(e ->
+		{
+			decantPage++;
+			if (plugin != null)
+			{
+				plugin.onDecantPageChanged(decantPage);
+			}
+		});
+		return assembleTab(buildSortBar(decantSortBtns, new String[]{"Profit", "ROI %", "Volume"},
+			() -> decantSortIdx, i ->
+			{
+				decantSortIdx = i;
+				decantPage = 0;
+				if (plugin != null)
+				{
+					plugin.onDecantSortChanged(decantSortIdx);
+				}
+			}),
+			decantListPanel, buildPageBar(decantPageLabel, decantPrev, decantNext));
+	}
+
 	private void applyToggleStyle(JButton btn, boolean on)
 	{
 		btn.setBackground(on ? new Color(0x00C27A) : new Color(0x3E3E3E));
@@ -4230,6 +4337,7 @@ public class O7FlipPanel extends PluginPanel
 	}
 
 	private JPanel buildOtherTab(JPanel dipsContent,
+	                             JPanel decantContent,
 	                             JPanel favouritesContent,
 	                             JPanel planContent,
 	                             JPanel dumpsContent)
@@ -4242,6 +4350,7 @@ public class O7FlipPanel extends PluginPanel
 
 		java.util.Map<String, JPanel> byName = new java.util.HashMap<>();
 		byName.put("Dips",    dipsContent);
+		byName.put("Decant",  decantContent);
 		byName.put("Favs",    favouritesContent);
 		byName.put("Plan",    planContent);
 		byName.put("Dumps",   dumpsContent);
