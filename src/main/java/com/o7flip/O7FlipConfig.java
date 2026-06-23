@@ -629,18 +629,6 @@ public interface O7FlipConfig extends Config
 	}
 
 	@ConfigItem(
-		keyName = "itemTabQuality",
-		name = "Flip quality",
-		description = "Show the average margin / consistency / GP-per-hour section on the Item tab (premium).",
-		section = itemTabSection,
-		position = 6
-	)
-	default boolean itemTabQuality()
-	{
-		return true;
-	}
-
-	@ConfigItem(
 		keyName = "itemTabLiquidity",
 		name = "Liquidity",
 		description = "Show the buy/sell volume split, imbalance, and fill-time section on the Item tab (premium).",
@@ -648,18 +636,6 @@ public interface O7FlipConfig extends Config
 		position = 7
 	)
 	default boolean itemTabLiquidity()
-	{
-		return true;
-	}
-
-	@ConfigItem(
-		keyName = "itemTabRisk",
-		name = "Risk",
-		description = "Show the dump score / unusual volume section on the Item tab (premium).",
-		section = itemTabSection,
-		position = 8
-	)
-	default boolean itemTabRisk()
 	{
 		return true;
 	}
@@ -684,18 +660,6 @@ public interface O7FlipConfig extends Config
 		position = 10
 	)
 	default boolean itemTabVolume()
-	{
-		return true;
-	}
-
-	@ConfigItem(
-		keyName = "itemTabAlerts",
-		name = "Alerts",
-		description = "Show the merch alert / spike / dip section on the Item tab.",
-		section = itemTabSection,
-		position = 11
-	)
-	default boolean itemTabAlerts()
 	{
 		return true;
 	}

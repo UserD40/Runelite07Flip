@@ -363,19 +363,9 @@ public class InsightsPanel extends JPanel
 				add(buildIndicators(ins.indicators));
 				add(sectionDivider());
 			}
-			if (ins.quality != null && sectionVisible(O7FlipConfig::itemTabQuality))
-			{
-				add(buildQuality(ins.quality));
-				add(sectionDivider());
-			}
 			if (ins.liquidity != null && sectionVisible(O7FlipConfig::itemTabLiquidity))
 			{
 				add(buildLiquidity(ins.liquidity));
-				add(sectionDivider());
-			}
-			if (ins.risk != null && sectionVisible(O7FlipConfig::itemTabRisk))
-			{
-				add(buildRisk(ins.risk));
 				add(sectionDivider());
 			}
 			if (ins.projection != null && sectionVisible(O7FlipConfig::itemTabProjection))
@@ -383,12 +373,6 @@ public class InsightsPanel extends JPanel
 				add(buildProjection(ins.projection));
 				add(sectionDivider());
 			}
-		}
-
-		if (sectionVisible(O7FlipConfig::itemTabAlerts))
-		{
-			add(buildAlerts(ins));
-			add(sectionDivider());
 		}
 
 		if (ins.premiumLocked)
@@ -965,42 +949,6 @@ public class InsightsPanel extends JPanel
 		return panel;
 	}
 
-	private JPanel buildQuality(ItemInsights.Quality q)
-	{
-		JPanel panel = sectionPanel("Flip quality");
-		boolean any = false;
-		if (q.avgMargin24h != null)
-		{
-			panel.add(rowGp("Avg margin 24h", q.avgMargin24h, "pre-tax", Color.WHITE));
-			any = true;
-		}
-		if (q.avgProfit24h != null)
-		{
-			panel.add(rowGp("Avg profit 24h", q.avgProfit24h, null, margingColor(q.avgProfit24h)));
-			any = true;
-		}
-		if (q.marginConsistency != null)
-		{
-			panel.add(rowText("Consistency", q.marginConsistency + " / 100", confidenceColor(q.marginConsistency)));
-			any = true;
-		}
-		if (q.limitCycleProfit != null)
-		{
-			panel.add(rowGp("Per 4h limit", q.limitCycleProfit, null, margingColor(q.limitCycleProfit)));
-			any = true;
-		}
-		if (q.estGpPerHour != null)
-		{
-			panel.add(rowText("Est. GP/hr", FlipItemPanel.formatGpCompact(q.estGpPerHour) + " gp/hr", margingColor(q.estGpPerHour)));
-			any = true;
-		}
-		if (!any)
-		{
-			panel.add(row("No quality data", "—"));
-		}
-		return panel;
-	}
-
 	private JPanel buildLiquidity(ItemInsights.Liquidity l)
 	{
 		JPanel panel = sectionPanel("Liquidity");
@@ -1038,23 +986,6 @@ public class InsightsPanel extends JPanel
 		{
 			panel.add(row("No liquidity data", "—"));
 		}
-		return panel;
-	}
-
-	private JPanel buildRisk(ItemInsights.Risk r)
-	{
-		JPanel panel = sectionPanel("Risk");
-		if (r.dumpScore != null)
-		{
-			Color col = r.dumpScore >= 70 ? LOSS_COL : (r.dumpScore >= 40 ? new Color(0xE8A838) : Color.WHITE);
-			panel.add(rowText("Dump score", r.dumpScore + " / 100", col));
-		}
-		else
-		{
-			panel.add(rowText("Dump score", "—", LOCKED_COL));
-		}
-		panel.add(rowText("Active dump", r.activeDump ? "Yes" : "No", r.activeDump ? LOSS_COL : LOCKED_COL));
-		panel.add(rowText("Unusual volume", r.unusualVolume ? "Yes" : "No", r.unusualVolume ? new Color(0xE8A838) : LOCKED_COL));
 		return panel;
 	}
 
@@ -1326,37 +1257,6 @@ public class InsightsPanel extends JPanel
 		l.setFont(Fonts.SM);
 		l.setForeground(colour);
 		return l;
-	}
-
-	private JPanel buildAlerts(ItemInsights ins)
-	{
-		JPanel panel = sectionPanel("Alerts");
-		ItemInsights.Alerts a = ins.alerts;
-		if (a == null)
-		{
-			panel.add(row("No alert data", "—"));
-			return panel;
-		}
-		if (a.activeMerch && a.merchTarget != null)
-		{
-			String tier = a.merchTier != null ? capitalise(a.merchTier) : "Active";
-			panel.add(rowText("Merch alert",
-				tier + " · target " + FlipItemPanel.formatGpCompact(a.merchTarget) + " gp",
-				PROFIT_COL));
-		}
-		else
-		{
-			panel.add(rowText("Merch alert", "None", LOCKED_COL));
-		}
-		if (a.spikePct24h != null)
-		{
-			panel.add(rowText("Spike 24h", String.format("%+.1f%%", a.spikePct24h), margingColor((long) (double) a.spikePct24h)));
-		}
-		if (a.dipPct24h != null)
-		{
-			panel.add(rowText("Dip 24h", String.format("%+.1f%%", a.dipPct24h), margingColor((long) (double) a.dipPct24h)));
-		}
-		return panel;
 	}
 
 	private JPanel buildProjection(ItemInsights.Projection p)
