@@ -1771,9 +1771,6 @@ public class O7FlipPlugin extends Plugin
 			});
 			d.flipBuyPrice  = f.buyPrice;
 			d.flipSellPrice = f.sellPrice;
-			d.flipProfit    = f.profit;
-			d.flipRoiPct    = f.roiPct;
-			d.presentIn.add("Flips");
 		}
 
 		for (DumpItem du : lastDumps)
@@ -1787,8 +1784,6 @@ public class O7FlipPlugin extends Plugin
 			});
 			d.dumpBuyPrice  = du.buyPrice;
 			d.dumpSellPrice = du.sellPrice;
-			d.dumpPct       = du.dumpPct;
-			d.presentIn.add("Dumps");
 		}
 
 		for (SpikeItem s : lastSpikes)
@@ -1801,7 +1796,6 @@ public class O7FlipPlugin extends Plugin
 				return t;
 			});
 			d.spikeBuyPrice = s.buyPrice;
-			d.presentIn.add("Spikes");
 		}
 
 		trackedItems = Collections.unmodifiableMap(map);

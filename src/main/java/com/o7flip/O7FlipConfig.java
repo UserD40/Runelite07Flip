@@ -121,19 +121,6 @@ public interface O7FlipConfig extends Config
 	}
 
 	@ConfigItem(
-		keyName = "smithingLevel",
-		name = "Smithing level",
-		description = "Your Smithing level, used to calculate PoH repair costs.",
-		section = tabsSection,
-		position = 2
-	)
-	@Range(min = 1, max = 99)
-	default int smithingLevel()
-	{
-		return 99;
-	}
-
-	@ConfigItem(
 		keyName = "usePersonalisedFlips",
 		name = "Personalised flips by cash stack",
 		description = "<html>Filter the Flips tab to items you can afford right now based on the coins<br>"
@@ -400,18 +387,6 @@ public interface O7FlipConfig extends Config
 		position = 1
 	)
 	default boolean showGePriceHint()
-	{
-		return true;
-	}
-
-	@ConfigItem(
-		keyName = "inventoryCheckOnSell",
-		name = "Hide 'Sell on GE' if not held",
-		description = "Hide the Sell on GE right-click option if the item is not in your inventory.",
-		section = inventorySection,
-		position = 1
-	)
-	default boolean inventoryCheckOnSell()
 	{
 		return true;
 	}

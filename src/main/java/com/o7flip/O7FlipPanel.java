@@ -4352,7 +4352,7 @@ public class O7FlipPanel extends PluginPanel
 			.append("<font color='").append(profitColor).append("'><b>")
 			.append(cp.profit >= 0 ? "+" : "").append(FlipItemPanel.formatGpCompact(cp.profit))
 			.append("</b></font><font color='#888888'> · ")
-			.append(formatNumberLocal(cp.qty)).append(" @ ")
+			.append(FlipItemPanel.formatGp(cp.qty)).append(" @ ")
 			.append(FlipItemPanel.formatGpCompact(cp.qty > 0 ? cp.buyGp / cp.qty : 0))
 			.append("</font>");
 		if (cp.fillHours != null)
@@ -4372,11 +4372,6 @@ public class O7FlipPanel extends PluginPanel
 		row.add(text, BorderLayout.CENTER);
 		row.setMaximumSize(new Dimension(Integer.MAX_VALUE, row.getPreferredSize().height));
 		return row;
-	}
-
-	private static String formatNumberLocal(long n)
-	{
-		return String.format("%,d", n);
 	}
 
 	private static String formatHoursLocal(double h)

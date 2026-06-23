@@ -42,5 +42,4 @@ public class SearchResultItem
 	public boolean members;
 	public Integer highAlch;
 	public String  lastUpdated;
-	public Integer dataAgeMinutes;
 }

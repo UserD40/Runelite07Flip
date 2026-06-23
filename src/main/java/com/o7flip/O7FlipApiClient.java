@@ -285,7 +285,6 @@ public class O7FlipApiClient
 				item.members        = getBool(obj, "members", false);
 				item.highAlch       = getIntOrNull(obj, "high_alch");
 				item.lastUpdated    = getString(obj, "last_updated", "");
-				item.dataAgeMinutes = getIntOrNull(obj, "data_age_minutes");
 				return item;
 			}, callback);
 		}
@@ -639,9 +638,7 @@ public class O7FlipApiClient
 					stats.totalRealisedProfit = getLong(json, "total_realised_profit", 0L);
 					stats.verifiedProfit      = getLong(json, "verified_profit",        0L);
 					stats.declaredProfit      = getLong(json, "declared_profit",        0L);
-					stats.totalInvestedOpen   = getLong(json, "total_invested_open",    0L);
 					stats.closedCount         = getInt(json,  "closed_count",           0);
-					stats.openCount           = getInt(json,  "open_count",             0);
 					stats.winRate             = getDouble(json, "win_rate",             0.0);
 					stats.hitRate             = getDouble(json, "hit_rate",             0.0);
 					stats.updatedAt           = getString(json, "updated_at",           "");
@@ -651,12 +648,10 @@ public class O7FlipApiClient
 					{
 						JsonObject best = bestEl.getAsJsonObject();
 						TrackerStats.BestFlip bf = new TrackerStats.BestFlip();
-						bf.entryId       = getString(best, "entry_id",         "");
 						bf.itemId        = getInt(best,    "item_id",          0);
 						bf.name          = getString(best, "name",             "");
 						bf.profit        = getLong(best,   "profit",           0L);
 						bf.source        = getString(best, "source",           "declared");
-						bf.fullyClosedAt = getString(best, "fully_closed_at",  "");
 						stats.bestFlip = bf;
 					}
 
@@ -951,7 +946,6 @@ public class O7FlipApiClient
 			ItemInsights.Frozen f = new ItemInsights.Frozen();
 			f.buy      = getLong(fz, "buy",  0L);
 			f.sell     = getLong(fz, "sell", 0L);
-			f.frozenAt = getString(fz, "frozen_at", "");
 			out.frozen = f;
 		}
 
@@ -997,7 +991,6 @@ public class O7FlipApiClient
 			return null;
 		}
 		ItemInsights.Band b = new ItemInsights.Band();
-		b.mid     = getLong(obj, "mid",  0L);
 		b.low     = getLong(obj, "low",  0L);
 		b.high    = getLong(obj, "high", 0L);
 		b.hitRate = getDouble(obj, "hit_rate", 0.0);
@@ -2506,38 +2499,16 @@ public class O7FlipApiClient
 		item.dumpPct          = getDouble(obj, "dump_pct", 0);
 		item.dumpStatus       = getString(obj, "dump_status", "none");
 		item.lastDumpHoursAgo = getDoubleOrNull(obj, "last_dump_hours_ago");
-		item.nextDumpHours    = getDoubleOrNull(obj, "next_dump_hours");
-		item.burstCount       = getIntOrNull(obj, "burst_count");
 		item.hourlyVolume     = getInt(obj, "hourly_volume", 0);
 		item.buyLimit         = getInt(obj, "buy_limit", 0);
 		item.members          = getBool(obj, "members", true);
 
 		item.roiPct              = getDoubleOrNull(obj, "roi_pct");
-		item.maxProfitAtLimit    = getLongOrNull(obj,   "max_profit_at_limit");
 		item.patternStale        = getBoolOrNull(obj,   "pattern_stale");
 		item.dailyVolume         = getIntOrNull(obj,    "daily_volume");
 		item.periodHours         = getIntOrNull(obj,    "period_hours");
 		item.dumpPeakHourUtc     = getIntOrNull(obj,    "dump_peak_hour_utc");
 		item.isClockAligned      = getBoolOrNull(obj,   "is_clock_aligned");
-		item.confirmedBot        = getBoolOrNull(obj,   "confirmed_bot");
-		item.sellRatio           = getDoubleOrNull(obj, "sell_ratio");
-		item.avgBurstIntervalMin = getDoubleOrNull(obj, "avg_burst_interval_min");
-		item.recoveryPct         = getDoubleOrNull(obj, "recovery_pct");
-		item.recoveryHours       = getDoubleOrNull(obj, "recovery_hours");
-		item.recoverySamples     = getIntOrNull(obj,    "recovery_samples");
-
-		JsonArray hv = obj.has("hourly_volumes") && obj.get("hourly_volumes").isJsonArray()
-			? obj.getAsJsonArray("hourly_volumes") : null;
-		if (hv != null && hv.size() > 0)
-		{
-			int[] arr = new int[hv.size()];
-			for (int i = 0; i < hv.size(); i++)
-			{
-				try { arr[i] = hv.get(i).getAsInt(); }
-				catch (Exception e) { arr[i] = 0; }
-			}
-			item.hourlyVolumes = arr;
-		}
 		return item;
 	}
 

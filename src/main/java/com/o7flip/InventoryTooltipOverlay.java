@@ -25,6 +25,7 @@
 package com.o7flip;
 
 import com.o7flip.model.TrackedItemData;
+import com.o7flip.ui.FlipItemPanel;
 import com.o7flip.util.ProfitCalculator;
 import java.awt.Color;
 import java.awt.Rectangle;
@@ -95,16 +96,16 @@ public class InventoryTooltipOverlay extends WidgetItemOverlay
 
 		if (tracked != null && tracked.flipSellPrice != null)
 		{
-			sb.append("</br>Sell @ ").append(formatGp(tracked.flipSellPrice)).append(" gp");
+			sb.append("</br>Sell @ ").append(FlipItemPanel.formatGp(tracked.flipSellPrice)).append(" gp");
 		}
 		else if (tracked != null && tracked.alertSellTarget != null)
 		{
-			sb.append("</br>Target @ ").append(formatGp(tracked.alertSellTarget)).append(" gp");
+			sb.append("</br>Target @ ").append(FlipItemPanel.formatGp(tracked.alertSellTarget)).append(" gp");
 		}
 
 		if (unitCostBasis != null)
 		{
-			sb.append("</br>Cost basis ").append(formatGp(unitCostBasis)).append(" gp");
+			sb.append("</br>Cost basis ").append(FlipItemPanel.formatGp(unitCostBasis)).append(" gp");
 
 			Long compareTo = (tracked != null && tracked.flipSellPrice != null)
 				? tracked.flipSellPrice
@@ -129,11 +130,6 @@ public class InventoryTooltipOverlay extends WidgetItemOverlay
 			return null;
 		}
 		return pos.remainingCostBasis / pos.remainingQty;
-	}
-
-	private static String formatGp(long amount)
-	{
-		return String.format("%,d", amount);
 	}
 
 	private static String colTag(Color c)

@@ -24,8 +24,6 @@
  */
 package com.o7flip.model;
 
-import java.util.LinkedHashSet;
-
 public class TrackedItemData
 {
 	public int    itemId;
@@ -33,18 +31,11 @@ public class TrackedItemData
 
 	public Long   flipBuyPrice;
 	public Long   flipSellPrice;
-	public Long   flipProfit;
-	public Double flipRoiPct;
 
-	public Long   alertCurrentPrice;
 	public Long   alertSellTarget;
-	public Double alertUpsidePct;
 
 	public Long   dumpBuyPrice;
 	public Long   dumpSellPrice;
-	public Double dumpPct;
 
 	public Long   spikeBuyPrice;
-
-	public LinkedHashSet<String> presentIn = new LinkedHashSet<>();
 }

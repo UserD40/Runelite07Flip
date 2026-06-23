@@ -37,27 +37,16 @@ public class DumpItem
 	public double  dumpPct;
 	public String  dumpStatus;
 	public Double  lastDumpHoursAgo;
-	public Double  nextDumpHours;
-	public Integer burstCount;
 	public int     hourlyVolume;
 	public int     buyLimit;
 	public boolean members;
 
 	public Double   roiPct;
-	public Long     maxProfitAtLimit;
 	public Boolean  patternStale;
 	public Integer  dailyVolume;
 	public Integer  periodHours;
 	public Integer  dumpPeakHourUtc;
 	public Boolean  isClockAligned;
-	public Boolean  confirmedBot;
-	public Double   sellRatio;
-	public Double   avgBurstIntervalMin;
-	public int[]    hourlyVolumes;
-
-	public Double   recoveryPct;
-	public Double   recoveryHours;
-	public Integer  recoverySamples;
 
 	public static class Response
 	{

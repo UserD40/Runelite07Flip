@@ -25,6 +25,7 @@
 package com.o7flip;
 
 import com.o7flip.model.TrackedItemData;
+import com.o7flip.ui.FlipItemPanel;
 import net.runelite.api.Client;
 import net.runelite.api.MenuAction;
 import net.runelite.api.gameval.InterfaceID;
@@ -186,7 +187,7 @@ public class GePriceOverlay extends Overlay
 		{
 			if (allowFill)
 			{
-				String optionText = "Set buy price (" + formatGp(buyPrice) + " gp)";
+				String optionText = "Set buy price (" + FlipItemPanel.formatGp(buyPrice) + " gp)";
 				getMenuEntries().add(new OverlayMenuEntry(MenuAction.RUNELITE_OVERLAY, optionText, TARGET));
 				menuPrices.put(optionText, buyPrice);
 			}
@@ -194,7 +195,7 @@ public class GePriceOverlay extends Overlay
 			panel.getChildren().add(LineComponent.builder()
 				.left("Buy")
 				.leftColor(BUY_RED)
-				.right(formatGp(buyPrice))
+				.right(FlipItemPanel.formatGp(buyPrice))
 				.rightColor(INFO_GRAY)
 				.build());
 		}
@@ -205,7 +206,7 @@ public class GePriceOverlay extends Overlay
 			if (allowFill)
 			{
 				String optionText = (sellIsFrozen ? "Set locked sell price (" : "Set sell price (")
-					+ formatGp(sellPrice) + " gp)";
+					+ FlipItemPanel.formatGp(sellPrice) + " gp)";
 				getMenuEntries().add(new OverlayMenuEntry(MenuAction.RUNELITE_OVERLAY, optionText, TARGET));
 				menuPrices.put(optionText, sellPrice);
 			}
@@ -213,7 +214,7 @@ public class GePriceOverlay extends Overlay
 			panel.getChildren().add(LineComponent.builder()
 				.left(label)
 				.leftColor(sellIsFrozen ? HEADER : SELL_GREEN)
-				.right(formatGp(sellPrice))
+				.right(FlipItemPanel.formatGp(sellPrice))
 				.rightColor(sellIsFrozen ? HEADER : INFO_GRAY)
 				.build());
 
@@ -233,7 +234,7 @@ public class GePriceOverlay extends Overlay
 					panel.getChildren().add(LineComponent.builder()
 						.left("Margin / item")
 						.leftColor(INFO_GRAY)
-						.right(sign + formatGp(marginPerItem))
+						.right(sign + FlipItemPanel.formatGp(marginPerItem))
 						.rightColor(marginPerItem >= 0 ? SELL_GREEN : BUY_RED)
 						.build());
 				}
@@ -278,7 +279,7 @@ public class GePriceOverlay extends Overlay
 			panel.getChildren().add(LineComponent.builder()
 				.left("Buy limit")
 				.leftColor(INFO_GRAY)
-				.right(formatGp(buyLimit))
+				.right(FlipItemPanel.formatGp(buyLimit))
 				.rightColor(INFO_GRAY)
 				.build());
 		}
@@ -287,7 +288,7 @@ public class GePriceOverlay extends Overlay
 			panel.getChildren().add(LineComponent.builder()
 				.left("Volume / h")
 				.leftColor(INFO_GRAY)
-				.right(formatGp(hourlyVol))
+				.right(FlipItemPanel.formatGp(hourlyVol))
 				.rightColor(INFO_GRAY)
 				.build());
 		}
@@ -379,11 +380,6 @@ public class GePriceOverlay extends Overlay
 			if (v != null) return v;
 		}
 		return null;
-	}
-
-	private static String formatGp(long amount)
-	{
-		return String.format("%,d", amount);
 	}
 
 	private static String truncate(String s, int max)

@@ -29,9 +29,7 @@ public class TrackerStats
 	public long totalRealisedProfit;
 	public long verifiedProfit;
 	public long declaredProfit;
-	public long totalInvestedOpen;
 	public int closedCount;
-	public int openCount;
 	public double winRate;
 	public double hitRate;
 	public BestFlip bestFlip;   // null if user has no closed flips
@@ -39,11 +37,9 @@ public class TrackerStats
 
 	public static class BestFlip
 	{
-		public String entryId;
 		public int    itemId;
 		public String name;
 		public long   profit;
 		public String source;          // "verified" | "mixed" | "declared"
-		public String fullyClosedAt;
 	}
 }

@@ -126,7 +126,6 @@ public class ItemInsights
 
 	public static class Band
 	{
-		public long   mid;
 		public long   low;
 		public long   high;
 		public double hitRate;
@@ -136,7 +135,6 @@ public class ItemInsights
 	{
 		public long   buy;
 		public long   sell;
-		public String frozenAt;
 	}
 
 	public static class Indicators

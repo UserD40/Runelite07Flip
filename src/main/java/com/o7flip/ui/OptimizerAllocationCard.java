@@ -57,22 +57,6 @@ public class OptimizerAllocationCard extends JPanel
 {
 	private static final Color ODD_BG    = new Color(0x272727);
 	private static final Color HOVER_BG  = new Color(0x3A3A3A);
-	private static final Color BUY_FG    = new Color(0x7AB6FF);   // blue accent
-	private static final Color SELL_FG   = new Color(0xFFC077);   // amber accent
-	private static final Color GREEN     = new Color(0x00C27A);
-	private static final Color MUTED     = new Color(0x888888);
-
-	public OptimizerAllocationCard(OptimizeResult.Allocation a, ItemManager itemManager,
-		boolean odd, O7FlipPlugin plugin)
-	{
-		this(a, itemManager, odd, plugin, null, -1);
-	}
-
-	public OptimizerAllocationCard(OptimizeResult.Allocation a, ItemManager itemManager,
-		boolean odd, O7FlipPlugin plugin, Runnable onSwapClicked)
-	{
-		this(a, itemManager, odd, plugin, onSwapClicked, -1);
-	}
 
 	public OptimizerAllocationCard(OptimizeResult.Allocation a, ItemManager itemManager,
 		boolean odd, O7FlipPlugin plugin, Runnable onSwapClicked, int slotIndex)
@@ -114,13 +98,13 @@ public class OptimizerAllocationCard extends JPanel
 
 		JLabel buyLine = new JLabel("<html>"
 			+ "<font color='#7AB6FF'>Buy at:</font> "
-			+ "<font color='#FFFFFF'><b>" + formatExactGp(a.buyPrice) + "</b></font>"
+			+ "<font color='#FFFFFF'><b>" + FlipItemPanel.formatGp(a.buyPrice) + "</b></font>"
 			+ "</html>");
 		buyLine.setFont(Fonts.SM);
 
 		JLabel sellLine = new JLabel("<html>"
 			+ "<font color='#FFC077'>Sell at:</font> "
-			+ "<font color='#FFFFFF'><b>" + formatExactGp(a.sellPrice) + "</b></font>"
+			+ "<font color='#FFFFFF'><b>" + FlipItemPanel.formatGp(a.sellPrice) + "</b></font>"
 			+ "</html>");
 		sellLine.setFont(Fonts.SM);
 
@@ -136,7 +120,7 @@ public class OptimizerAllocationCard extends JPanel
 		sellLine.setToolTipText(pricesTooltip);
 
 		JLabel profitPerUnit = new JLabel("<html><font color='#00C27A'><b>+"
-			+ formatExactGp(a.profitPerUnit) + "</b></font>"
+			+ FlipItemPanel.formatGp(a.profitPerUnit) + "</b></font>"
 			+ "<font color='#888888'> profit per unit (after tax)</font></html>");
 		profitPerUnit.setFont(Fonts.SM);
 		profitPerUnit.setToolTipText("<html>After-tax profit at the recommended bid/ask."
@@ -144,7 +128,7 @@ public class OptimizerAllocationCard extends JPanel
 			+ " bonds/teleports/tools exempt, 5M cap per item) are pre-applied.</font></html>");
 
 		StringBuilder line4 = new StringBuilder("<html>")
-			.append("<font color='#FFFFFF'>").append(formatNumber(a.qty)).append("</font>")
+			.append("<font color='#FFFFFF'>").append(FlipItemPanel.formatGp(a.qty)).append("</font>")
 			.append("<font color='#888888'>×</font> ")
 			.append("<font color='#FFE07A'>").append(FlipItemPanel.formatGpCompact(a.gpAllocated)).append("</font>")
 			.append("</html>");
@@ -339,18 +323,24 @@ public class OptimizerAllocationCard extends JPanel
 		int bought = sumQty(a.buys);
 		int sold   = sumQty(a.sells);
 		String tooltip = "<html><b>" + text + "</b><br>"
-			+ "Bought: " + formatNumber(bought) + " / " + formatNumber(a.qty) + "<br>"
-			+ "Sold: " + formatNumber(sold) + " / " + formatNumber(bought) + "</html>";
+			+ "Bought: " + FlipItemPanel.formatGp(bought) + " / " + FlipItemPanel.formatGp(a.qty) + "<br>"
+			+ "Sold: " + FlipItemPanel.formatGp(sold) + " / " + FlipItemPanel.formatGp(bought) + "</html>";
 
+		JLabel chip = makeChip(text, bg, Color.WHITE);
+		chip.setToolTipText(tooltip);
+		return chip;
+	}
+
+	private static JLabel makeChip(String text, Color bg, Color fg)
+	{
 		JLabel chip = new JLabel(text);
 		chip.setFont(Fonts.SM);
 		chip.setOpaque(true);
 		chip.setBackground(bg);
-		chip.setForeground(Color.WHITE);
+		chip.setForeground(fg);
 		chip.setBorder(BorderFactory.createCompoundBorder(
 			new LineBorder(new Color(0, 0, 0, 60), 1, true),
 			new EmptyBorder(2, 6, 2, 6)));
-		chip.setToolTipText(tooltip);
 		return chip;
 	}
 
@@ -367,14 +357,7 @@ public class OptimizerAllocationCard extends JPanel
 
 	private static JComponent buildPartialBadge()
 	{
-		JLabel chip = new JLabel("partial");
-		chip.setFont(Fonts.SM);
-		chip.setOpaque(true);
-		chip.setBackground(new Color(0x4A3B17));
-		chip.setForeground(new Color(0xFFC077));
-		chip.setBorder(BorderFactory.createCompoundBorder(
-			new LineBorder(new Color(0, 0, 0, 60), 1, true),
-			new EmptyBorder(2, 6, 2, 6)));
+		JLabel chip = makeChip("partial", new Color(0x4A3B17), new Color(0xFFC077));
 		chip.setToolTipText("<html>You stopped buying this slot early.<br>"
 			+ "<font color='#888888'>It holds at Filled until the bought units sell, "
 			+ "then the freed capital redeploys.</font></html>");
@@ -416,7 +399,7 @@ public class OptimizerAllocationCard extends JPanel
 
 	private static JButton buildStopBuyingButton(int bought)
 	{
-		JButton btn = roundedPill("Stop buying · sell " + formatNumber(bought) + " & recycle");
+		JButton btn = roundedPill("Stop buying · sell " + FlipItemPanel.formatGp(bought) + " & recycle");
 		btn.setBackground(new Color(0x4A3B17));
 		btn.setForeground(new Color(0xFFC077));
 		btn.setToolTipText("<html>Cap this slot to the units you've already bought.<br>"
@@ -432,14 +415,14 @@ public class OptimizerAllocationCard extends JPanel
 		StringBuilder sb = new StringBuilder("<html><font color='#888888'>");
 		if (isSellPhase(a))
 		{
-			sb.append(formatNumber(sold)).append(" / ").append(formatNumber(target)).append(" sold");
+			sb.append(FlipItemPanel.formatGp(sold)).append(" / ").append(FlipItemPanel.formatGp(target)).append(" sold");
 		}
 		else
 		{
-			sb.append(formatNumber(bought)).append(" / ").append(formatNumber(a.qty)).append(" bought");
+			sb.append(FlipItemPanel.formatGp(bought)).append(" / ").append(FlipItemPanel.formatGp(a.qty)).append(" bought");
 			if (sold > 0)
 			{
-				sb.append("  ·  ").append(formatNumber(sold)).append(" sold");
+				sb.append("  ·  ").append(FlipItemPanel.formatGp(sold)).append(" sold");
 			}
 		}
 		sb.append("</font></html>");
@@ -503,13 +486,4 @@ public class OptimizerAllocationCard extends JPanel
 			: "Source: raw instant spot (fewer recent fills)";
 	}
 
-	private static String formatExactGp(long n)
-	{
-		return String.format("%,d", n);
-	}
-
-	private static String formatNumber(long n)
-	{
-		return String.format("%,d", n);
-	}
 }
