@@ -28,14 +28,12 @@ import com.google.gson.Gson;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
-import com.o7flip.model.AlertItem;
 import com.o7flip.model.AuthStatus;
 import com.o7flip.model.DumpItem;
 import com.o7flip.model.FlipItem;
 import com.o7flip.model.DipItem;
 import com.o7flip.model.HighAlchItem;
 import com.o7flip.model.ItemInsights;
-import com.o7flip.model.PriceAlert;
 import com.o7flip.model.OptimizeResult;
 import com.o7flip.model.RecommendedPrices;
 import com.o7flip.model.SearchResultItem;
@@ -2613,199 +2611,6 @@ public class O7FlipApiClient
 		});
 	}
 
-	/**
-	 * Loads alerts in one shot — pagination dropped per the redesign. Server
-	 * caps at 200; pending vs successful filtering happens client-side from
-	 * the {@code status} field. Free users only ever receive successful
-	 * alerts regardless of the {@code ?status=} query, so callers don't need
-	 * to gate the request.
-	 */
-	public void fetchAlerts(BiConsumer<List<AlertItem>, Integer> callback)
-	{
-		String url = BASE_URL + "/alerts?limit=200&status=all";
-		fetch(url, new Callback()
-		{
-			@Override
-			public void onFailure(Call call, IOException e)
-			{
-				log.warn("[07Flip] fetchAlerts failed: {}", e.getMessage());
-				callback.accept(new ArrayList<>(), 0);
-			}
-
-			@Override
-			public void onResponse(Call call, Response response) throws IOException
-			{
-				parsePagedResponse(response, "alerts", O7FlipApiClient.this::parseAlertItem, callback);
-			}
-		});
-	}
-
-	/**
-	 * User-created price alerts (the "Watch" tab). All three operations are
-	 * per-user and require an API key; no key → empty list / failure callback
-	 * without hitting the network.
-	 */
-	public void fetchPriceAlerts(Consumer<List<PriceAlert>> callback)
-	{
-		String key = sanitizedApiKey();
-		if (key == null)
-		{
-			callback.accept(new ArrayList<>());
-			return;
-		}
-		fetch(BASE_URL + "/v2/price-alerts", new Callback()
-		{
-			@Override
-			public void onFailure(Call call, IOException e)
-			{
-				log.warn("[07Flip] fetchPriceAlerts failed: {}", e.getMessage());
-				callback.accept(new ArrayList<>());
-			}
-
-			@Override
-			public void onResponse(Call call, Response response) throws IOException
-			{
-				try
-				{
-					if (response.code() == 429)
-					{
-						markRateLimited(response);
-					}
-					if (!response.isSuccessful() || response.body() == null)
-					{
-						log.warn("[07Flip] fetchPriceAlerts HTTP {}", response.code());
-						callback.accept(new ArrayList<>());
-						return;
-					}
-					JsonObject root = gson.fromJson(response.body().string(), JsonObject.class);
-					callback.accept(parseArray(root, "alerts", O7FlipApiClient.this::parsePriceAlert));
-				}
-				catch (Exception e)
-				{
-					log.warn("[07Flip] fetchPriceAlerts parse error: {}", e.getMessage());
-					callback.accept(new ArrayList<>());
-				}
-				finally
-				{
-					response.close();
-				}
-			}
-		});
-	}
-
-	public void createPriceAlert(int itemId, String side, String direction, long targetPrice, Consumer<Boolean> onResult)
-	{
-		String key = sanitizedApiKey();
-		if (key == null)
-		{
-			onResult.accept(false);
-			return;
-		}
-		if (isRateLimited())
-		{
-			onResult.accept(false);
-			return;
-		}
-		JsonObject body = new JsonObject();
-		body.addProperty("item_id", itemId);
-		body.addProperty("side", side);
-		body.addProperty("direction", direction);
-		body.addProperty("target_price", targetPrice);
-		RequestBody requestBody = RequestBody.create(MEDIA_TYPE_JSON, gson.toJson(body));
-		Request.Builder builder = new Request.Builder()
-			.url(BASE_URL + "/v2/price-alerts")
-			.post(requestBody)
-			.header("User-Agent", USER_AGENT)
-			.header("Authorization", "Bearer " + key);
-		okHttpClient.newCall(builder.build()).enqueue(new Callback()
-		{
-			@Override
-			public void onFailure(Call call, IOException e)
-			{
-				log.warn("[07Flip] createPriceAlert failed: {}", e.getMessage());
-				onResult.accept(false);
-			}
-
-			@Override
-			public void onResponse(Call call, Response response) throws IOException
-			{
-				int code = response.code();
-				if (code == 429)
-				{
-					markRateLimited(response);
-				}
-				boolean ok = response.isSuccessful();
-				if (!ok)
-				{
-					log.warn("[07Flip] createPriceAlert HTTP {}", code);
-				}
-				response.close();
-				onResult.accept(ok);
-			}
-		});
-	}
-
-	public void deletePriceAlert(String id, Consumer<Boolean> onResult)
-	{
-		String key = sanitizedApiKey();
-		if (key == null || id == null || id.isEmpty())
-		{
-			onResult.accept(false);
-			return;
-		}
-		if (isRateLimited())
-		{
-			onResult.accept(false);
-			return;
-		}
-		Request.Builder builder = new Request.Builder()
-			.url(BASE_URL + "/v2/price-alerts/" + id)
-			.delete()
-			.header("User-Agent", USER_AGENT)
-			.header("Authorization", "Bearer " + key);
-		okHttpClient.newCall(builder.build()).enqueue(new Callback()
-		{
-			@Override
-			public void onFailure(Call call, IOException e)
-			{
-				log.warn("[07Flip] deletePriceAlert failed: {}", e.getMessage());
-				onResult.accept(false);
-			}
-
-			@Override
-			public void onResponse(Call call, Response response) throws IOException
-			{
-				int code = response.code();
-				if (code == 429)
-				{
-					markRateLimited(response);
-				}
-				boolean ok = response.isSuccessful();
-				if (!ok)
-				{
-					log.warn("[07Flip] deletePriceAlert HTTP {}", code);
-				}
-				response.close();
-				onResult.accept(ok);
-			}
-		});
-	}
-
-	private PriceAlert parsePriceAlert(JsonObject o)
-	{
-		PriceAlert a = new PriceAlert();
-		a.id           = getStringOrNull(o, "id");
-		a.itemId       = getInt(o, "item_id", 0);
-		a.name         = getString(o, "name", "");
-		a.side         = getString(o, "side", "sell");
-		a.direction    = getString(o, "direction", "above");
-		a.targetPrice  = getLong(o, "target_price", 0L);
-		a.currentPrice = getLongOrNull(o, "current_price");
-		a.createdAt    = getString(o, "created_at", "");
-		a.triggered    = getBool(o, "triggered", false);
-		return a;
-	}
-
 	// -------------------------------------------------------------------------
 	// Bundle endpoint — single POST replacing all scheduled individual calls
 	// -------------------------------------------------------------------------
@@ -2815,7 +2620,6 @@ public class O7FlipApiClient
 		BiConsumer<List<FlipItem>, Integer>  onFlips,
 		BiConsumer<List<SpikeItem>, Integer> onSpikes,
 		BiConsumer<List<DumpItem>, Integer>  onDumps,
-		BiConsumer<List<AlertItem>, Integer> onAlerts,
 		Consumer<String>                     onConnectUrl
 	)
 	{
@@ -2885,12 +2689,6 @@ public class O7FlipApiClient
 						JsonObject sec = root.getAsJsonObject("dumps");
 						List<DumpItem> items = parseArray(sec, "dumps", O7FlipApiClient.this::parseDumpItem);
 						onDumps.accept(items, getInt(sec, "total", items.size()));
-					}
-					if (onAlerts != null && root.has("alerts"))
-					{
-						JsonObject sec = root.getAsJsonObject("alerts");
-						List<AlertItem> items = parseArray(sec, "alerts", O7FlipApiClient.this::parseAlertItem);
-						onAlerts.accept(items, getInt(sec, "total", items.size()));
 					}
 					if (onConnectUrl != null && root.has("_auth"))
 					{
@@ -3140,44 +2938,6 @@ public class O7FlipApiClient
 			item.hourlyVolumes = arr;
 		}
 		return item;
-	}
-
-	private AlertItem parseAlertItem(JsonObject obj)
-	{
-		AlertItem alert = new AlertItem();
-		alert.itemId         = getInt(obj, "item_id", 0);
-		alert.name           = getString(obj, "name", "Unknown");
-		alert.tier           = getString(obj, "tier", "");
-
-		// Prefer the new starting_price field; fall back to current_price for the
-		// short window between client and server deploys when one side might be
-		// stale. After the next plugin release the fallback can be dropped.
-		alert.startingPrice  = getLong(obj, "starting_price", getLong(obj, "current_price", 0L));
-		alert.currentPrice   = alert.startingPrice;   // legacy mirror
-		alert.livePrice      = getLongOrNull(obj, "live_price");
-		alert.sellTarget     = getLong(obj, "sell_target", 0L);
-		alert.upsidePct      = getDouble(obj, "upside_pct", 0.0);
-		alert.holdTime       = getString(obj, "hold_time", "");
-		alert.high90d        = getLong(obj, "high_90d", 0L);
-		alert.low90d         = getLong(obj, "low_90d", 0L);
-		alert.drawdownPct    = getDouble(obj, "drawdown_pct", 0.0);
-		alert.detectedAt     = getString(obj, "detected_at", "");
-
-		alert.status         = getString(obj, "status", "pending");
-		alert.achievedPrice  = getLongOrNull(obj, "achieved_price");
-		alert.achievedAt     = obj.has("achieved_at") && !obj.get("achieved_at").isJsonNull()
-			? obj.get("achieved_at").getAsString() : null;
-		alert.realisedProfit = getLongOrNull(obj, "realised_profit");
-		alert.realisedRoiPct = getDoubleOrNull(obj, "realised_roi_pct");
-
-		// Server picks timeframe per-alert: daily-since-detection for older
-		// alerts, last-24h hourly fallback for any alert detected within
-		// the past day. Same field names either way — plugin renders blind
-		// to which path was chosen.
-		alert.sparklineBuy   = parseNullableLongArray(obj, "sparkline_buy");
-		alert.sparklineSell  = parseNullableLongArray(obj, "sparkline_sell");
-		alert.sparklineStart = getString(obj, "sparkline_start", "");
-		return alert;
 	}
 
 	// -------------------------------------------------------------------------

@@ -24,13 +24,11 @@
  */
 package com.o7flip;
 
-import com.o7flip.model.AlertItem;
 import com.o7flip.model.DumpItem;
 import com.o7flip.model.FlipItem;
 import com.o7flip.model.SearchResultItem;
 import com.o7flip.model.SpikeItem;
 import com.o7flip.model.TradeRecord;
-import com.o7flip.ui.AlertItemPanel;
 import com.o7flip.ui.DipItemPanel;
 import com.o7flip.ui.DumpItemPanel;
 import com.o7flip.ui.HighAlchPanel;
@@ -331,7 +329,6 @@ public class O7FlipPanel extends PluginPanel
 	private JButton[] favouritesSortBtns;
 	private int favouritesSortIdx = 0;
 	private javax.swing.Timer favCooldownTimer;
-	private List<AlertItem>   allAlerts  = new ArrayList<>();
 	private List<TradeRecord> allMyFlips = new ArrayList<>();
 
 	// -------------------------------------------------------------------------
@@ -340,7 +337,6 @@ public class O7FlipPanel extends PluginPanel
 	private int flipsSortIdx   = 0;
 	private int spikesSortIdx  = 0;
 	private int dumpsSortIdx   = 0;
-	private int alertsSortIdx  = 0;
 	private int myFlipsSortIdx = 0;  // 0=Active 1=Recent 2=Margin
 	private int myFlipsPage    = 0;
 	private static final int MY_FLIPS_PAGE_SIZE = 5;
@@ -369,11 +365,6 @@ public class O7FlipPanel extends PluginPanel
 	private JPanel dipsListPanel;
 	private JPanel highAlchListPanel;
 	private JPanel favouritesListPanel;
-	private JPanel watchListPanel;
-	private java.util.List<com.o7flip.model.PriceAlert> priceAlerts = new ArrayList<>();
-	// Alerts tab sub-nav: card switcher + the two toggle pills (Alerts / Watch).
-	private JPanel alertsTabCard;
-	private JButton[] alertsSubNavBtns;
 	private JLabel highAlchCostLabel;
 	// Optimizer ("Plan") sub-tab state — ephemeral, lives only while the
 	// panel is alive. Inputs are kept in fields so the user's settings
@@ -402,7 +393,6 @@ public class O7FlipPanel extends PluginPanel
 	// or an auth-status poll triggers a rebuild. Null until the user
 	// actually clicks something inside Other.
 	private String lastOtherSubTab;
-	private JPanel alertsListPanel;
 	private JPanel myFlipsListPanel;
 	private com.o7flip.ui.MyTradesStatsPanel myFlipsStatsPanel;
 	private com.o7flip.ui.InsightsPanel insightsPanel;
@@ -425,7 +415,6 @@ public class O7FlipPanel extends PluginPanel
 	private JPanel    myFlipsMarginSortBar;
 	private JPanel    myFlipsRecentSortBar;
 	private JButton   myFlipsPeriodButton;
-	private JButton[] alertsSortBtns;
 
 	// -------------------------------------------------------------------------
 	// Page controls
@@ -901,13 +890,6 @@ public class O7FlipPanel extends PluginPanel
 		renderDumps(filtered());
 	}
 
-	public void updateAlerts(List<AlertItem> items)
-	{
-		allAlerts = items;
-		renderAlerts(filtered());
-		setLoading(false);
-	}
-
 	public void updateMyFlips(List<TradeRecord> records)
 	{
 		allMyFlips = new ArrayList<>(records);
@@ -1065,7 +1047,6 @@ public class O7FlipPanel extends PluginPanel
 			renderDips("");
 			renderHighAlch("");
 			renderFavourites("");
-			renderAlerts("");
 			return;
 		}
 
@@ -1301,14 +1282,6 @@ public class O7FlipPanel extends PluginPanel
 		}
 	}
 
-	private List<AlertItem>  fAlerts(String q)
-	{
-		return allAlerts.stream()
-			.filter(i -> notBlocked(i.itemId))
-			.filter(i -> q.isEmpty() || matches(i.name, q))
-			.collect(Collectors.toList());
-	}
-
 	// =========================================================================
 	// Sort helpers
 	// =========================================================================
@@ -1324,20 +1297,6 @@ public class O7FlipPanel extends PluginPanel
 	private List<DumpItem> sortDumps(List<DumpItem> items)
 	{
 		return items;
-	}
-
-	private List<AlertItem> sortAlerts(List<AlertItem> items)
-	{
-		// Tabs are filters now — within each filtered set we always sort
-		// reverse-chronologically. Successful alerts use achievedAt (when the
-		// target was hit), everything else uses detectedAt (when it was first
-		// flagged). Falls back gracefully if either timestamp is missing.
-		boolean successfulView = (!isPremium) || alertsSortIdx == 2;
-		Comparator<AlertItem> c = successfulView
-			? Comparator.comparing((AlertItem x) ->
-				x.achievedAt != null ? x.achievedAt : (x.detectedAt != null ? x.detectedAt : ""))
-			: Comparator.comparing((AlertItem x) -> x.detectedAt != null ? x.detectedAt : "");
-		return items.stream().sorted(c.reversed()).collect(Collectors.toList());
 	}
 
 	// =========================================================================
@@ -1580,83 +1539,6 @@ public class O7FlipPanel extends PluginPanel
 		{
 			favCooldownTimer.stop();
 		}
-	}
-
-	private void renderAlerts(String q)
-	{
-		alertsListPanel.removeAll();
-
-		List<AlertItem> filtered = sortAlerts(filterAlertsByStatus(fAlerts(q)));
-		if (filtered.isEmpty())
-		{
-			alertsListPanel.add(emptyLabel(emptyAlertsHeadline(), emptyAlertsSub()));
-		}
-		else
-		{
-			for (int i = 0; i < filtered.size(); i++)
-			{
-				alertsListPanel.add(new AlertItemPanel(filtered.get(i), itemManager, i % 2 != 0, plugin));
-			}
-		}
-
-		alertsListPanel.revalidate();
-		alertsListPanel.repaint();
-		hilite(alertsSortBtns, alertsSortIdx);
-	}
-
-	/**
-	 * Filters the alert list by the current sort tab. Free users only see the
-	 * "Successful" tab — alertsSortIdx is forced to 0 in {@link #buildAlertsSortBar}
-	 * for them. Premium index map: 0=Most Recent, 1=Pending, 2=Successful.
-	 */
-	private List<AlertItem> filterAlertsByStatus(List<AlertItem> input)
-	{
-		String wantStatus;
-		if (!isPremium)
-		{
-			wantStatus = "successful";
-		}
-		else if (alertsSortIdx == 1)
-		{
-			wantStatus = "pending";
-		}
-		else if (alertsSortIdx == 2)
-		{
-			wantStatus = "successful";
-		}
-		else
-		{
-			wantStatus = null;   // Most Recent — keep all
-		}
-		if (wantStatus == null)
-		{
-			return input;
-		}
-		List<AlertItem> out = new ArrayList<>();
-		for (AlertItem a : input)
-		{
-			if (wantStatus.equalsIgnoreCase(a.status))
-			{
-				out.add(a);
-			}
-		}
-		return out;
-	}
-
-	private String emptyAlertsHeadline()
-	{
-		if (!isPremium)                 return "No successful alerts yet";
-		if (alertsSortIdx == 1)         return "No pending alerts";
-		if (alertsSortIdx == 2)         return "No successful alerts yet";
-		return "No active price alerts";
-	}
-
-	private String emptyAlertsSub()
-	{
-		if (!isPremium)                 return "Premium unlocks pending + most-recent alerts";
-		if (alertsSortIdx == 1)         return "No alerts currently waiting to hit target";
-		if (alertsSortIdx == 2)         return "Successful alerts will appear here once targets hit";
-		return "Alerts posted twice daily";
 	}
 
 	/**
@@ -2895,7 +2777,6 @@ public class O7FlipPanel extends PluginPanel
 			// Movable pool — same visibility predicates whether they're sitting
 			// on Row 1 (top-level) or inside Other (sub-tab).
 			case "Dumps":
-			case "Alerts":
 			case "Dips":
 			case "Favs":
 			case "Alch":
@@ -2926,13 +2807,13 @@ public class O7FlipPanel extends PluginPanel
 	 * dialog; the user's saved {@code topRowTabs} drives the actual layout.
 	 */
 	public static final List<String> MOVABLE_POOL = java.util.Arrays.asList(
-		"Dumps", "Alerts",
+		"Dumps",
 		"Dips", "Favs", "Alch", "Plan"
 	);
 
 	/** Default top-row pick when {@code topRowTabs} is empty. */
 	public static final List<String> DEFAULT_TOP_ROW = java.util.Arrays.asList(
-		"Dumps", "Alerts"
+		"Dumps"
 	);
 
 	/** Fixed Row 2 — non-customisable, non-reorderable. */
@@ -2991,7 +2872,6 @@ public class O7FlipPanel extends PluginPanel
 		switch (name)
 		{
 			case "Dumps":   return config.showDumps();
-			case "Alerts":  return config.showAlerts();
 			case "Dips":    return config.showDips();
 			case "Favs":    return config.showFavourites() && hasApiKey();
 			case "Alch":    return config.showHighAlch();
@@ -3040,7 +2920,6 @@ public class O7FlipPanel extends PluginPanel
 		JPanel dumpsContent    = buildDumpsTab();
 		JPanel spikesContent   = buildSpikesTab();
 		JPanel insightsContent = buildInsightsTab();
-		JPanel alertsContent   = buildGenericTab("Merch");
 		JPanel dipsContent       = buildDipsTab();
 		JPanel highAlchContent   = buildHighAlchTab();
 		JPanel favouritesContent = buildFavouritesTab();
@@ -3052,7 +2931,7 @@ public class O7FlipPanel extends PluginPanel
 		// slotted into Other (below) and the top-row map, so the gate shows
 		// wherever the feature lives (top row OR inside Other). The real list
 		// panels were still built above (initialising their fields); we simply
-		// never display them. Flips, Trades, Favourites, Item, Alerts, Spikes
+		// never display them. Flips, Trades, Favourites, Item, Spikes
 		// and High Alch stay accessible.
 		if (!isPremium)
 		{
@@ -3065,7 +2944,7 @@ public class O7FlipPanel extends PluginPanel
 		JPanel otherContent      = buildOtherTab(dipsContent,
 			highAlchContent, favouritesContent,
 			planContent,
-			dumpsContent, alertsContent);
+			dumpsContent);
 		JPanel myFlipsContent  = buildMyFlipsTab();
 
 		// Map each tab name to its (content, visibility predicate) — the
@@ -3075,7 +2954,6 @@ public class O7FlipPanel extends PluginPanel
 		contentByName.put("Flips",     flipsContent);
 		contentByName.put("Dumps",     dumpsContent);
 		contentByName.put("Item",      insightsContent);
-		contentByName.put("Alerts",    alertsContent);
 		contentByName.put("Other",     otherContent);
 		contentByName.put("Trades",    myFlipsContent);
 		// New movable-pool entries: can appear EITHER in Row 1 (top-level tab)
@@ -3801,7 +3679,6 @@ public class O7FlipPanel extends PluginPanel
 		renderDips(q);
 		renderHighAlch(q);
 		renderFavourites(q);
-		renderAlerts(q);
 		refreshBlocklistFooter();
 
 		if (previouslySelected != null)
@@ -4529,69 +4406,6 @@ public class O7FlipPanel extends PluginPanel
 		return assembleTab(topBar, dumpsListPanel, buildPageBar(dumpsPageLabel, dumpsPrev, dumpsNext));
 	}
 
-	private JPanel buildGenericTab(String name)
-	{
-		switch (name)
-		{
-			default: // Alerts tab: "Alerts" (merch feed) + "Watch" (user price alerts) sub-views
-			{
-				// Merch-feed view (the original Alerts content, with its sort bar).
-				alertsListPanel = listPanel();
-				JPanel merchView = assembleTab(buildAlertsSortBar(), alertsListPanel, null);
-
-				// Watch view — the user's own price alerts.
-				watchListPanel = listPanel();
-				JPanel watchView = assembleTab(null, watchListPanel, null);
-				renderWatch();
-
-				alertsTabCard = new JPanel(new CardLayout());
-				alertsTabCard.add(merchView, "alerts");
-				alertsTabCard.add(watchView, "watch");
-
-				// Sub-nav toggle pinned above the card.
-				JButton alertsBtn = pillButton("Alerts");
-				JButton watchBtn  = pillButton("Watch");
-				alertsSubNavBtns = new JButton[]{alertsBtn, watchBtn};
-				applySortStyle(alertsBtn, true);
-				applySortStyle(watchBtn, false);
-				alertsBtn.addActionListener(e -> selectAlertsSubView("alerts"));
-				watchBtn.addActionListener(e -> selectAlertsSubView("watch"));
-
-				JPanel subNav = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 4));
-				subNav.setBackground(ColorScheme.DARKER_GRAY_COLOR);
-				subNav.setBorder(new MatteBorder(0, 0, 1, 0, new Color(0x3A3A3A)));
-				subNav.add(alertsBtn);
-				subNav.add(watchBtn);
-
-				JPanel wrap = new JPanel(new BorderLayout());
-				wrap.setBackground(ColorScheme.DARK_GRAY_COLOR);
-				wrap.add(subNav, BorderLayout.NORTH);
-				wrap.add(alertsTabCard, BorderLayout.CENTER);
-				return wrap;
-			}
-		}
-	}
-
-	/** Switches the Alerts tab between the merch feed and the user's Watch list. */
-	private void selectAlertsSubView(String which)
-	{
-		if (alertsTabCard == null)
-		{
-			return;
-		}
-		((CardLayout) alertsTabCard.getLayout()).show(alertsTabCard, which);
-		if (alertsSubNavBtns != null && alertsSubNavBtns.length == 2)
-		{
-			applySortStyle(alertsSubNavBtns[0], "alerts".equals(which));
-			applySortStyle(alertsSubNavBtns[1], "watch".equals(which));
-		}
-		// Lazily refresh the user's price alerts when they open the Watch view.
-		if ("watch".equals(which) && plugin != null)
-		{
-			plugin.onWatchTabSelected();
-		}
-	}
-
 	/**
 	 * The Dips sub-tab — paginated list against /api/runelite/dips, sortable
 	 * by recency, dip %, or distance from ATL. The endpoint mixes 24h-dip
@@ -4824,122 +4638,6 @@ public class O7FlipPanel extends PluginPanel
 		topBar.add(reorderWrap, BorderLayout.EAST);
 
 		return assembleTab(topBar, favouritesListPanel, null);
-	}
-
-	/** Pushes the user's price alerts into the Watch sub-view. Called from the plugin (EDT). */
-	public void updatePriceAlerts(java.util.List<com.o7flip.model.PriceAlert> alerts)
-	{
-		priceAlerts = alerts != null ? alerts : new ArrayList<>();
-		renderWatch();
-	}
-
-	private void renderWatch()
-	{
-		if (watchListPanel == null)
-		{
-			return;
-		}
-		watchListPanel.removeAll();
-		if (!hasApiKey())
-		{
-			watchListPanel.add(emptyLabel("API key required",
-				"Paste your 07flip.com API key in the plugin config to use price alerts."));
-		}
-		else if (priceAlerts.isEmpty())
-		{
-			watchListPanel.add(emptyLabel("No price alerts",
-				"Open an item, then tap 'Set price alert' to watch a target price."));
-		}
-		else
-		{
-			for (int i = 0; i < priceAlerts.size(); i++)
-			{
-				com.o7flip.model.PriceAlert a = priceAlerts.get(i);
-				if (a == null)
-				{
-					continue;
-				}
-				watchListPanel.add(new com.o7flip.ui.WatchAlertPanel(a, itemManager, i % 2 != 0, plugin));
-				watchListPanel.add(sep());
-			}
-		}
-		watchListPanel.revalidate();
-		watchListPanel.repaint();
-	}
-
-	/**
-	 * "Create price alert" dialog, opened from the Item panel's button. Lets
-	 * the user pick a side (buy/sell), a direction (above/below) and a target
-	 * price (seeded with the current sell), then POSTs via the plugin.
-	 */
-	public void openPriceAlertDialog(int itemId, String name, long currentBuy, long currentSell)
-	{
-		if (plugin == null || itemId <= 0)
-		{
-			return;
-		}
-
-		String[] sides = {"Sell", "Buy"};
-		String[] directions = {"above", "below"};
-		javax.swing.JComboBox<String> sideBox = new javax.swing.JComboBox<>(sides);
-		javax.swing.JComboBox<String> dirBox  = new javax.swing.JComboBox<>(directions);
-		long seed = currentSell > 0 ? currentSell : currentBuy;
-		javax.swing.JTextField targetField = new javax.swing.JTextField(seed > 0 ? String.valueOf(seed) : "", 12);
-
-		JPanel form = new JPanel(new java.awt.GridLayout(0, 2, 6, 6));
-		form.add(new JLabel("Item:"));
-		form.add(new JLabel("<html><b>" + (name != null ? name : "Item " + itemId) + "</b></html>"));
-		form.add(new JLabel("Alert when the"));
-		form.add(sideBox);
-		form.add(new JLabel("price goes"));
-		form.add(dirBox);
-		form.add(new JLabel("target price (gp):"));
-		form.add(targetField);
-		form.add(new JLabel("<html><font color='#888888'>Whole numbers only — no commas or 'gp'.</font></html>"));
-		form.add(new JLabel(""));
-		if (!isPremium)
-		{
-			form.add(new JLabel("<html><font color='#888888'>Free accounts can keep up to 5 active alerts.</font></html>"));
-			form.add(new JLabel(""));
-		}
-
-		int choice = javax.swing.JOptionPane.showConfirmDialog(this, form,
-			"Set price alert", javax.swing.JOptionPane.OK_CANCEL_OPTION,
-			javax.swing.JOptionPane.PLAIN_MESSAGE);
-		if (choice != javax.swing.JOptionPane.OK_OPTION)
-		{
-			return;
-		}
-
-		long target;
-		try
-		{
-			target = Long.parseLong(targetField.getText().trim().replace(",", ""));
-		}
-		catch (NumberFormatException ex)
-		{
-			javax.swing.JOptionPane.showMessageDialog(this,
-				"The target price must be a whole number.", "Set price alert",
-				javax.swing.JOptionPane.WARNING_MESSAGE);
-			return;
-		}
-		if (target <= 0)
-		{
-			javax.swing.JOptionPane.showMessageDialog(this,
-				"The target price must be greater than zero.", "Set price alert",
-				javax.swing.JOptionPane.WARNING_MESSAGE);
-			return;
-		}
-
-		String side = ((String) sideBox.getSelectedItem()).toLowerCase();
-		String direction = (String) dirBox.getSelectedItem();
-		plugin.createPriceAlert(itemId, side, direction, target,
-			() -> javax.swing.JOptionPane.showMessageDialog(this,
-				"Alert created — manage it under Alerts → Watch.", "Set price alert",
-				javax.swing.JOptionPane.INFORMATION_MESSAGE),
-			() -> javax.swing.JOptionPane.showMessageDialog(this,
-				"Couldn't create the alert — try again in a moment.", "Set price alert",
-				javax.swing.JOptionPane.WARNING_MESSAGE));
 	}
 
 	/**
@@ -5696,7 +5394,7 @@ public class O7FlipPanel extends PluginPanel
 	 * populates based on the user's top-row selection: swap Dumps in to
 	 * Row 1 and it disappears from Other; swap it out and it reappears.
 	 *
-	 * Six per-feature content panels are passed in (we can't conditionally
+	 * Five per-feature content panels are passed in (we can't conditionally
 	 * skip building them because list-panel fields like {@code dipsListPanel}
 	 * are read by render methods even when the tab isn't visible).
 	 */
@@ -5704,7 +5402,7 @@ public class O7FlipPanel extends PluginPanel
 	                             JPanel highAlchContent,
 	                             JPanel favouritesContent,
 	                             JPanel planContent,
-	                             JPanel dumpsContent, JPanel alertsContent)
+	                             JPanel dumpsContent)
 	{
 		JTabbedPane inner = new JTabbedPane(JTabbedPane.TOP, JTabbedPane.WRAP_TAB_LAYOUT);
 		inner.setBackground(ColorScheme.DARK_GRAY_COLOR);
@@ -5724,7 +5422,6 @@ public class O7FlipPanel extends PluginPanel
 		byName.put("Favs",    favouritesContent);
 		byName.put("Plan",    planContent);
 		byName.put("Dumps",   dumpsContent);
-		byName.put("Alerts",  alertsContent);
 
 		java.util.Set<String> topRow = new java.util.HashSet<>(resolveTopRow());
 		for (String name : MOVABLE_POOL)
@@ -5797,33 +5494,6 @@ public class O7FlipPanel extends PluginPanel
 		wrap.setBackground(ColorScheme.DARK_GRAY_COLOR);
 		wrap.add(inner, BorderLayout.CENTER);
 		return wrap;
-	}
-
-	/**
-	 * Three-tab sort bar for the Alerts panel: Most Recent / Pending / Successful.
-	 * Free users only ever see the Successful button \u2014 Most Recent and Pending
-	 * are hidden, and the index is forced to "Successful" on render. Premium
-	 * users see all three with Most Recent as the default.
-	 */
-	private JPanel buildAlertsSortBar()
-	{
-		String[] labels = isPremium
-			? new String[]{"Most Recent", "Pending", "Successful"}
-			: new String[]{"Successful"};
-		alertsSortBtns = new JButton[labels.length];
-		// Free user only has the Successful button \u2014 index 0 maps to "successful".
-		// Premium users get the full ordering (0=recent, 1=pending, 2=successful).
-		if (!isPremium)
-		{
-			alertsSortIdx = 0;
-		}
-		return buildSortBar(alertsSortBtns, labels,
-			() -> alertsSortIdx,
-			i ->
-			{
-				alertsSortIdx = i;
-				renderAlerts(filtered());
-			});
 	}
 
 	// =========================================================================

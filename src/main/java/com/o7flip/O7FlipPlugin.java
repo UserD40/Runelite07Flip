@@ -28,7 +28,6 @@ import com.google.gson.Gson;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.inject.Provides;
-import com.o7flip.model.AlertItem;
 import com.o7flip.model.DumpItem;
 import com.o7flip.model.FlipItem;
 import com.o7flip.model.SpikeItem;
@@ -206,7 +205,6 @@ public class O7FlipPlugin extends Plugin
 	/** Per-tab last-fetched lists. Written on executor thread only. */
 	/** Most recent /flips response. Package-private so GePriceOverlay can read flip07Score from it. */
 	List<FlipItem>  lastFlips  = Collections.emptyList();
-	private List<AlertItem> lastAlerts = Collections.emptyList();
 	private List<DumpItem>  lastDumps  = Collections.emptyList();
 	private List<SpikeItem> lastSpikes = Collections.emptyList();
 
@@ -2123,7 +2121,6 @@ public class O7FlipPlugin extends Plugin
 			case "showDumps":
 			case "showSpikes":
 			case "showItem":
-			case "showAlerts":
 			case "showDips":
 			case "showFavourites":
 			case "showHighAlch":
@@ -2277,17 +2274,6 @@ public class O7FlipPlugin extends Plugin
 			sections.add("dumps", p);
 		}
 
-		if (config.showAlerts())
-		{
-			JsonObject p = new JsonObject();
-			// Pagination dropped per the redesign — fetch up to 200 in one shot,
-			// filter pending vs successful client-side. Free users still only
-			// receive successful alerts (server-enforced).
-			p.addProperty("limit", 200);
-			p.addProperty("status", "all");
-			sections.add("alerts", p);
-		}
-
 		final int flipsPage   = panel.getFlipsPage();
 		final int spikesPage  = panel.getSpikesPage();
 		final int dumpsPage   = panel.getDumpsPage();
@@ -2307,12 +2293,6 @@ public class O7FlipPlugin extends Plugin
 			// only ship from the dedicated /dumps endpoint, so a fetchDumps
 			// call below replaces the bundle's dumps section.
 			null,
-			config.showAlerts() ? (items, total) ->
-			{
-				lastAlerts = items;
-				rebuildTrackedItems();
-				SwingUtilities.invokeLater(() -> panel.updateAlerts(items));
-			} : null,
 			connectUrl ->
 			{
 				String key = config.apiKey();
@@ -2510,21 +2490,6 @@ public class O7FlipPlugin extends Plugin
 			d.flipProfit    = f.profit;
 			d.flipRoiPct    = f.roiPct;
 			d.presentIn.add("Flips");
-		}
-
-		for (AlertItem a : lastAlerts)
-		{
-			TrackedItemData d = map.computeIfAbsent(a.itemId, id ->
-			{
-				TrackedItemData t = new TrackedItemData();
-				t.itemId = id;
-				t.name = a.name;
-				return t;
-			});
-			d.alertCurrentPrice = a.currentPrice;
-			d.alertSellTarget   = a.sellTarget;
-			d.alertUpsidePct    = a.upsidePct;
-			d.presentIn.add("Alerts");
 		}
 
 		for (DumpItem du : lastDumps)
@@ -4803,81 +4768,6 @@ public class O7FlipPlugin extends Plugin
 			if (items != null && !items.isEmpty()) saveCache("favourites", items);
 			pushFavouritesToPanel(items);
 		}));
-	}
-
-	/** Watch tab selected — refresh the user's price alerts (auth required). */
-	void onWatchTabSelected()
-	{
-		if (!hasApiKey() || executor == null || executor.isShutdown())
-		{
-			return;
-		}
-		executor.execute(this::fetchPriceAlertsNow);
-	}
-
-	private void fetchPriceAlertsNow()
-	{
-		apiClient.fetchPriceAlerts(alerts ->
-			SwingUtilities.invokeLater(() -> panel.updatePriceAlerts(alerts)));
-	}
-
-	/**
-	 * Opens the "create price alert" dialog for an item (called from the Item
-	 * panel's button). Delegates to the panel where dialog UI lives; seeds the
-	 * target field with the current sell price as a sensible default.
-	 */
-	public void openPriceAlertDialog(int itemId, String name, long currentBuy, long currentSell)
-	{
-		SwingUtilities.invokeLater(() -> panel.openPriceAlertDialog(itemId, name, currentBuy, currentSell));
-	}
-
-	/**
-	 * Creates a price alert, then refreshes the Watch tab on success. Routed
-	 * through the executor (network) with the UI refresh on the EDT.
-	 */
-	public void createPriceAlert(int itemId, String side, String direction, long targetPrice, Runnable onDone, Runnable onError)
-	{
-		if (executor == null || executor.isShutdown())
-		{
-			return;
-		}
-		executor.execute(() -> apiClient.createPriceAlert(itemId, side, direction, targetPrice, ok ->
-			SwingUtilities.invokeLater(() ->
-			{
-				if (ok)
-				{
-					if (onDone != null)
-					{
-						onDone.run();
-					}
-					fetchPriceAlertsNow();
-				}
-				else if (onError != null)
-				{
-					onError.run();
-				}
-			})));
-	}
-
-	/** Deletes a price alert by id, refreshing the Watch tab on success. */
-	public void deletePriceAlert(String id, Runnable onError)
-	{
-		if (executor == null || executor.isShutdown())
-		{
-			return;
-		}
-		executor.execute(() -> apiClient.deletePriceAlert(id, ok ->
-			SwingUtilities.invokeLater(() ->
-			{
-				if (ok)
-				{
-					fetchPriceAlertsNow();
-				}
-				else if (onError != null)
-				{
-					onError.run();
-				}
-			})));
 	}
 
 	// -------------------------------------------------------------------------

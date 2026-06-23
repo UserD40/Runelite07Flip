@@ -623,14 +623,6 @@ public class InsightsPanel extends JPanel
 				: "Autofill unavailable — no buy price for this item",
 			canAutofill, () -> plugin.queueGeBuy(itemId, buyTarget, name)));
 
-		// Price alert — opens the create dialog.
-		final long buy  = ins.current != null ? ins.current.buyPrice  : 0L;
-		final long sell = ins.current != null ? ins.current.sellPrice : 0L;
-		row.add(actionChip("🔔", hasKey
-				? "Set a price alert for this item"
-				: "Add your 07flip.com API key to use price alerts",
-			hasKey && plugin != null, () -> plugin.openPriceAlertDialog(itemId, name, buy, sell)));
-
 		// Favourite lives back on the header star (top-right), not here.
 
 		// Lock — pin the recommended sell price. Needs a key + rec prices.

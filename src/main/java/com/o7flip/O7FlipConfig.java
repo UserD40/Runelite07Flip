@@ -273,19 +273,6 @@ public interface O7FlipConfig extends Config
 	}
 
 	@ConfigItem(
-		keyName = "showAlerts",
-		name = "",
-		description = "",
-		section = tabsSection,
-		position = 4,
-		hidden = true
-	)
-	default boolean showAlerts()
-	{
-		return true;
-	}
-
-	@ConfigItem(
 		keyName = "showDips",
 		name = "",
 		description = "",
@@ -395,7 +382,7 @@ public interface O7FlipConfig extends Config
 
 	/**
 	 * CSV of up to 4 tab names that occupy the customisable top row of the
-	 * panel. Defaults to {@code "Dumps,Alerts"}. Anything from
+	 * panel. Defaults to {@code "Dumps"}. Anything from
 	 * the candidate pool that isn't listed here shows up inside the Other
 	 * tab on the bottom row instead.
 	 */
@@ -409,7 +396,7 @@ public interface O7FlipConfig extends Config
 	)
 	default String topRowTabs()
 	{
-		return "Dumps,Alerts";
+		return "Dumps";
 	}
 
 	// ── Grand Exchange integration ─────────────────────────────────────────
