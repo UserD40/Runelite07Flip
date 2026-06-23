@@ -40,11 +40,6 @@ import java.awt.Dimension;
 import java.awt.GridLayout;
 import java.util.concurrent.TimeUnit;
 
-/**
- * One row for the My Trades "Pending" sort — an open position
- * (bought, not yet sold). Right-side label is "Xd held" rather
- * than profit, since profit doesn't realise until sell time.
- */
 public class OpenPositionRow extends JPanel
 {
 	private static final Color ODD_BG  = new Color(0x272727);

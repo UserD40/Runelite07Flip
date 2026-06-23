@@ -30,17 +30,6 @@ import java.awt.Graphics2D;
 import java.awt.RenderingHints;
 import java.awt.image.BufferedImage;
 
-/**
- * Standalone (Graphics2D-only) version of the buy/sell sparkline used by
- * {@link BuySellSparkline}, rendered into a {@link BufferedImage} so it can
- * be embedded directly in a RuneLite overlay panel via
- * {@code ImageComponent}. No JPanel / Swing layout involved — overlays paint
- * with raw Graphics2D, which is incompatible with the JPanel-based sparkline.
- *
- * Sized for compact overlay use (typically ~180 × 50 px). Skips axis labels
- * entirely — they don't fit at this size and the user has the price values
- * right above in the overlay's text rows.
- */
 public final class MiniChart
 {
 	private static final Color BUY_COL  = new Color(0xFF7070);
@@ -50,23 +39,6 @@ public final class MiniChart
 
 	private MiniChart() {}
 
-	/**
-	 * Renders the buy/sell sparkline into a freshly allocated BufferedImage.
-	 * Either array may be null or under-populated:
-	 * <ul>
-	 *   <li>null on either side → that line is simply not drawn</li>
-	 *   <li>{@code null} / zero entries inside an array → polyline breaks
-	 *       cleanly instead of bridging the gap</li>
-	 *   <li>fewer than 2 valid points across both series → a dashed placeholder
-	 *       track is rendered so the overlay layout stays stable</li>
-	 * </ul>
-	 *
-	 * @param width   image width in pixels
-	 * @param height  image height in pixels
-	 * @param buy     buy-side history (oldest → newest), or null
-	 * @param sell    sell-side history (oldest → newest), or null
-	 * @return a new image — callers own it and may cache between frames
-	 */
 	public static BufferedImage render(int width, int height, Long[] buy, Long[] sell)
 	{
 		BufferedImage img = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
@@ -96,8 +68,6 @@ public final class MiniChart
 		boolean enoughData = min != Long.MAX_VALUE && max > min;
 		if (!enoughData)
 		{
-			// Dashed placeholder so the overlay reserves the height even with
-			// no data — keeps the layout from popping when data lands.
 			g2.setColor(TRACK);
 			g2.setStroke(new BasicStroke(1f, BasicStroke.CAP_BUTT, BasicStroke.JOIN_MITER,
 				1f, new float[]{4f, 4f}, 0f));
@@ -105,7 +75,6 @@ public final class MiniChart
 			return;
 		}
 
-		// Subtle midline so the eye anchors the chart vertically.
 		g2.setColor(MID_LINE);
 		g2.setStroke(new BasicStroke(1f));
 		g2.drawLine(0, h / 2, w, h / 2);

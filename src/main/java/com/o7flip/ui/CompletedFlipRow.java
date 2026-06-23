@@ -41,10 +41,6 @@ import java.awt.GridLayout;
 import java.text.SimpleDateFormat;
 import java.util.Date;
 
-/**
- * One row for the My Trades "Margin" sort — a closed flip with the
- * buy/sell totals and realised profit, sorted by profit elsewhere.
- */
 public class CompletedFlipRow extends JPanel
 {
 	private static final Color ODD_BG     = new Color(0x272727);

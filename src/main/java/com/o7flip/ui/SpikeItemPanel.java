@@ -61,25 +61,20 @@ public class SpikeItemPanel extends JPanel
 		setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
 		setAlignmentX(Component.LEFT_ALIGNMENT);
 
-		// ── Icon ──────────────────────────────────────────────────────────────
 		JLabel iconLabel = FlipItemPanel.buildIcon(item.itemId, itemManager);
 
-		// ── Name ──────────────────────────────────────────────────────────────
 		JLabel nameLabel = new JLabel(item.name);
 		nameLabel.setFont(Fonts.BOLD);
 		nameLabel.setForeground(Color.WHITE);
 
-		// ── Buy (red, own line) ────────────────────────────────────────────────
 		JLabel buyLbl = new JLabel("Buy: " + FlipItemPanel.formatGp(item.buyPrice));
 		buyLbl.setFont(Fonts.SM);
 		buyLbl.setForeground(new Color(0xFF7070));
 
-		// ── 24h avg (gray, own line) ──────────────────────────────────────────
 		JLabel avgLbl = new JLabel("24h avg: " + FlipItemPanel.formatGp(item.avg24hBuy));
 		avgLbl.setFont(Fonts.SM);
 		avgLbl.setForeground(new Color(0x666666));
 
-		// ── Volume ────────────────────────────────────────────────────────────
 		String volStr   = item.hourlyVolume > 0 ? "Vol: " + FlipItemPanel.formatGp(item.hourlyVolume) + "/hr" : "";
 		String limitStr = item.buyLimit > 0 ? (volStr.isEmpty() ? "" : "  ") + "Limit: " + FlipItemPanel.formatGp(item.buyLimit) : "";
 		JLabel volLabel = new JLabel(volStr + limitStr);
@@ -93,7 +88,6 @@ public class SpikeItemPanel extends JPanel
 		textPanel.add(avgLbl);
 		textPanel.add(volLabel);
 
-		// ── Spike badge ───────────────────────────────────────────────────────
 		JLabel spikeBadge = new JLabel(
 			"<html><center><b><font color='#00C27A'>+"
 			+ String.format("%.1f%%", item.spikePct)

@@ -34,7 +34,6 @@ import net.runelite.client.config.Range;
 @ConfigGroup("o7flip")
 public interface O7FlipConfig extends Config
 {
-	// ── Sections ────────────────────────────────────────────────────────────
 
 	@ConfigSection(
 		name = "General",
@@ -92,12 +91,7 @@ public interface O7FlipConfig extends Config
 	)
 	String trackerSection = "tracker";
 
-	// (The legacy Tab order section was removed — tabOrder + topRowTabs are
-	//  hidden persistence items that now live under the Panel tabs section
-	//  to avoid an empty header in the config UI. The Customise top row
-	//  tabs button is the user-facing entry point.)
 
-	// ── General ─────────────────────────────────────────────────────────────
 
 	@ConfigItem(
 		keyName = "apiKey",
@@ -153,18 +147,6 @@ public interface O7FlipConfig extends Config
 		return false;
 	}
 
-	/**
-	 * Capital-input mode for the cross-tab affordability filter. Surfaced
-	 * directly on the panel as a toggle; the config entries below are hidden
-	 * persistence only.
-	 *
-	 * <ul>
-	 *   <li>{@code OFF} — no capital filter (default; preserves the legacy
-	 *       behaviour where every tab shows the full list).</li>
-	 *   <li>{@code AUTO} — derive from inventory coins, rounded to 100K.</li>
-	 *   <li>{@code MANUAL} — use {@link #capitalManual()}, the typed value.</li>
-	 * </ul>
-	 */
 	enum CapitalMode
 	{
 		OFF, AUTO, MANUAL
@@ -196,9 +178,6 @@ public interface O7FlipConfig extends Config
 		return 0L;
 	}
 
-	/** True when the manual capital field is locked against accidental edits.
-	 *  Defaults to true — a value the user typed once survives misclicks
-	 *  until they explicitly unlock. */
 	@ConfigItem(
 		keyName = "capitalLocked",
 		name = "",
@@ -212,13 +191,6 @@ public interface O7FlipConfig extends Config
 		return true;
 	}
 
-	// ── Panel tabs ──────────────────────────────────────────────────────────
-	//
-	// All per-tab show flags below are HIDDEN in the config UI now — the
-	// "Customise top row tabs" dialog is the primary visibility control.
-	// Each flag still resolves to its default, so power users editing
-	// settings.properties directly can hard-disable a fetch (useful for the
-	// premium-gated features like Alerts when free).
 
 	@ConfigItem(
 		keyName = "showFlips",
@@ -350,7 +322,6 @@ public interface O7FlipConfig extends Config
 		return true;
 	}
 
-	// ── Tab order ──────────────────────────────────────────────────────────
 
 	@ConfigItem(
 		keyName = "openTabReorderDialog",
@@ -380,12 +351,6 @@ public interface O7FlipConfig extends Config
 		return "";
 	}
 
-	/**
-	 * CSV of up to 4 tab names that occupy the customisable top row of the
-	 * panel. Defaults to {@code "Dumps"}. Anything from
-	 * the candidate pool that isn't listed here shows up inside the Other
-	 * tab on the bottom row instead.
-	 */
 	@ConfigItem(
 		keyName = "topRowTabs",
 		name = "",
@@ -399,7 +364,6 @@ public interface O7FlipConfig extends Config
 		return "Dumps";
 	}
 
-	// ── Grand Exchange integration ─────────────────────────────────────────
 
 	@ConfigItem(
 		keyName = "autoFillGePrice",
@@ -543,10 +507,7 @@ public interface O7FlipConfig extends Config
 		return true;
 	}
 
-	// ── GP drop animation ──────────────────────────────────────────────────
 
-	/** Typeface options for the GP drop text. Mapped to actual fonts in
-	 *  {@code GpDropOverlay} — RuneScape faces come from {@code FontManager}. */
 	enum GpDropFontType
 	{
 		DEFAULT_BOLD("Default (bold)"),
@@ -685,7 +646,6 @@ public interface O7FlipConfig extends Config
 		return new Color(0xE85050);
 	}
 
-	// ── Trade tracker ───────────────────────────────────────────────────────
 
 	@ConfigItem(
 		keyName = "shareTradeData",
@@ -701,11 +661,6 @@ public interface O7FlipConfig extends Config
 		return false;
 	}
 
-	// ── Item tab section visibility ─────────────────────────────────────────
-	// One toggle per section of the Item insights tab, all default-on. The
-	// item header (icon, name, favourite star) is always shown. Premium-only
-	// sections still require premium — hiding/showing here only affects what
-	// renders out of the data the user's tier already has.
 
 	@ConfigItem(
 		keyName = "itemTabLivePrices",
@@ -851,7 +806,6 @@ public interface O7FlipConfig extends Config
 		return true;
 	}
 
-	/** Default Buy/Sell chart period that loads on the Item tab. */
 	enum DefaultChartPeriod
 	{
 		TWO_HOUR("2 hours", "2h"),
@@ -869,7 +823,6 @@ public interface O7FlipConfig extends Config
 			this.chartLabel = chartLabel;
 		}
 
-		/** The chip label this maps to ("2h", "24h", …). */
 		public String chartLabel()
 		{
 			return chartLabel;

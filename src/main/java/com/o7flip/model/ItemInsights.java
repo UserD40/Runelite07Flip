@@ -24,17 +24,6 @@
  */
 package com.o7flip.model;
 
-/**
- * Per-item insights returned by {@code GET /api/runelite/v2/item/{itemId}}.
- * Mirrors the server response 1:1 — premium-gated fields ({@code rec_*},
- * {@code score.signal}, {@code projection}) come back as null for free
- * users and are rendered with an inline upsell card.
- *
- * Sparkline arrays are dense series of gp prices keyed off the matching
- * {@code *_start} ISO timestamp; a missing point is encoded as null in
- * the array. The plugin renders them width-relative so timestamps aren't
- * needed for layout.
- */
 public class ItemInsights
 {
 	public int     itemId;
@@ -56,20 +45,10 @@ public class ItemInsights
 	public Quality    quality;      // premium-only, null when free
 	public Risk       risk;         // premium-only, null when free
 
-	/**
-	 * Buy / sell price points for the last 24h, aligned to the same time
-	 * buckets — both arrays are the same length. Each entry is the gp price
-	 * at that bucket, or null when the source data has a gap (current hour
-	 * partly elapsed, no Wiki samples yet, etc.). The chart renderer breaks
-	 * its polyline on null so missing points don't connect into a flat line.
-	 */
 	public Long[]  sparkline24hBuy;
 	public Long[]  sparkline24hSell;
 	public String  sparkline24hStart;
 
-	// Shorter, higher-resolution windows for high-velocity items — fine-grained
-	// (sub-hourly) buckets the hourly 24h series can't show. Same null-on-gap
-	// convention. Empty arrays when the server doesn't supply them.
 	public Long[]  sparkline2hBuy;
 	public Long[]  sparkline2hSell;
 	public String  sparkline2hStart;
@@ -77,10 +56,6 @@ public class ItemInsights
 	public Long[]  sparkline4hSell;
 	public String  sparkline4hStart;
 
-	// Longer-horizon series, same null-on-gap convention as the 24h arrays.
-	// 7d = 4-hour buckets (42 points), 30d = daily points (30). Empty arrays
-	// when the server doesn't supply them — the chart period toggle only
-	// offers periods whose arrays actually have data.
 	public Long[]  sparkline7dBuy;
 	public Long[]  sparkline7dSell;
 	public String  sparkline7dStart;
@@ -157,13 +132,6 @@ public class ItemInsights
 		public double hitRate;
 	}
 
-	/**
-	 * Snapshot of 07Flip buy/sell prices the user (or the plugin on their
-	 * behalf) pinned at a specific moment in time — usually when a buy
-	 * order was placed. The plugin uses {@code sell} in the GE setup
-	 * overlay to keep the projected margin intact across market drift.
-	 * Auto-cleared when the matching sell completes.
-	 */
 	public static class Frozen
 	{
 		public long   buy;
@@ -171,12 +139,6 @@ public class ItemInsights
 		public String frozenAt;
 	}
 
-	/**
-	 * Daily-timeframe technical indicators from the server's precomputed
-	 * indicator table (the same data behind the website's Technical
-	 * Screener). Every field is individually nullable — the panel renders
-	 * only the rows it has values for.
-	 */
 	public static class Indicators
 	{
 		public Double  rsi14;
@@ -193,7 +155,6 @@ public class ItemInsights
 		public Double  pct30d;
 	}
 
-	/** Buy/sell throughput split and fill-speed proxy for the last hour/24h. */
 	public static class Liquidity
 	{
 		public Integer hourlyBuyVolume;       // instant buys (wiki lowPriceVolume)
@@ -203,7 +164,6 @@ public class ItemInsights
 		public Double  estHoursToFillLimit;   // volume-throughput proxy, not a queue model
 	}
 
-	/** Flip-quality stats derived from the last 24h of hourly aggregates. */
 	public static class Quality
 	{
 		public Long    avgMargin24h;          // mean hourly margin, pre-tax
@@ -213,11 +173,6 @@ public class ItemInsights
 		public Long    estGpPerHour;          // limitCycleProfit / 4, volume-capped
 	}
 
-	/**
-	 * Bot-dump / unusual-volume flags. {@code dumpScore} is only computed
-	 * for items in the server's warmed candidate set — null means "not
-	 * scored right now", which the panel renders as a dash, never as 0.
-	 */
 	public static class Risk
 	{
 		public Integer dumpScore;             // 0–100 | null (outside warmed set)

@@ -42,20 +42,6 @@ import java.awt.GridLayout;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 
-/**
- * Row component for /api/runelite/dips entries. The endpoint returns two
- * row shapes distinguished by {@code type}:
- *
- * <ul>
- *   <li>{@code "24h_dip"} — buy price ≥5% below the 24h average. Shows the
- *       24h average and dip %.</li>
- *   <li>{@code "atl"} — buy price within 0.3% of the 1-year floor. Shows
- *       the ATL floor and current price vs. ATL %.</li>
- * </ul>
- *
- * Right-click anywhere on the row queues a Buy on the GE at the row's
- * {@code buy_price}, mirroring the Flips tab UX.
- */
 public class DipItemPanel extends JPanel
 {
 	private static final Color ODD_BG    = new Color(0x272727);
@@ -65,8 +51,6 @@ public class DipItemPanel extends JPanel
 	private static final Color ORANGE    = new Color(0xFF981F);
 	private static final Color GRAY      = new Color(0xAAAAAA);
 
-	/** Convenience overload — defaults to the 1d window when caller doesn't
-	 *  care which dip-window to label (e.g. cached restore). */
 	public DipItemPanel(DipItem item, ItemManager itemManager, boolean odd, O7FlipPlugin plugin)
 	{
 		this(item, itemManager, odd, plugin, "1d");
@@ -84,10 +68,8 @@ public class DipItemPanel extends JPanel
 
 		boolean isAtl = "atl".equalsIgnoreCase(item.type);
 
-		// ── ICON ──────────────────────────────────────────────────────────────
 		JLabel iconLabel = FlipItemPanel.buildIcon(item.itemId, itemManager);
 
-		// ── NAME + type badge ─────────────────────────────────────────────────
 		JLabel nameLabel = new JLabel(item.name);
 		nameLabel.setFont(Fonts.BOLD);
 		nameLabel.setForeground(Color.WHITE);
@@ -105,10 +87,6 @@ public class DipItemPanel extends JPanel
 		nameRow.add(nameLabel, BorderLayout.CENTER);
 		nameRow.add(badge,     BorderLayout.EAST);
 
-		// ── Row 2 (combined): Buy · reference price ──────────────────────────
-		// Was two rows (Buy / ATL or Buy / 24h avg). Now one line so the
-		// card stays compact and the user sees the two prices side-by-side
-		// for easy comparison.
 		String refLabelText = "";
 		String refTip = "";
 		if (isAtl && item.atlFloor != null)
@@ -134,12 +112,6 @@ public class DipItemPanel extends JPanel
 			+ "<br><font color='#666666'>Right-click anywhere to queue a Buy on the GE · Click for insights</font></html>");
 		priceRow.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
 
-		// ── Row 3: prominent drop signal ─────────────────────────────────────
-		// Window-aware: picks dipPct1d / dipPct7d / dipPct30d to match the
-		// user's selected window in the panel pills. Server now ships all
-		// three on every dip row (plus the legacy dipPct, which mirrors 1d).
-		// ATL: "At ATL" when ≤0.5% above the floor (5-year), otherwise the
-		// signed buy_vs_atl_pct. Suppresses the "0.0% vs ATL" redundancy.
 		Double dipForWindow = item.dipPct;  // fallback
 		String windowLabel = "24h";
 		if ("7d".equalsIgnoreCase(window))
@@ -199,14 +171,12 @@ public class DipItemPanel extends JPanel
 		signalLabel.setFont(Fonts.SM);
 		if (!signalTooltip.isEmpty()) signalLabel.setToolTipText(signalTooltip);
 
-		// 3-row text column — name, prices, drop signal.
 		JPanel textPanel = new JPanel(new GridLayout(3, 1, 0, 2));
 		textPanel.setBackground(bg);
 		textPanel.add(nameRow);
 		textPanel.add(priceRow);
 		textPanel.add(signalLabel);
 
-		// Re-aliased so the click + right-click hooks below match the new names.
 		JLabel buyLabel = priceRow;
 		JLabel refLabel = signalLabel;
 		JLabel pctLabel = signalLabel;
@@ -214,7 +184,6 @@ public class DipItemPanel extends JPanel
 		add(iconLabel, BorderLayout.WEST);
 		add(textPanel, BorderLayout.CENTER);
 
-		// Click → Item insights, shift/double-click → website, right-click → buy.
 		ClickRouter.attach(this, plugin, item.itemId, item.name);
 		ClickRouter.attachClickOnly(nameLabel, plugin, item.itemId, item.name);
 		ClickRouter.attachClickOnly(buyLabel,  plugin, item.itemId, item.name);

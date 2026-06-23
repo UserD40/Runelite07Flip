@@ -58,24 +58,13 @@ public class FlipItemPanel extends JPanel
 		this(flip, itemManager, odd, plugin, false);
 	}
 
-	/**
-	 * @param favouritesRow when true, the top-right score chip is replaced with
-	 *                      a "remove from favourites" icon (Favs tab only).
-	 */
 	public FlipItemPanel(FlipItem flip, ItemManager itemManager, boolean odd, O7FlipPlugin plugin, boolean favouritesRow)
 	{
 		Color bg = odd ? ODD_BG : ColorScheme.DARK_GRAY_COLOR;
 
-		// 07Flip's rec_buy / rec_sell prices are the patient-flipper p10/p90
-		// targets — a paid signal. Free users see the market bid/ask only and
-		// their right-click queues at the matching market price, so they get
-		// the queue UX without the rec data.
 		final boolean isPremium = plugin != null && plugin.panel != null && plugin.panel.isPremium();
 		final boolean showRecPrices = isPremium;
 
-		// "Bulk Margin" (bandFlip) rows: the live buy/sell/profit are ~0 because
-		// these are patient range flips, not instant spreads. Render the band_*
-		// fields instead — Buy = floor, Sell = ceiling, profit = band_profit.
 		final boolean band = flip.isBand();
 
 		setLayout(new BorderLayout(8, 0));
@@ -84,17 +73,12 @@ public class FlipItemPanel extends JPanel
 		setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
 		setAlignmentX(Component.LEFT_ALIGNMENT);
 
-		// ── ICON ──────────────────────────────────────────────────────────────
 		JLabel iconLabel = buildIcon(flip.itemId, itemManager);
 
-		// ── NAME + SCORE — separate JLabels so each can carry its own tooltip
 		JLabel nameLabel = new JLabel(flip.name);
 		nameLabel.setFont(Fonts.BOLD);
 		nameLabel.setForeground(Color.WHITE);
 
-		// Top-right chip = the 07Flip score (muted dash when the server has no
-		// score). Favourites rows show NO right-side chip — reordering and
-		// removal live in the favourites reorder popup, not per-card.
 		JLabel scoreLabel = null;
 		if (!favouritesRow)
 		{
@@ -123,9 +107,6 @@ public class FlipItemPanel extends JPanel
 			nameRow.add(scoreLabel, BorderLayout.EAST);
 		}
 
-		// ── BUY (red) ─────────────────────────────────────────────────────────
-		// Band rows: Buy = band_floor (the dependable 14-day p10), not the live
-		// bid — that's the price this preset says to actually buy at.
 		final long buyShown = band ? flip.bandFloor : flip.buyPrice;
 		String buyHtml = "<html><b>Buy:</b>  " + formatGpCompact(buyShown);
 		if (!band && showRecPrices && flip.recBuyPrice != null)
@@ -154,27 +135,11 @@ public class FlipItemPanel extends JPanel
 		buyTip.append("<font color='#666666'>Right-click anywhere to queue a Buy on the GE · Click for insights · Shift+click or double-click to open on 07flip.com</font></html>");
 		buyLabel.setToolTipText(buyTip.toString());
 		buyLabel.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
-		// Per-line right-click direct actions used to live here but were too
-		// easy to trigger by accident — clicking the green Sell line queued
-		// a Sell when the user meant to Buy from the row's menu. Right-click
-		// is now exclusively the row-level menu, single source of truth.
-		//
-		// Premium users get the 07Flip rec_buy price (the patient-flipper
-		// target). Free users get the live market buy price (the low/bid
-		// target) — same queue UX, just at the live market price instead of
-		// the gated rec target.
-		// Rec prices are premium-gated, so free users fall back to the live
-		// market BUY price (the low/bid) — what a flipper sets their buy offer
-		// to. Previously this fell back to the sell-side price, which wrongly
-		// queued the buy at the high/ask.
-		// Band rows queue the buy at the dependable floor, not the live bid.
 		final long buyTarget = band
 			? flip.bandFloor
 			: ((showRecPrices && flip.recBuyPrice != null && flip.recBuyPrice > 0)
 				? flip.recBuyPrice : flip.buyPrice);
 
-		// ── SELL (green) ──────────────────────────────────────────────────────
-		// Band rows: Sell = band_ceiling (the dependable 14-day p90).
 		final long sellShown = band ? flip.bandCeiling : flip.sellPrice;
 		String sellHtml = "<html><b>Sell:</b>  " + formatGpCompact(sellShown);
 		if (!band && showRecPrices && flip.recSellPrice != null)
@@ -203,27 +168,14 @@ public class FlipItemPanel extends JPanel
 		sellTip.append("<font color='#666666'>Right-click anywhere to queue a Buy on the GE · Click for insights · Shift+click or double-click to open on 07flip.com</font></html>");
 		sellLabel.setToolTipText(sellTip.toString());
 		sellLabel.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
-		// Per-line right-click direct actions removed — see the matching
-		// comment above the Buy block. Same premium-gating: premium gets
-		// rec_sell, free users get the market buy price.
 		final long sellTarget = (showRecPrices && flip.recSellPrice != null && flip.recSellPrice > 0)
 			? flip.recSellPrice : flip.buyPrice;
 
-		// ── PROFIT + ROI ───────────────────────────────────────────────────────
-		// Compact single line: "+158.0K · L70". ROI, 07F margin and
-		// affordable qty are surfaced via hover tooltip so the row never
-		// truncates regardless of price magnitude.
-		// Profit only — limit lives in its own label below so it can carry
-		// its own '4-hour buy limit' tooltip. Bulk Margin rows show band_profit
-		// (the 4h-cycle figure) instead of the ~0 live margin.
 		JLabel profitLabel;
 		StringBuilder tip = new StringBuilder("<html><b>");
 		tip.append(escapeHtml(flip.name)).append("</b><br>");
 		if (band)
 		{
-			// Headline = band_profit (margin × 4h buy limit), with the per-item
-			// margin + % alongside so the row carries both the cycle profit and
-			// the dependable spread it comes from.
 			long bp = flip.bandProfit != null ? flip.bandProfit : 0L;
 			long bm = flip.bandMargin != null ? flip.bandMargin : 0L;
 			profitLabel = new JLabel("<html><font color='#00C27A'><b>+" + formatGpCompact(bp) + "</b></font>"
@@ -252,9 +204,6 @@ public class FlipItemPanel extends JPanel
 		}
 		else
 		{
-			// formatGpCompact already carries the minus sign for negatives, so only
-			// prepend "+" for non-negative values (avoids the "+-97" double sign),
-			// and colour red when the margin is negative.
 			String profitColor = flip.profit >= 0 ? "#00C27A" : "#E85050";
 			String profitSign  = flip.profit >= 0 ? "+" : "";
 			profitLabel = new JLabel("<html><font color='" + profitColor + "'>"
@@ -289,9 +238,6 @@ public class FlipItemPanel extends JPanel
 		tip.append("</html>");
 		profitLabel.setToolTipText(tip.toString());
 
-		// Profit row: just the margin number. Buy limit and other secondary
-		// facts live in the hover tooltip on the profit label so the row
-		// stays clean.
 		JPanel textPanel = new JPanel(new GridLayout(4, 1, 0, 2));
 		textPanel.setBackground(bg);
 		textPanel.add(nameRow);
@@ -304,10 +250,6 @@ public class FlipItemPanel extends JPanel
 
 		ClickRouter.attach(this, plugin, flip.itemId, flip.name);
 
-		// Each price label intercepts its own mouse events for the right-click
-		// "queue this price" action, which means click events on those labels
-		// never reach the panel-level ClickRouter. Attach a click-only handler
-		// so shift+click / double-click for navigation works across the row.
 		ClickRouter.attachClickOnly(buyLabel,    plugin, flip.itemId, flip.name);
 		ClickRouter.attachClickOnly(sellLabel,   plugin, flip.itemId, flip.name);
 		ClickRouter.attachClickOnly(profitLabel, plugin, flip.itemId, flip.name);
@@ -317,11 +259,6 @@ public class FlipItemPanel extends JPanel
 			ClickRouter.attachClickOnly(scoreLabel, plugin, flip.itemId, flip.name);
 		}
 
-		// Swing doesn't bubble mouse events: a right-click on the inner
-		// Buy/Sell/profit labels never reaches the row's MouseListener. Forward
-		// the right-click to the same queueGeBuy call so the entire row
-		// surface — labels included — is a single click target for queuing
-		// the buy.
 		MouseAdapter rightClickQueueBuy = new MouseAdapter()
 		{
 			@Override
@@ -360,17 +297,8 @@ public class FlipItemPanel extends JPanel
 			@Override
 			public void mousePressed(MouseEvent e)
 			{
-				// Shift+right-click is the website-open gesture handled by
-				// ClickRouter — skip the context menu so it doesn't open on
-				// top of the browser navigation.
 				if (SwingUtilities.isRightMouseButton(e) && !e.isShiftDown() && plugin != null)
 				{
-					// Flips tab is about buy opportunities \u2014 a plain right-
-					// click anywhere on the row queues a Buy directly, no
-					// menu. Avoids the previous trap where clicking near the
-					// green Sell line accidentally queued a Sell when the
-					// user meant to buy. Sell from-inventory still works via
-					// inventory-click in the GE itself.
 					plugin.queueGeBuy(flip.itemId, buyTarget, flip.name);
 				}
 			}
@@ -378,9 +306,6 @@ public class FlipItemPanel extends JPanel
 		setMaximumSize(new Dimension(Integer.MAX_VALUE, getPreferredSize().height));
 	}
 
-	// =========================================================================
-	// Static helpers shared by all item panels
-	// =========================================================================
 
 	public static JLabel buildIcon(int itemId, ItemManager itemManager)
 	{
@@ -400,19 +325,6 @@ public class FlipItemPanel extends JPanel
 		return String.format("%,d", amount);
 	}
 
-	/**
-	 * Compact gp formatter used in narrow row labels — billions, millions
-	 * and thousands get B/M/K suffixes so very large numbers don't blow
-	 * out the row width. Use {@link #formatGp(long)} where exact precision
-	 * matters (Details dialog, GE auto-fill, trade history).
-	 *
-	 * Examples:
-	 *   1,460,546,000 -> "1.46B"
-	 *   22,500,000    -> "22.5M"
-	 *   318,842       -> "318.8K"
-	 *   6,800         -> "6.8K"
-	 *   42            -> "42"
-	 */
 	public static String formatGpCompact(long amount)
 	{
 		long abs = Math.abs(amount);
@@ -433,9 +345,6 @@ public class FlipItemPanel extends JPanel
 
 	private static String trim(String s)
 	{
-		// Strip a trailing ".0" or ".X0" so "22.50" becomes "22.5" and "5.00"
-		// becomes "5". Keeps the compact form readable without losing useful
-		// precision (e.g. "1.46" stays "1.46" not "1.5").
 		int dot = s.indexOf('.');
 		if (dot < 0)
 		{
@@ -467,11 +376,6 @@ public class FlipItemPanel extends JPanel
 		LinkBrowser.browse(url);
 	}
 
-	/**
-	 * Appends a "Hide" menu item to a row's right-click popup. Shared by
-	 * every panel that lists 07flip.com items (Flips, Dumps, Spikes, Dips,
-	 * Alerts) so users can hide unwanted items consistently across tabs.
-	 */
 	public static void addHideMenuItem(JPopupMenu menu, com.o7flip.O7FlipPlugin plugin, int itemId, String name)
 	{
 		if (plugin == null || itemId <= 0)

@@ -26,15 +26,6 @@ package com.o7flip.model;
 
 import net.runelite.api.GrandExchangeOfferState;
 
-/**
- * Immutable, EDT-safe snapshot of a live GE offer. Captured on the game
- * thread (where {@link net.runelite.api.Client#getItemDefinition} is legal)
- * so the panel can render rows without crossing thread boundaries.
- *
- * Replaces direct use of {@link net.runelite.api.GrandExchangeOffer} from
- * Swing code — that class works fine for primitive accessors but resolving
- * the item name requires the client thread and asserts otherwise.
- */
 public class ActiveOfferSnapshot
 {
 	public final int slot;

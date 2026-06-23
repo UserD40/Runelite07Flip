@@ -53,30 +53,6 @@ import java.awt.FontMetrics;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 
-/**
- * Renders a single allocation from the optimiser response. Compact dark
- * card matching the rest of the plugin's row aesthetic.
- *
- * <pre>
- *   ┌──────────────────────────────────────────────────────┐
- *   │ [icon]  Item name                          [state]   │
- *   │         Buy at: 38,432   Sell at: 41,201             │
- *   │         +2,769 profit per unit (after tax)           │
- *   │         14 × 47.59M · +431.4K total profit           │
- *   └──────────────────────────────────────────────────────┘
- * </pre>
- *
- * <ul>
- *   <li>Right-click anywhere on the card queues a Buy at {@code buy_price}.</li>
- *   <li>{@code profit_per_unit} / {@code expected_profit} are the server's
- *       after-tax numbers — never re-derived client-side.</li>
- *   <li>State pill (Buying/Filled/Selling/Closed) replaces the
- *       price-source/fill-confidence dots — clearer signal of progress.</li>
- *   <li>Sell-side auto-fill on the GE is triggered by the plugin the moment
- *       the slot transitions to {@code FILLED}, so listing the items uses
- *       the recommended ask without further user action.</li>
- * </ul>
- */
 public class OptimizerAllocationCard extends JPanel
 {
 	private static final Color ODD_BG    = new Color(0x272727);
@@ -111,15 +87,10 @@ public class OptimizerAllocationCard extends JPanel
 
 		JLabel iconLabel = FlipItemPanel.buildIcon(a.itemId, itemManager);
 
-		// ── Row 1: name + dots + (optional swap) ─────────────────────────────
 		JLabel nameLabel = new JLabel(a.name);
 		nameLabel.setFont(Fonts.BOLD);
 		nameLabel.setForeground(Color.WHITE);
 
-		// State pill (Buying/Filled/Selling/Closed) replaces the old
-		// price-source + fill-confidence dots — clearer signal of progress,
-		// less visual noise. A "partial" badge sits alongside it when the slot
-		// was capped via "Stop buying".
 		JComponent stateChipForName = buildStateChip(a);
 
 		JPanel chipCluster = new JPanel(new FlowLayout(FlowLayout.RIGHT, 4, 0));
@@ -141,9 +112,6 @@ public class OptimizerAllocationCard extends JPanel
 			nameRow.add(chipCluster, BorderLayout.EAST);
 		}
 
-		// ── Row 2: two chips — Buy at / Sell at, exact gp ────────────────────
-		// Buy on one line, Sell on the next — keeps long prices (8-digit gp)
-		// readable without wrapping mid-number.
 		JLabel buyLine = new JLabel("<html>"
 			+ "<font color='#7AB6FF'>Buy at:</font> "
 			+ "<font color='#FFFFFF'><b>" + formatExactGp(a.buyPrice) + "</b></font>"
@@ -167,7 +135,6 @@ public class OptimizerAllocationCard extends JPanel
 		buyLine.setToolTipText(pricesTooltip);
 		sellLine.setToolTipText(pricesTooltip);
 
-		// ── Row 3: after-tax profit per unit ─────────────────────────────────
 		JLabel profitPerUnit = new JLabel("<html><font color='#00C27A'><b>+"
 			+ formatExactGp(a.profitPerUnit) + "</b></font>"
 			+ "<font color='#888888'> profit per unit (after tax)</font></html>");
@@ -176,10 +143,6 @@ public class OptimizerAllocationCard extends JPanel
 			+ "<br><font color='#888888'>Server-computed — tax edge cases (≤50gp exempt,"
 			+ " bonds/teleports/tools exempt, 5M cap per item) are pre-applied.</font></html>");
 
-		// ── Row 4: allocation + expected cycle profit + fill time + state ──
-		// expected_profit is the after-tax total for ONE complete buy→sell
-		// cycle (the server changed from a per-hour extrapolation). The
-		// label is "profit", not "/hr" — see card tooltip.
 		StringBuilder line4 = new StringBuilder("<html>")
 			.append("<font color='#FFFFFF'>").append(formatNumber(a.qty)).append("</font>")
 			.append("<font color='#888888'>×</font> ")
@@ -193,12 +156,10 @@ public class OptimizerAllocationCard extends JPanel
 		bottomRow.setBackground(bg);
 		bottomRow.add(allocLine, BorderLayout.CENTER);
 
-		// ── Buy/sell progress label + bar — mirrors the website's card UI ─────
 		int boughtSoFar = sumQty(a.buys);
 		JLabel progressLabel = buildProgressLabel(a);
 		JComponent progressBar = buildProgressBar(a);
 
-		// ── C — "Stop buying" on still-buying, not-yet-partial slots ─────────
 		JButton stopBuyingBtn = null;
 		if (a.state == SlotState.BUYING && !a.partial && boughtSoFar > 0 && plugin != null && slotIndex >= 0)
 		{
@@ -207,9 +168,6 @@ public class OptimizerAllocationCard extends JPanel
 			stopBuyingBtn.addActionListener(e -> plugin.markPartial(idx));
 		}
 
-		// Regenerate — on a sold-complete slot, replace the finished position with
-		// a fresh pick. Reuses the swap path (swapPlanSlot), which now bumps
-		// generated_at so the new item also propagates to the site.
 		JButton regenerateBtn = null;
 		if (onSwapClicked != null && isSoldComplete(a))
 		{
@@ -220,7 +178,6 @@ public class OptimizerAllocationCard extends JPanel
 			regenerateBtn.addActionListener(e -> onSwapClicked.run());
 		}
 
-		// ── Stack rows ───────────────────────────────────────────────────────
 		JPanel textPanel = new JPanel();
 		textPanel.setLayout(new BoxLayout(textPanel, BoxLayout.Y_AXIS));
 		textPanel.setBackground(bg);
@@ -257,11 +214,6 @@ public class OptimizerAllocationCard extends JPanel
 		add(iconLabel, BorderLayout.WEST);
 		add(textPanel, BorderLayout.CENTER);
 
-		// Hover-shown swap button — only on PENDING slots (the auto-picked
-		// recommendation hasn't been acted on yet). Swapping a slot you're
-		// already buying/holding would silently drop a tracked position and its
-		// fill ledger from the plan, so it's intentionally unavailable there —
-		// matching the website's "reload" affordance, which is pending-only.
 		final boolean swappable = a.state == null || a.state == SlotState.PENDING;
 		if (onSwapClicked != null && swappable)
 		{
@@ -271,8 +223,6 @@ public class OptimizerAllocationCard extends JPanel
 			swap.setBorder(new EmptyBorder(0, 4, 0, 4));
 			swap.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
 			swap.setToolTipText("Replace this auto-picked item with the next best one");
-			// Persistent (not hover-gated): a panel is far less hover-discoverable
-			// than a web card, so the swap affordance stays visible on pending slots.
 			swap.setVisible(true);
 			swap.addMouseListener(new MouseAdapter()
 			{
@@ -346,13 +296,6 @@ public class OptimizerAllocationCard extends JPanel
 
 	}
 
-	/**
-	 * Computed lazily so the HTML labels' preferred heights are correct at the
-	 * point BoxLayout queries us. Capturing getPreferredSize() in the
-	 * constructor measures the profit/price lines BEFORE they wrap to the
-	 * sidebar's actual width, so wrapped cards came out too short and the
-	 * progress bar at the bottom was clipped.
-	 */
 	@Override
 	public Dimension getMaximumSize()
 	{
@@ -360,9 +303,6 @@ public class OptimizerAllocationCard extends JPanel
 		return new Dimension(Integer.MAX_VALUE, pref.height);
 	}
 
-	/** True when the slot's sells have completed its target — CLOSED, or SELLING
-	 *  with {@code sold >=} target qty (covers the bought=0 / site-tracked-sold
-	 *  case where {@code SlotState.derive} can't reach CLOSED). */
 	static boolean isSoldComplete(OptimizeResult.Allocation a)
 	{
 		if (a == null) return false;
@@ -372,21 +312,16 @@ public class OptimizerAllocationCard extends JPanel
 
 	private static JComponent buildStateChip(OptimizeResult.Allocation a)
 	{
-		// PENDING is the empty state — no point rendering a chip for "nothing
-		// has happened yet". Show the chip from BUYING onward.
 		if (a.state == null || a.state == SlotState.PENDING) return null;
 		String text;
 		Color bg;
 		if (isSoldComplete(a))
 		{
-			// Fully sold — show "Sold", not "Selling"/"Closed".
 			text = "Sold";
 			bg = new Color(0x3A2A4A);
 		}
 		else if (a.state == SlotState.FILLED && a.sellListed)
 		{
-			// §10 — fully bought AND a live GE sell offer exists: the user is
-			// waiting on a buyer, so say "Selling" instead of the stale "Filled".
 			text = "Selling";
 			bg = new Color(0x4A3B17);
 		}
@@ -430,7 +365,6 @@ public class OptimizerAllocationCard extends JPanel
 		return total;
 	}
 
-	/** Amber "partial" badge shown alongside the state chip on capped slots. */
 	private static JComponent buildPartialBadge()
 	{
 		JLabel chip = new JLabel("partial");
@@ -447,7 +381,6 @@ public class OptimizerAllocationCard extends JPanel
 		return chip;
 	}
 
-	/** Shared rounded-pill button template for the card's action controls. */
 	private static JButton roundedPill(String text)
 	{
 		JButton btn = new JButton(text)
@@ -481,7 +414,6 @@ public class OptimizerAllocationCard extends JPanel
 		return btn;
 	}
 
-	/** Pill button: "Stop buying · sell N & recycle". */
 	private static JButton buildStopBuyingButton(int bought)
 	{
 		JButton btn = roundedPill("Stop buying · sell " + formatNumber(bought) + " & recycle");
@@ -492,9 +424,6 @@ public class OptimizerAllocationCard extends JPanel
 		return btn;
 	}
 
-	/** "B / Q bought · S sold" — the text beside the progress bar. The optimiser
-	 *  counts only up to the plan target, so clamp the displayed counts to qty
-	 *  (belt-and-suspenders for any legacy over-filled leg). */
 	private static JLabel buildProgressLabel(OptimizeResult.Allocation a)
 	{
 		int target = Math.max(0, a.qty);
@@ -503,8 +432,6 @@ public class OptimizerAllocationCard extends JPanel
 		StringBuilder sb = new StringBuilder("<html><font color='#888888'>");
 		if (isSellPhase(a))
 		{
-			// Selling phase — sold/target is the number that matters now; keep
-			// it readable for partials ("200 / 1,400 sold").
 			sb.append(formatNumber(sold)).append(" / ").append(formatNumber(target)).append(" sold");
 		}
 		else
@@ -522,8 +449,6 @@ public class OptimizerAllocationCard extends JPanel
 		return l;
 	}
 
-	/** §10 — true once the slot is in its SELL phase: a sell fill has landed
-	 *  (SELLING/CLOSED) or a live GE sell offer is listed on a bought slot. */
 	private static boolean isSellPhase(OptimizeResult.Allocation a)
 	{
 		return a.state == SlotState.SELLING
@@ -531,22 +456,12 @@ public class OptimizerAllocationCard extends JPanel
 			|| (a.state == SlotState.FILLED && a.sellListed);
 	}
 
-	/**
-	 * Thin rounded progress bar mirroring the website's card: GREEN fill = buy
-	 * progress (bought / qty) while the slot is pending/buying; PURPLE fill = sell
-	 * progress (sold / qty) once selling/closed. Empty track when nothing has
-	 * filled yet.
-	 */
 	private static JComponent buildProgressBar(OptimizeResult.Allocation a)
 	{
 		int bought = sumQty(a.buys);
 		int sold   = sumQty(a.sells);
 		boolean selling = isSellPhase(a);
 		final Color fill = selling ? new Color(0x9B59B6) : new Color(0x00C27A);
-		// Both phases measure against the slot's TARGET qty: green = bought/qty
-		// while buying, purple = sold/qty while selling/closed. Using qty (not
-		// bought) as the sell denominator matches the site and stays correct when
-		// the tracked bought count is 0/unknown for an already-sold position.
 		int target = Math.max(1, a.qty);
 		double f = selling
 			? Math.min(1.0, sold / (double) target)
@@ -563,8 +478,6 @@ public class OptimizerAllocationCard extends JPanel
 				int w = getWidth();
 				int h = getHeight();
 				int arc = h;
-				// Visible track (clearly lighter than the card bg) so an empty bar
-				// still reads as a progress bar at 0%.
 				g2.setColor(new Color(0x3E3E3E));
 				g2.fillRoundRect(0, 0, w, h, arc, arc);
 				int fw = (int) Math.round(w * fraction);
@@ -590,11 +503,6 @@ public class OptimizerAllocationCard extends JPanel
 			: "Source: raw instant spot (fewer recent fills)";
 	}
 
-	/**
-	 * Exact gp with comma grouping — the actionable Buy / Sell prices the
-	 * user types into the GE need exact precision, not the abbreviated
-	 * "38.4K" form used elsewhere. Matches the website's chip rendering.
-	 */
 	private static String formatExactGp(long n)
 	{
 		return String.format("%,d", n);

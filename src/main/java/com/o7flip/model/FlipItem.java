@@ -36,36 +36,17 @@ public class FlipItem
 	public int buyLimit;
 	public boolean members;
 
-	// Optional cash-stack annotation (only present when the request used
-	// ?cashStack=…&annotate=affordableQty). Null otherwise.
 	public Integer affordableQty;
 
-	// Composite "07Flip Score" 0–100. Null when the item had < 20 trades
-	// in the last hour (illiquid or fresh items).
 	public Integer flip07Score;
 
-	// Recommended buy / sell prices from the server's last-hour p10/p90 of
-	// fills. Use for the GE auto-fill overlay and the item-detail drawer.
-	// Null together when the item had < 10 snapshots in the last hour.
 	public Long recBuyPrice;
 	public Long recSellPrice;
 	public Long recProfit;
 
-	// Hourly / daily volume. Server doesn't always echo these on /flips rows
-	// — when null, the volume filter is a pass-through. Server agent offered
-	// to add them to /flips response; once that ships these light up.
 	public Integer hourlyVolume;
 	public Integer dailyVolume;
 
-	// ── Band ("Bulk Margin") fields ────────────────────────────────────────
-	// Present ONLY on rows returned by ?preset=bandFlip. For these patient
-	// range flips the LIVE buy/sell/profit above are ~0 (near-zero instant
-	// spread) and must NOT be shown — render from these instead:
-	//   Buy  = bandFloor    (14-day p10 dependable buy)
-	//   Sell = bandCeiling  (14-day p90 dependable sell)
-	//   Margin = bandMargin (after-tax gp/item)  ·  bandMarginPct (% of floor)
-	//   Profit / rank = bandProfit (after-tax over one 4h buy-limit cycle)
-	// bandFloor doubles as the presence flag — null on every other preset.
 	public Long bandProfit;
 	public Long bandMargin;
 	public Long bandFloor;
@@ -73,7 +54,6 @@ public class FlipItem
 	public double bandMarginPct;
 	public Integer bandVolumeCoverage;
 
-	/** True when this row carries band ("Bulk Margin") data. */
 	public boolean isBand()
 	{
 		return bandFloor != null;

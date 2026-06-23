@@ -42,11 +42,6 @@ import net.runelite.client.ui.overlay.Overlay;
 import net.runelite.client.ui.overlay.OverlayLayer;
 import net.runelite.client.ui.overlay.OverlayPosition;
 
-/**
- * Renders animated "+X gp" / "-X gp" drops near the Grand Exchange interface
- * each time a flip completes. Pure visual feedback — no game-state effect,
- * no state owned by other components.
- */
 @Singleton
 public class GpDropOverlay extends Overlay
 {
@@ -59,7 +54,6 @@ public class GpDropOverlay extends Overlay
 	private final O7FlipConfig config;
 	private final Deque<Drop> drops = new ArrayDeque<>();
 
-	// Cache the derived Font — render runs every frame and the config rarely changes.
 	private Font cachedFont;
 	private O7FlipConfig.GpDropFontType cachedFontType;
 	private int cachedFontSize;
@@ -73,7 +67,6 @@ public class GpDropOverlay extends Overlay
 		setLayer(OverlayLayer.ABOVE_WIDGETS);
 	}
 
-	/** Queue a drop. Positive amounts render green, negative red. Safe to call from any thread. */
 	public synchronized void queue(long amount)
 	{
 		if (drops.size() >= MAX_DROPS)
@@ -92,7 +85,6 @@ public class GpDropOverlay extends Overlay
 			return null;
 		}
 
-		// Anchor: top of the GE interface widget if visible, otherwise top-left of canvas
 		int anchorX, anchorY;
 		Widget geRoot = client.getWidget(InterfaceID.GeOffers.UNIVERSE);
 		if (geRoot != null && !geRoot.isHidden())
@@ -106,8 +98,6 @@ public class GpDropOverlay extends Overlay
 			anchorY = 80;
 		}
 
-		// User-configured nudge from the default anchor (config → Grand
-		// Exchange integration → GP drop offset X / Y).
 		anchorX += config.gpDropOffsetX();
 		anchorY += config.gpDropOffsetY();
 
@@ -118,8 +108,6 @@ public class GpDropOverlay extends Overlay
 
 		if (preview)
 		{
-			// Position-preview mode: loop a sample drop forever so the user can
-			// see exactly where drops spawn while they adjust the X/Y offsets.
 			drawDrop(graphics, fm, 1_250_000L, now % life, anchorX, anchorY, 0);
 		}
 
@@ -145,13 +133,11 @@ public class GpDropOverlay extends Overlay
 		return null;
 	}
 
-	/** Configured animation length, floored so a bad stored value can't divide by zero. */
 	private long dropLifeMs()
 	{
 		return Math.max(100, config.gpDropDurationMs());
 	}
 
-	/** Draws one drop at the given age in its rise-and-fade animation. */
 	private void drawDrop(Graphics2D graphics, FontMetrics fm, long amount, long age,
 		int anchorX, int anchorY, int idx)
 	{
@@ -163,7 +149,6 @@ public class GpDropOverlay extends Overlay
 		int textWidth = fm.stringWidth(text);
 
 		int x = anchorX - textWidth / 2;
-		// Stack spacing scales with the font so big text doesn't overlap itself.
 		int y = anchorY - yOffset - idx * (fm.getHeight() + 4);
 
 		graphics.setColor(new Color(0, 0, 0, Math.min(alpha, SHADOW_COLOR.getAlpha())));
@@ -174,7 +159,6 @@ public class GpDropOverlay extends Overlay
 		graphics.drawString(text, x, y);
 	}
 
-	/** Resolves the configured typeface + size, cached between frames. */
 	private Font dropFont()
 	{
 		O7FlipConfig.GpDropFontType type = config.gpDropFontType();

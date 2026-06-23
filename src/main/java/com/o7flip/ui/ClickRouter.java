@@ -31,20 +31,6 @@ import java.awt.Component;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 
-/**
- * Single-click → switch to Insights tab and load the item.
- * Double-click → open the item page on 07flip.com.
- *
- * Swing fires {@code mouseClicked} once per click with a cumulative
- * {@code clickCount}, so the only way to disambiguate the gestures is a
- * short timer that fires the single-click action only if no second click
- * arrives within the platform double-click interval. The trade-off is a
- * ~{@value #DOUBLE_CLICK_DELAY_MS} ms perceptible delay on single-click —
- * acceptable for navigating an analytics tab.
- *
- * Right-click is not handled here — callers attach their own context-menu
- * {@code mousePressed} handler if they want one.
- */
 public final class ClickRouter
 {
 	private static final int DOUBLE_CLICK_DELAY_MS = 250;
@@ -53,24 +39,8 @@ public final class ClickRouter
 	{
 	}
 
-	/**
-	 * Wires single + double left-click on the given component for an item id.
-	 *
-	 * @param component   the row / panel that should respond to clicks
-	 * @param plugin      the plugin singleton (used to call openInsights)
-	 * @param itemId      the item id to route to on click
-	 * @param fallbackName name shown in the loading state before the fetch
-	 *                    returns; null if unknown
-	 */
-	/** Shared tooltip text — applied wherever ClickRouter is wired so the gestures are discoverable. */
 	public static final String CLICK_HINT = "Click for insights · Shift+click or double-click to open on 07flip.com";
 
-	/**
-	 * Variant for surfaces where double-click → website is undesirable —
-	 * single-click triggers Insights immediately (no timer, no debounce).
-	 * Shift+click still escapes to the website though, so the gesture is
-	 * consistent across the plugin.
-	 */
 	public static void attachInsightsOnly(Component component, O7FlipPlugin plugin, int itemId, String fallbackName)
 	{
 		if (component == null || plugin == null || itemId <= 0)
@@ -111,10 +81,6 @@ public final class ClickRouter
 			@Override
 			public void mouseClicked(MouseEvent e)
 			{
-				// Shift+click (either button) is an explicit "take me to the
-				// website" gesture — cancel any pending single-click timer and
-				// fire immediately. Right-click panel handlers should also
-				// check e.isShiftDown() so the context menu doesn't open too.
 				if (e.isShiftDown())
 				{
 					if (pendingSingle[0] != null)
@@ -154,13 +120,6 @@ public final class ClickRouter
 		});
 	}
 
-	/**
-	 * Attaches the same gesture handling as {@link #attach} but doesn't touch
-	 * the component's tooltip. Used for child widgets inside a row (price
-	 * labels, score badges) that already have their own informative tooltip —
-	 * we want shift+click / double-click to work when the user clicks those
-	 * areas, but the existing tooltip should stay.
-	 */
 	public static void attachClickOnly(Component component, O7FlipPlugin plugin, int itemId, String fallbackName)
 	{
 		if (component == null || plugin == null || itemId <= 0)
@@ -212,18 +171,8 @@ public final class ClickRouter
 		});
 	}
 
-	/** Client-property key marking a component (and its subtree) as off-limits to routing. */
 	private static final String NO_ROUTE_PROP = "o7flip.noRoute";
 
-	/**
-	 * Marks a component so {@link #attachToTree} skips it and everything under
-	 * it. Use on interactive controls embedded in an otherwise click-to-route
-	 * panel — chart period chips, the favourite star — whose own click action
-	 * would otherwise fire <em>alongside</em> a routed {@code openInsights}
-	 * (Swing delivers a click to every listener on a component; one listener
-	 * calling {@code consume()} does not stop the others). The stray route
-	 * reload was what reset the Item tab's scroll on every chip click.
-	 */
 	public static void markNoRoute(javax.swing.JComponent c)
 	{
 		if (c != null)
@@ -234,7 +183,6 @@ public final class ClickRouter
 
 	private static boolean isInteractiveControl(Component c)
 	{
-		// Buttons always carry their own action — routing them is never wanted.
 		if (c instanceof javax.swing.AbstractButton)
 		{
 			return true;
@@ -246,17 +194,6 @@ public final class ClickRouter
 		return false;
 	}
 
-	/**
-	 * Walks a container tree and wires {@link #attachClickOnly} to every
-	 * component — root + every descendant. Used by the Item Insights panel
-	 * so the navigation gestures work no matter where in the panel the user
-	 * clicks (sections / labels / sparklines all otherwise capture their own
-	 * mouse events and would block a panel-level listener).
-	 *
-	 * Components flagged via {@link #markNoRoute} (and any {@link
-	 * javax.swing.AbstractButton}) are skipped along with their subtrees, so
-	 * their own click handlers run without a competing route reload.
-	 */
 	public static void attachToTree(Component root, O7FlipPlugin plugin, int itemId, String fallbackName)
 	{
 		if (root == null || isInteractiveControl(root)) return;

@@ -24,21 +24,12 @@
  */
 package com.o7flip.model;
 
-/**
- * Synthetic record of a matched trade against an active Optimiser slot.
- * Pushed into a {@link LiveSlot}'s {@code buys[]} or {@code sells[]} when
- * the plugin detects a trade for an item in the active allocation. Not a
- * raw GE offer — offer-level granularity is deliberately not tracked.
- */
 public class SlotFill
 {
 	public int    qty;
 	public long   priceEach;
 	public String tradedAt;   // ISO datetime
 
-	/** Deep copy. {@code foldFill} mutates {@code qty}/{@code priceEach} in place,
-	 *  so an off-thread POST snapshot must clone the SlotFill itself, not just the
-	 *  containing list, to avoid a torn read. */
 	public SlotFill copy()
 	{
 		SlotFill c = new SlotFill();

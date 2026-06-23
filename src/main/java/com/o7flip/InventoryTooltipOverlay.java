@@ -37,12 +37,6 @@ import net.runelite.client.ui.overlay.WidgetItemOverlay;
 import net.runelite.client.ui.overlay.tooltip.Tooltip;
 import net.runelite.client.ui.overlay.tooltip.TooltipManager;
 
-/**
- * Hover an item in the player's inventory and see 07Flip's recommended sell
- * price plus the user's cost basis (FIFO from {@code tradeHistory}). Renders
- * via {@link TooltipManager} so it follows the cursor and stacks naturally
- * with other plugins' tooltips.
- */
 @Singleton
 public class InventoryTooltipOverlay extends WidgetItemOverlay
 {
@@ -59,10 +53,6 @@ public class InventoryTooltipOverlay extends WidgetItemOverlay
 		this.client = client;
 		this.plugin = plugin;
 		this.tooltipManager = tooltipManager;
-		// WidgetItemOverlay manages its own position and layer internally —
-		// calling setPosition()/setLayer() throws IllegalStateException, which
-		// blocks Guice from instantiating this class and prevents the whole
-		// plugin from loading. Just register the inventory hook.
 		showOnInventory();
 	}
 
@@ -100,11 +90,6 @@ public class InventoryTooltipOverlay extends WidgetItemOverlay
 			return null;
 		}
 
-		// RuneLite tooltips use OSRS-style markup, NOT Swing HTML:
-		//   </br>        — line break
-		//   <col=RRGGBB> — coloured text (6-char hex, no leading hash)
-		// Swing's <html>/<b>/<font> tags render as raw text, which is exactly
-		// what the previous version was doing.
 		StringBuilder sb = new StringBuilder();
 		sb.append("<col=ffaa00>07Flip</col>");
 
@@ -151,7 +136,6 @@ public class InventoryTooltipOverlay extends WidgetItemOverlay
 		return String.format("%,d", amount);
 	}
 
-	/** 6-char hex colour, no leading hash — for OSRS-style {@code <col=...>} tags. */
 	private static String colTag(Color c)
 	{
 		return String.format("%02x%02x%02x", c.getRed(), c.getGreen(), c.getBlue());

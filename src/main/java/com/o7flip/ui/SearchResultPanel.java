@@ -42,19 +42,6 @@ import java.awt.GridLayout;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 
-/**
- * Search-result card. Visually identical to {@link FlipItemPanel} — same
- * icon, name+chip row, Buy/Sell/Profit rows, colours, paddings and fonts —
- * so toggling between the Flips tab and a search filter feels seamless.
- *
- * Search results don't carry a 07Flip score, so the score-chip slot renders
- * as a muted dash with an explanatory tooltip rather than a number. The
- * tooltip prevents the column from looking broken.
- *
- * Right-click anywhere on the row queues a Buy on the GE — same single-
- * click action as FlipItemPanel, no popup menu. The queued price is the
- * market buy-side (low) price, i.e. what a flipper sets their buy offer to.
- */
 public class SearchResultPanel extends JPanel
 {
 	private static final Color ODD_BG    = new Color(0x272727);
@@ -73,17 +60,12 @@ public class SearchResultPanel extends JPanel
 
 		boolean hasPrice = item.buyPrice != null && item.sellPrice != null;
 
-		// ── ICON ──────────────────────────────────────────────────────────────
 		JLabel iconLabel = FlipItemPanel.buildIcon(item.itemId, itemManager);
 
-		// ── NAME + SCORE chip (mirrors FlipItemPanel's right-edge slot) ──────
 		JLabel nameLabel = new JLabel(item.name);
 		nameLabel.setFont(Fonts.BOLD);
 		nameLabel.setForeground(Color.WHITE);
 
-		// Search payload doesn't include flip07_score, but we still render a
-		// dash so the row's right edge aligns with FlipItemPanel rows above
-		// and below it. Tooltip explains the gap.
 		JLabel scoreLabel = new JLabel("—");
 		scoreLabel.setFont(Fonts.BOLD);
 		scoreLabel.setForeground(new Color(0xAAAAAA));
@@ -94,7 +76,6 @@ public class SearchResultPanel extends JPanel
 		nameRow.add(nameLabel,  BorderLayout.CENTER);
 		nameRow.add(scoreLabel, BorderLayout.EAST);
 
-		// ── BUY (red) ─────────────────────────────────────────────────────────
 		JLabel buyLabel;
 		if (hasPrice)
 		{
@@ -115,7 +96,6 @@ public class SearchResultPanel extends JPanel
 			buyLabel.setForeground(new Color(0x555555));
 		}
 
-		// ── SELL (green) ──────────────────────────────────────────────────────
 		JLabel sellLabel = new JLabel("");
 		if (hasPrice)
 		{
@@ -130,16 +110,11 @@ public class SearchResultPanel extends JPanel
 			sellLabel.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
 		}
 
-		// Queue the Buy at the same price tier as the Flips panel: premium users
-		// get the 07Flip recommended buy (premium-only on /v2/search), free users
-		// get the live market buy price (the low/bid). rec_* is null for free/anon
-		// so the ternary naturally falls back to the live price.
 		final boolean isPremium = plugin != null && plugin.panel != null && plugin.panel.isPremium();
 		final long buyTarget = !hasPrice ? 0L
 			: (isPremium && item.recBuyPrice != null && item.recBuyPrice > 0)
 				? item.recBuyPrice : item.buyPrice;
 
-		// ── PROFIT + ROI ──────────────────────────────────────────────────────
 		JLabel profitLabel = new JLabel("");
 		if (item.profit != null && hasPrice)
 		{
@@ -171,7 +146,6 @@ public class SearchResultPanel extends JPanel
 			profitLabel.setToolTipText(tip.toString());
 		}
 
-		// ── TEXT COLUMN (4 rows — matches FlipItemPanel) ──────────────────────
 		JPanel textPanel = new JPanel(new GridLayout(4, 1, 0, 2));
 		textPanel.setBackground(bg);
 		textPanel.add(nameRow);
@@ -182,7 +156,6 @@ public class SearchResultPanel extends JPanel
 		add(iconLabel, BorderLayout.WEST);
 		add(textPanel, BorderLayout.CENTER);
 
-		// Row-level click → Item insights; shift/double click → website.
 		ClickRouter.attach(this, plugin, item.itemId, item.name);
 		ClickRouter.attachClickOnly(nameLabel,   plugin, item.itemId, item.name);
 		ClickRouter.attachClickOnly(buyLabel,    plugin, item.itemId, item.name);
@@ -190,10 +163,6 @@ public class SearchResultPanel extends JPanel
 		ClickRouter.attachClickOnly(profitLabel, plugin, item.itemId, item.name);
 		ClickRouter.attachClickOnly(scoreLabel,  plugin, item.itemId, item.name);
 
-		// Right-click on any inner label forwards to the same queueGeBuy call
-		// as the row-level handler — Swing doesn't bubble mouse events, so
-		// without these the inner labels would swallow the right-click and
-		// the row's MouseListener would never fire.
 		final JLabel sellLabelF   = sellLabel;
 		final JLabel profitLabelF = profitLabel;
 		MouseAdapter rightClickQueueBuy = new MouseAdapter()

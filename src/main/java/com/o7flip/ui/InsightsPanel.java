@@ -53,15 +53,6 @@ import java.util.Collections;
 import java.util.List;
 import java.util.function.Predicate;
 
-/**
- * Per-item Insights view, populated by {@link com.o7flip.O7FlipPlugin#openInsights}.
- * Renders the response from {@code GET /api/runelite/v2/item/{itemId}}, gated on
- * the {@code premium_locked} flag — premium-only fields render as dashes, with
- * an upsell card appended at the bottom directing users to {@code upgrade_url}.
- *
- * Pure presentation. The plugin owns the fetch lifecycle and the panel is
- * fully rebuilt on each {@link #show} call to keep state minimal.
- */
 public class InsightsPanel extends JPanel
 {
 	private static final Color SECTION_BG    = new Color(0x1F1F1F);
@@ -79,32 +70,18 @@ public class InsightsPanel extends JPanel
 	private boolean inEmptyState = true;
 	private boolean inFailedState = false;
 
-	// Last successfully rendered insights — kept so section-visibility config
-	// changes can re-render in place without another fetch. Cleared on
-	// showLoading so a stale item can never overpaint an in-flight load.
 	private ItemInsights lastShown;
 
-	// Selected chart period index, persisted across re-renders of the SAME
-	// item so a section-visibility refresh (or any other in-place rebuild)
-	// doesn't snap the chart back to the default period. -1 means "use the
-	// default" (24h when present), and is reset whenever a new item loads.
 	private int desiredChartPeriodIdx = -1;
 
-	// Star toggle state — tracked separately from the rebuilt subtree so we
-	// can repaint without a full panel rerender when the favourite state
-	// flips. {@link #currentItemId} reflects whatever Insights last rendered;
-	// {@link #starLabel} is the JLabel inside the header.
 	private int     currentItemId;
 	private String  currentItemName;
 	private JLabel  starLabel;
 	private JLabel  lockLabel;
-	// Ticks the header cooldown bar while the shown item is on a buy-limit cooldown.
 	private javax.swing.Timer headerCooldownTimer;
 
-	// Action-row chip colours.
 	private static final Color CHIP_BG    = new Color(0x2A2A2A);
 	private static final Color CHIP_HOVER = new Color(0x3C3C3C);
-	// Amber used for the recommended Buy/Sell when the price is locked/frozen.
 	private static final Color FROZEN_COL = new Color(0xFFC845);
 
 	public InsightsPanel(ItemManager itemManager)
@@ -123,24 +100,13 @@ public class InsightsPanel extends JPanel
 		this.plugin      = plugin;
 		this.config      = config;
 		setLayout(new BoxLayout(this, BoxLayout.Y_AXIS));
-		// Match the section background so the gaps between sections read as a
-		// single clean panel rather than lighter-grey bands.
 		setBackground(SECTION_BG);
 		setBorder(new EmptyBorder(8, 0, 8, 0));
-		// Stretch fully within the parent listPanel — otherwise the InsightsPanel
-		// takes its preferred width (which is the widest child's preferred width)
-		// and gets left-aligned inside the host, leaving a gap on the right.
 		setAlignmentX(Component.LEFT_ALIGNMENT);
 		setMaximumSize(new Dimension(Integer.MAX_VALUE, Integer.MAX_VALUE));
 		showEmpty();
 	}
 
-	/**
-	 * Updates the recommended-items list shown in the empty state. Re-renders
-	 * the empty state in place if it's currently showing — does nothing when
-	 * an item is already loaded so the user's selection isn't blown away by a
-	 * background flips refresh.
-	 */
 	public void setRecommended(List<FlipItem> items, O7FlipPlugin p)
 	{
 		this.recommended = items != null ? items : Collections.emptyList();
@@ -151,19 +117,10 @@ public class InsightsPanel extends JPanel
 		}
 		else if (inFailedState)
 		{
-			// The failed state shows the same Recommended cards — re-render so
-			// a flips refresh that lands after the failure still populates them.
 			showLoadFailed();
 		}
 	}
 
-	/**
-	 * No item picked yet. Renders a friendly placeholder plus a "Recommended"
-	 * section with up to three top-scoring flips so the user can jump straight
-	 * into one without leaving the tab. Recommendations come from whatever
-	 * {@link #setRecommended} most recently passed in — typically the top of
-	 * the Flips list, sorted by 07Flip score.
-	 */
 	public void showEmpty()
 	{
 		removeAll();
@@ -191,13 +148,6 @@ public class InsightsPanel extends JPanel
 		repaint();
 	}
 
-	/**
-	 * Full-width JLabel with text centred via the label's own horizontal
-	 * alignment, not via BoxLayout's alignmentX. Mixing CENTER/LEFT
-	 * alignmentX in a Y_AXIS BoxLayout makes children visually drift
-	 * around a virtual centre axis, so we keep every child LEFT_ALIGNED
-	 * and stretchable instead.
-	 */
 	private static JLabel stretchedCenterLabel(String text, Color colour, java.awt.Font font)
 	{
 		JLabel l = new JLabel(text);
@@ -211,12 +161,6 @@ public class InsightsPanel extends JPanel
 		return l;
 	}
 
-	/**
-	 * Word-wrapping centred paragraph for the empty-state explanation.
-	 * Uses HTML body with no fixed width — JLabel adapts to whatever
-	 * width the BoxLayout column gives us. Height is unconstrained so
-	 * tall wraps don't get clipped.
-	 */
 	private static JLabel stretchedWrappedCenter(String text, Color colour, java.awt.Font font)
 	{
 		String html = "<html><div style='text-align:center'>"
@@ -239,8 +183,6 @@ public class InsightsPanel extends JPanel
 		section.setBackground(ColorScheme.DARK_GRAY_COLOR);
 		section.setBorder(new EmptyBorder(0, 10, 0, 10));
 		section.setAlignmentX(Component.LEFT_ALIGNMENT);
-		// Stretch to full panel width — without this BoxLayout caps at the
-		// preferred width and adjacent rows visually drift inwards.
 		section.setMaximumSize(new Dimension(Integer.MAX_VALUE, Short.MAX_VALUE));
 
 		JLabel header = new JLabel("Recommended");
@@ -270,10 +212,6 @@ public class InsightsPanel extends JPanel
 		return section;
 	}
 
-	/**
-	 * Compact clickable card for the empty state. Click → openInsights(itemId)
-	 * which switches the tab content to that item's loaded view in place.
-	 */
 	private static class RecommendedCard extends JPanel
 	{
 		private static final Color CARD_BG    = new Color(0x1F1F1F);
@@ -337,15 +275,12 @@ public class InsightsPanel extends JPanel
 		}
 	}
 
-	/** Loading state: shown immediately on click while the fetch is in flight. */
 	public void showLoading(int itemId, String fallbackName)
 	{
 		removeAll();
 		inEmptyState = false;
 		inFailedState = false;
 		lastShown = null;
-		// No price data during loading — pass 0 so the header skips the
-		// right-click "queue GE buy" wire-up until the real insights land.
 		add(buildHeader(itemId, fallbackName != null ? fallbackName : "Item " + itemId, false, 0, null, null, null, 0L));
 		add(Box.createVerticalStrut(8));
 		add(centeredLabel("Loading…", ColorScheme.LIGHT_GRAY_COLOR, Fonts.SM));
@@ -353,7 +288,6 @@ public class InsightsPanel extends JPanel
 		repaint();
 	}
 
-	/** Successful response — render the full view. */
 	public void show(ItemInsights ins)
 	{
 		if (ins == null)
@@ -361,10 +295,6 @@ public class InsightsPanel extends JPanel
 			showLoadFailed();
 			return;
 		}
-		// A re-render of the item already on screen (e.g. a section-visibility
-		// toggle) should feel in-place: keep the user's scroll position and the
-		// chart period they picked. A genuinely new item resets both — fresh
-		// items belong at the top, on the default period.
 		boolean sameItem = lastShown != null && lastShown.itemId == ins.itemId;
 		javax.swing.JViewport vp = (javax.swing.JViewport)
 			SwingUtilities.getAncestorOfClass(javax.swing.JViewport.class, this);
@@ -379,12 +309,6 @@ public class InsightsPanel extends JPanel
 		inFailedState = false;
 		lastShown = ins;
 
-		// Always-visible sections (header → live prices → chart → range → volume → alerts).
-		// Free users see only these plus a single upsell card; premium users see
-		// the locked sections inline before Volume.
-		// Buy target for the header's right-click "queue GE buy": prefer the
-		// premium recommended-buy when present, otherwise the low market buy —
-		// matching FlipItemPanel's curated-feed behaviour. Never the sell side.
 		long headerBuyTarget = 0L;
 		if (ins.current != null)
 		{
@@ -395,8 +319,6 @@ public class InsightsPanel extends JPanel
 			ins.volume != null ? Integer.valueOf(ins.volume.daily) : null, headerBuyTarget));
 		add(Box.createVerticalStrut(4));
 
-		// Visible action row — autofill / alert / lock / web — so these aren't
-		// shortcut-only. Sits directly below the item header.
 		add(buildActionRow(ins, headerBuyTarget));
 		add(sectionDivider());
 
@@ -412,7 +334,6 @@ public class InsightsPanel extends JPanel
 			add(sectionDivider());
 		}
 
-		// Range data is served to free users too, so it lives in the open block.
 		if (sectionVisible(O7FlipConfig::itemTabPriceRange))
 		{
 			add(buildRanges(ins));
@@ -425,11 +346,6 @@ public class InsightsPanel extends JPanel
 			add(sectionDivider());
 		}
 
-		// Premium-only sections sit between the open block and Alerts so the
-		// open data flows naturally and the locked block is one cohesive
-		// region, not interleaved with open rows. The newer-schema sections
-		// (indicators / quality / liquidity / risk) render only when the
-		// server actually sent them, so older server builds degrade silently.
 		if (!ins.premiumLocked)
 		{
 			if (sectionVisible(O7FlipConfig::itemTabRecommended))
@@ -475,20 +391,11 @@ public class InsightsPanel extends JPanel
 			add(sectionDivider());
 		}
 
-		// Single consolidated upsell card for free users — replaces the four
-		// per-section "—" placeholders the previous design rendered. One CTA,
-		// not spammy.
 		if (ins.premiumLocked)
 		{
 			add(buildUpsell(ins.upgradeUrl != null && !ins.upgradeUrl.isEmpty() ? ins.upgradeUrl : "https://07flip.com/premium"));
 		}
 
-		// Make every region of the panel respond to shift+click / double-click
-		// → open the item page on 07flip.com. Each section captures its own
-		// mouse events otherwise so a single panel-level listener wouldn't
-		// catch clicks landed on labels deep in the tree. Plugin reference
-		// comes from setRecommended (set on first construction by O7FlipPanel)
-		// — if it's missing, we silently skip the wire-up.
 		if (plugin != null)
 		{
 			ClickRouter.attachToTree(this, plugin, ins.itemId, ins.name);
@@ -497,9 +404,6 @@ public class InsightsPanel extends JPanel
 		revalidate();
 		repaint();
 
-		// Restore the scroll position captured above, once layout has settled.
-		// Clamp so it never overshoots a now-shorter view (e.g. a section was
-		// just hidden).
 		if (savedScroll != null && vp != null)
 		{
 			SwingUtilities.invokeLater(() ->
@@ -511,15 +415,6 @@ public class InsightsPanel extends JPanel
 		}
 	}
 
-	/**
-	 * Fetch failed — a network blip or a server hiccup. Renders a calm retry
-	 * state instead of a bare red error so the tab never looks broken: a short
-	 * explanation, a Retry button for the item that failed (id/name remembered
-	 * from the loading header), and the same Recommended cards as the empty
-	 * state so the user always has somewhere to click next. A flips refresh
-	 * landing after the failure re-renders via {@link #setRecommended} to
-	 * backfill the cards.
-	 */
 	private void showLoadFailed()
 	{
 		removeAll();
@@ -538,7 +433,6 @@ public class InsightsPanel extends JPanel
 		{
 			final int id = currentItemId;
 			final String nm = currentItemName;
-			// Unobtainable item defs are literally named "null" — never show that.
 			boolean hasName = nm != null && !nm.isEmpty() && !"null".equalsIgnoreCase(nm);
 			JButton retry = new JButton("Retry" + (hasName ? " — " + nm : ""));
 			retry.setFont(Fonts.SM_BOLD);
@@ -571,22 +465,11 @@ public class InsightsPanel extends JPanel
 		repaint();
 	}
 
-	/**
-	 * Per-section visibility from the "Item tab" config group. A panel built
-	 * without a config reference shows everything — the toggles are purely
-	 * subtractive.
-	 */
 	private boolean sectionVisible(Predicate<O7FlipConfig> toggle)
 	{
 		return config == null || toggle.test(config);
 	}
 
-	/**
-	 * Re-renders the currently loaded item with the latest section-visibility
-	 * config, so toggling a setting applies immediately without re-clicking
-	 * the item. No-op in the empty / loading / failed states (the in-flight
-	 * fetch will render with the new config anyway).
-	 */
 	public void refreshSectionVisibility()
 	{
 		if (!inEmptyState && !inFailedState && lastShown != null)
@@ -595,17 +478,8 @@ public class InsightsPanel extends JPanel
 		}
 	}
 
-	/**
-	 * Visible per-item action row shown under the header: autofill (queue GE
-	 * buy), price alert, favourite, lock, and open-on-web — so these actions
-	 * aren't shortcut/right-click only. Each is an icon chip with a tooltip;
-	 * actions needing an API key (favourite, alert) or premium rec prices
-	 * (lock) render greyed-out with an explanatory tooltip when unavailable.
-	 */
 	private JPanel buildActionRow(ItemInsights ins, long buyTarget)
 	{
-		// GridLayout spreads the icons evenly across the full row width instead
-		// of clustering them on the left.
 		JPanel row = new JPanel(new java.awt.GridLayout(1, 0, 2, 0));
 		row.setBackground(SECTION_BG);
 		row.setBorder(new EmptyBorder(2, 6, 2, 6));
@@ -616,16 +490,13 @@ public class InsightsPanel extends JPanel
 		final String name = ins.name;
 		final boolean hasKey = plugin != null && plugin.hasApiKeyPublic();
 
-		// Autofill — queue a GE buy at the recommended (or live) buy price.
 		boolean canAutofill = plugin != null && buyTarget > 0;
 		row.add(actionChip("💰", canAutofill
 				? "Autofill — queue a GE buy at the recommended price"
 				: "Autofill unavailable — no buy price for this item",
 			canAutofill, () -> plugin.queueGeBuy(itemId, buyTarget, name)));
 
-		// Favourite lives back on the header star (top-right), not here.
 
-		// Lock — pin the recommended sell price. Needs a key + rec prices.
 		final boolean lockable = hasKey && ins.current != null
 			&& ins.current.recSell != null && ins.current.recSell > 0;
 		final Long recBuy  = ins.current != null ? ins.current.recBuy  : null;
@@ -651,9 +522,6 @@ public class InsightsPanel extends JPanel
 					{
 						plugin.lockPrice(itemId, recBuy, recSell);
 					}
-					// Re-render so the 07Flip recommended prices recolour (amber
-					// when frozen) and the lock icon updates. Same-item re-render
-					// keeps scroll + chart period.
 					if (lastShown != null)
 					{
 						show(lastShown);
@@ -668,14 +536,12 @@ public class InsightsPanel extends JPanel
 		}
 		row.add(lockLabel);
 
-		// Open on 07flip.com.
 		row.add(actionChip("🌐", "Open this item on 07flip.com", true,
 			() -> net.runelite.client.util.LinkBrowser.browse("https://07flip.com/item/" + itemId)));
 
 		return row;
 	}
 
-	/** A stateless icon-button chip with a hover highlight + tooltip. */
 	private JLabel actionChip(String glyph, String tooltip, boolean enabled, Runnable onClick)
 	{
 		JLabel l = newStateChip();
@@ -703,8 +569,6 @@ public class InsightsPanel extends JPanel
 		return l;
 	}
 
-	/** Bare chip styling shared by all action chips — transparent so it blends
-	 *  into the panel, with a highlight only on hover. */
 	private JLabel newStateChip()
 	{
 		JLabel l = new JLabel("", SwingConstants.CENTER);
@@ -733,7 +597,6 @@ public class InsightsPanel extends JPanel
 		return l;
 	}
 
-	/** Paints the lock chip from current freeze state (or greyed when not lockable). */
 	private void paintLock(boolean lockable)
 	{
 		if (lockLabel == null)
@@ -756,13 +619,7 @@ public class InsightsPanel extends JPanel
 			: "Click to lock the recommended sell price.");
 	}
 
-	// ── Sections ────────────────────────────────────────────────────────────
 
-	/**
-	 * Keeps the header cooldown bar ticking each second. When the cooldown
-	 * finishes it stops itself and re-renders so the header reverts to the
-	 * normal "Limit · /day" subtitle.
-	 */
 	private void startHeaderCooldownTimer()
 	{
 		if (headerCooldownTimer == null)
@@ -790,7 +647,6 @@ public class InsightsPanel extends JPanel
 		}
 	}
 
-	/** A 1px hairline between sections — clean separation without a grey gap. */
 	private java.awt.Component sectionDivider()
 	{
 		JPanel d = new JPanel();
@@ -803,8 +659,6 @@ public class InsightsPanel extends JPanel
 
 	private JPanel buildHeader(int itemId, String name, boolean members, int buyLimit, Integer highAlch, Integer lowAlch, Integer dailyVolume, long buyTarget)
 	{
-		// Remember what we're rendering so refreshFavouriteState() can find
-		// the right item when the plugin pings us.
 		this.currentItemId   = itemId;
 		this.currentItemName = name;
 
@@ -820,10 +674,6 @@ public class InsightsPanel extends JPanel
 		nameLabel.setFont(Fonts.BOLD);
 		nameLabel.setForeground(Color.WHITE);
 
-		// Trade-relevant glance: buy limit (position cap per 4h) + daily volume
-		// (liquidity). The old Members / Alch line was low-value for flipping
-		// and overflowed the narrow header. Members / F2P is the fallback when
-		// neither number is known (e.g. the loading state).
 		StringBuilder sub = new StringBuilder();
 		if (buyLimit > 0)
 		{
@@ -851,8 +701,6 @@ public class InsightsPanel extends JPanel
 		text.setBackground(SECTION_BG);
 		text.add(nameLabel);
 		text.add(Box.createVerticalStrut(2));
-		// When the item is on a buy-limit cooldown, the subtitle row becomes the
-		// live cooldown bar instead of "Limit · /day".
 		boolean onCooldown = plugin != null && plugin.buyLimitCooldownMs(itemId) > 0;
 		if (onCooldown)
 		{
@@ -870,7 +718,6 @@ public class InsightsPanel extends JPanel
 			}
 		}
 
-		// ── Favourite star (right edge) ──────────────────────────────────────
 		starLabel = new JLabel();
 		starLabel.setFont(starLabel.getFont().deriveFont(20f));
 		starLabel.setBorder(new EmptyBorder(0, 8, 0, 0));
@@ -890,10 +737,6 @@ public class InsightsPanel extends JPanel
 		panel.add(text,      BorderLayout.CENTER);
 		panel.add(starLabel, BorderLayout.EAST);
 
-		// Right-click the header → queue a GE buy at the low buy-side price,
-		// same gesture as the Flips/search rows. Swing doesn't bubble mouse
-		// events, so the handler is attached to the header panel and each of
-		// its children.
 		if (plugin != null && buyTarget > 0)
 		{
 			MouseAdapter rightClickQueueBuy = new MouseAdapter()
@@ -918,7 +761,6 @@ public class InsightsPanel extends JPanel
 		return panel;
 	}
 
-	/** Reflects current favourite + auth state into the star icon. */
 	private void paintStar()
 	{
 		if (starLabel == null) return;
@@ -950,9 +792,6 @@ public class InsightsPanel extends JPanel
 		if (plugin == null || currentItemId <= 0) return;
 		if (!plugin.hasApiKeyPublic())
 		{
-			// No key — open the config so they can paste one in. We don't
-			// have a dedicated setup flow yet; the plugin config is the
-			// canonical entry point.
 			return;
 		}
 		boolean wasFav = plugin.isFavourite(currentItemId);
@@ -960,7 +799,6 @@ public class InsightsPanel extends JPanel
 			() -> { /* success — UI already updated optimistically */ },
 			() ->
 			{
-				// Server rejected — paint reverted state and let the user know.
 				paintStar();
 				if (starLabel != null)
 				{
@@ -969,10 +807,6 @@ public class InsightsPanel extends JPanel
 			});
 	}
 
-	/**
-	 * Called by O7FlipPanel when the plugin's favourite-id set changes.
-	 * Cheap repaint of just the star — no full insights rebuild.
-	 */
 	public void refreshFavouriteState()
 	{
 		paintStar();
@@ -998,10 +832,6 @@ public class InsightsPanel extends JPanel
 
 	private JPanel build07FlipPrices(ItemInsights ins)
 	{
-		// Premium-only — show called only when ins.premiumLocked is false.
-		// When the price is locked, show the ACTUAL frozen buy/sell pair (the
-		// margin you locked in), in amber — not the live rec relabelled. This
-		// is the same pair the GE auto-fill targets, so the two never disagree.
 		boolean locked = plugin != null && plugin.isPriceLocked(ins.itemId);
 		Long frozenBuy  = locked && plugin != null ? plugin.getFrozenBuy(ins.itemId)  : null;
 		Long frozenSell = locked && plugin != null ? plugin.getFrozenSell(ins.itemId) : null;
@@ -1044,8 +874,6 @@ public class InsightsPanel extends JPanel
 		panel.add(rowText("90d", FlipItemPanel.formatGpCompact(r.low90d) + " — " + FlipItemPanel.formatGpCompact(r.high90d), Color.WHITE));
 		if (r.position90dPct != null)
 		{
-			// Where the current buy price sits in the 90d range — near the low
-			// end (green) is historically cheap, near the high end is expensive.
 			panel.add(rowText("90d position", String.format("%.0f%% of range", r.position90dPct), rangePositionColor(r.position90dPct)));
 		}
 		if (r.drawdownPctFrom90d != null)
@@ -1065,7 +893,6 @@ public class InsightsPanel extends JPanel
 
 	private JPanel buildScore(ItemInsights ins)
 	{
-		// Premium-only — caller gates on ins.premiumLocked.
 		JPanel panel = sectionPanel("07Flip score");
 		ItemInsights.Score s = ins.score;
 		if (s == null)
@@ -1082,11 +909,6 @@ public class InsightsPanel extends JPanel
 		return panel;
 	}
 
-	/**
-	 * Daily-timeframe technicals from the server's precomputed indicator
-	 * table. Every row is individually optional — we render what we got and
-	 * skip the rest, so partial indicator coverage never shows dashes.
-	 */
 	private JPanel buildIndicators(ItemInsights.Indicators ind)
 	{
 		JPanel panel = sectionPanel("Technical indicators");
@@ -1143,7 +965,6 @@ public class InsightsPanel extends JPanel
 		return panel;
 	}
 
-	/** Flip-quality stats: how good this margin actually is across a day. */
 	private JPanel buildQuality(ItemInsights.Quality q)
 	{
 		JPanel panel = sectionPanel("Flip quality");
@@ -1180,7 +1001,6 @@ public class InsightsPanel extends JPanel
 		return panel;
 	}
 
-	/** Buy/sell throughput split and fill-speed proxy. */
 	private JPanel buildLiquidity(ItemInsights.Liquidity l)
 	{
 		JPanel panel = sectionPanel("Liquidity");
@@ -1205,15 +1025,12 @@ public class InsightsPanel extends JPanel
 		}
 		if (l.crossedHours24h != null)
 		{
-			// Hours of the last 24 where the margin inverted (avg buy ≥ avg
-			// sell) — more inverted hours = flakier flip.
 			Color col = l.crossedHours24h == 0 ? PROFIT_COL : (l.crossedHours24h >= 6 ? LOSS_COL : new Color(0xE8A838));
 			panel.add(rowText("Margin inverted", l.crossedHours24h + "h of last 24", col));
 			any = true;
 		}
 		if (l.estHoursToFillLimit != null)
 		{
-			// Volume-throughput proxy, not a queue model — hence the "~".
 			panel.add(rowText("Est. limit fill", "~" + formatHours(l.estHoursToFillLimit), Color.WHITE));
 			any = true;
 		}
@@ -1224,10 +1041,6 @@ public class InsightsPanel extends JPanel
 		return panel;
 	}
 
-	/**
-	 * Bot-dump / unusual-volume flags. dump score is only computed for items
-	 * in the server's warmed candidate set — null renders as a dash, never 0.
-	 */
 	private JPanel buildRisk(ItemInsights.Risk r)
 	{
 		JPanel panel = sectionPanel("Risk");
@@ -1245,7 +1058,6 @@ public class InsightsPanel extends JPanel
 		return panel;
 	}
 
-	/** Adds a signed, colour-coded % change row when the value is present. */
 	private static boolean addPctChangeRow(JPanel panel, String label, Double pct)
 	{
 		if (pct == null)
@@ -1256,7 +1068,6 @@ public class InsightsPanel extends JPanel
 		return true;
 	}
 
-	/** Like {@link #margingColor} but keeps the sign of sub-1% values. */
 	private static Color signColor(double v)
 	{
 		if (v > 0)
@@ -1283,7 +1094,6 @@ public class InsightsPanel extends JPanel
 		return Color.WHITE;
 	}
 
-	/** Near the 90d low (cheap) = green, near the 90d high (expensive) = red. */
 	private static Color rangePositionColor(double positionPct)
 	{
 		if (positionPct <= 25)
@@ -1337,7 +1147,6 @@ public class InsightsPanel extends JPanel
 		return panel;
 	}
 
-	/** One selectable period of the buy/sell chart. */
 	private static class ChartPeriod
 	{
 		final String label;
@@ -1358,7 +1167,6 @@ public class InsightsPanel extends JPanel
 		}
 	}
 
-	/** ISO-8601 → epoch millis, or -1 on null/unparseable (hover timestamp then hidden). */
 	private static long parseIsoToEpochMs(String iso)
 	{
 		if (iso == null || iso.isEmpty())
@@ -1380,19 +1188,8 @@ public class InsightsPanel extends JPanel
 		return (buy != null && buy.length > 0) || (sell != null && sell.length > 0);
 	}
 
-	/** Period chosen as the default when the user hasn't picked one for this item. */
 	private static final String DEFAULT_CHART_PERIOD = "24h";
 
-	/**
-	 * Buy/sell price chart with a 2h / 4h / 24h / 7d / 30d period toggle. Only
-	 * periods whose arrays actually contain data get a chip, so a server that
-	 * doesn't send a given series yet simply omits it — a server sending only
-	 * 24h degrades to the bare 24h chart with no toggle row at all. The shorter
-	 * 2h/4h windows give higher-velocity items the resolution an hourly 24h
-	 * view can't. The default shown is {@value #DEFAULT_CHART_PERIOD} (or the
-	 * first available), and the user's pick is remembered across in-place
-	 * re-renders of the same item via {@link #desiredChartPeriodIdx}.
-	 */
 	private JPanel buildChartSection(ItemInsights ins)
 	{
 		JPanel panel = new JPanel();
@@ -1401,8 +1198,6 @@ public class InsightsPanel extends JPanel
 		panel.setBorder(new EmptyBorder(8, 10, 8, 10));
 		panel.setAlignmentX(Component.LEFT_ALIGNMENT);
 
-		// Bucket interval per period (minutes), used to label the hover timestamp:
-		// 2h/4h = 5-min, 24h = hourly, 7d = 4-hour, 30d = daily.
 		final List<ChartPeriod> periods = new ArrayList<>();
 		if (hasSeries(ins.sparkline2hBuy, ins.sparkline2hSell))
 		{
@@ -1443,7 +1238,6 @@ public class InsightsPanel extends JPanel
 			return panel;
 		}
 
-		// 80 px default height leaves room for the sparkline's X/Y axis labels.
 		final JPanel chartHolder = new JPanel(new BorderLayout());
 		chartHolder.setBackground(SECTION_BG);
 		chartHolder.setAlignmentX(Component.LEFT_ALIGNMENT);
@@ -1460,9 +1254,6 @@ public class InsightsPanel extends JPanel
 				JLabel chip = new JLabel(periods.get(i).label);
 				chip.setFont(Fonts.SM_BOLD);
 				chip.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
-				// The chip owns its click — keep the tree router off it so a
-				// period switch doesn't also schedule an openInsights reload
-				// (which was resetting the user's scroll on every chip press).
 				ClickRouter.markNoRoute(chip);
 				chip.addMouseListener(new MouseAdapter()
 				{
@@ -1480,12 +1271,10 @@ public class InsightsPanel extends JPanel
 		}
 
 		panel.add(chartHolder);
-		// Start on the user's remembered period for this item, else the default.
 		int startIdx = (desiredChartPeriodIdx >= 0 && desiredChartPeriodIdx < periods.size())
 			? desiredChartPeriodIdx : defaultPeriodIndex(periods);
 		selectChartPeriod(periods, chips, startIdx, chartHolder);
 
-		// Tiny inline legend so users know which colour is which without a tooltip.
 		JPanel legend = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 8, 0));
 		legend.setBackground(SECTION_BG);
 		legend.setBorder(new EmptyBorder(4, 0, 0, 0));
@@ -1497,11 +1286,6 @@ public class InsightsPanel extends JPanel
 		return panel;
 	}
 
-	/**
-	 * Index of the period to show by default: the user's configured preference
-	 * if that period has data for this item, else {@value #DEFAULT_CHART_PERIOD},
-	 * else the first available.
-	 */
 	private int defaultPeriodIndex(List<ChartPeriod> periods)
 	{
 		String pref = config != null ? config.defaultChartPeriod().chartLabel() : DEFAULT_CHART_PERIOD;
@@ -1522,7 +1306,6 @@ public class InsightsPanel extends JPanel
 		return 0;
 	}
 
-	/** Swaps the chart to the chosen period, remembers it, and repaints the chip highlight. */
 	private void selectChartPeriod(List<ChartPeriod> periods, List<JLabel> chips, int idx, JPanel chartHolder)
 	{
 		desiredChartPeriodIdx = idx;
@@ -1539,7 +1322,6 @@ public class InsightsPanel extends JPanel
 
 	private static JLabel legendChip(String label, Color colour)
 	{
-		// "■ Buy" — a coloured square glyph, then the label, in one JLabel.
 		JLabel l = new JLabel("■ " + label);
 		l.setFont(Fonts.SM);
 		l.setForeground(colour);
@@ -1638,7 +1420,6 @@ public class InsightsPanel extends JPanel
 		return panel;
 	}
 
-	// ── Row helpers ─────────────────────────────────────────────────────────
 
 	private JPanel sectionPanel(String header)
 	{
@@ -1721,12 +1502,6 @@ public class InsightsPanel extends JPanel
 		return l;
 	}
 
-	/**
-	 * Centred multi-line label using HTML-wrapped text — JLabel handles word
-	 * wrap natively when the body is HTML with a fixed-width div. Keeps the
-	 * empty-state explanation readable in the ~280px sidebar without a
-	 * separate JTextArea / styled component.
-	 */
 	private static JLabel wrappedCenter(String text, Color colour, java.awt.Font font)
 	{
 		String html = "<html><div style='text-align:center;width:240px'>"

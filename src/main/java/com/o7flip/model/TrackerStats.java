@@ -24,21 +24,6 @@
  */
 package com.o7flip.model;
 
-/**
- * Server-authoritative My Trades headline numbers, returned by
- * {@code GET /api/runelite/tracker/stats}. Merges plugin-recorded
- * {@code trade_records} with website-logged {@code tracker_entries},
- * de-duped via {@code flip_trade_links} on the server side.
- *
- * Falls back to {@code null} when the user has no API key, hasn't
- * enabled trade sharing, or the endpoint is unreachable — callers
- * should then compute a local-only result via {@link com.o7flip.util.ProfitCalculator}.
- *
- * Trust split: {@code totalRealisedProfit = verifiedProfit + declaredProfit}.
- * "Verified" means at least one real GE trade is linked to the entry;
- * "declared" means the user closed the entry manually with a target price
- * before any fill landed (Pegasian-boots-style projections).
- */
 public class TrackerStats
 {
 	public long totalRealisedProfit;

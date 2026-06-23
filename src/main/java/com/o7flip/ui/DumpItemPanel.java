@@ -48,21 +48,6 @@ import java.awt.RenderingHints;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 
-/**
- * Renders one row of the Dumps tab against the v3 dumps endpoint.
- *
- * Visual hierarchy:
- * <ul>
- *   <li>Name row + per-item badges ("Verified", "Game Reset") aligned right.</li>
- *   <li>Buy / Max profit-at-limit so flippers see "what's the win if I clear
- *       a full 4h buy limit" without doing the math.</li>
- *   <li>Score + ROI + dump cadence ("every 6h · 20:00 UTC").</li>
- *   <li>Status + last-dump time + 24h volume sparkline.</li>
- * </ul>
- *
- * Unverified rows (confirmed_bot ≠ true) render with muted greys so users
- * learn to trust the verified rows first.
- */
 public class DumpItemPanel extends JPanel
 {
 	private static final Color ODD_BG   = new Color(0x272727);
@@ -73,7 +58,6 @@ public class DumpItemPanel extends JPanel
 	private static final Color CLOCK    = new Color(0xFF981F);
 	private static final Color MUTED    = new Color(0x666666);
 	private static final Color UNVERIFIED_FG = new Color(0xAAAAAA);
-	// v5 tier badges
 	private static final Color CONFIRMED_TIER = new Color(0x00C27A); // emerald
 	private static final Color LIKELY_TIER    = new Color(0xE8A838); // amber
 
@@ -81,24 +65,11 @@ public class DumpItemPanel extends JPanel
 	{
 		Color bg = odd ? ODD_BG : ColorScheme.DARK_GRAY_COLOR;
 		boolean clockAligned = Boolean.TRUE.equals(item.isClockAligned);
-		// v5 tiers: "confirmed" rows have structural automation evidence;
-		// "likely" rows have a strong pattern but no proof (PvM-drop bots,
-		// off-clock peaks). Likely rows render with a slightly muted body
-		// so confirmed instinctively reads as stronger, but they stay
-		// fully actionable.
 		boolean stale = Boolean.TRUE.equals(item.patternStale);
-		// Null tier = "likely" (defensive: matches the renderer's caution
-		// when an older response doesn't include the field).
 		boolean likely = !"confirmed".equalsIgnoreCase(item.tier);
-		// "likely" rows render with a subtly dimmed body (~90% perceptual
-		// brightness) so confirmed rows read as stronger at a glance,
-		// without making likely rows feel disabled.
 		Color bodyFg = stale ? UNVERIFIED_FG
 			: (likely ? new Color(0xDDDDDD) : Color.WHITE);
 
-		// Left-edge 3px tier stripe — conveys tier at a glance without
-		// crowding the name row with a CONFIRMED/LIKELY badge. Replaces the
-		// inline badge plus the prior status row (covered by group header).
 		final Color tierStripe = stale ? MUTED
 			: (likely ? LIKELY_TIER : CONFIRMED_TIER);
 		setLayout(new BorderLayout(6, 0));
@@ -115,7 +86,6 @@ public class DumpItemPanel extends JPanel
 		textPanel.setLayout(new BoxLayout(textPanel, BoxLayout.Y_AXIS));
 		textPanel.setBackground(bg);
 
-		// ── Row 1: Name + badges ─────────────────────────────────────────────
 		JLabel nameLabel = new JLabel(item.name);
 		nameLabel.setFont(Fonts.BOLD);
 		nameLabel.setForeground(bodyFg);
@@ -128,10 +98,6 @@ public class DumpItemPanel extends JPanel
 		nameRow.add(nameLabel);
 		nameRow.add(Box.createHorizontalGlue());
 
-		// Badges in the name row are now opt-in only — tier is conveyed by
-		// the left-edge stripe, and the dump_status grouping already says
-		// "Dumping now" / "Due soon" / "Pattern" via section headers. Only
-		// special-case signals warrant a chip here.
 		if (stale)
 		{
 			nameRow.add(buildBadge("Stale", MUTED,
@@ -140,12 +106,6 @@ public class DumpItemPanel extends JPanel
 		textPanel.add(nameRow);
 		textPanel.add(Box.createVerticalStrut(3));
 
-		// ── Row 2: Buy price ─────────────────────────────────────────────────
-		// Just the buy price — the "+at limit", per-flip profit, ROI and
-		// score columns have all been retired. Score / ROI didn't change
-		// flippers' decisions much (the dump_status grouping covered urgency
-		// and the tier stripe covered confidence). Buy price is what users
-		// actually need to act on.
 		JLabel buyLbl = new JLabel("Buy: " + FlipItemPanel.formatGpCompact(item.buyPrice));
 		buyLbl.setFont(Fonts.SM);
 		buyLbl.setForeground(stale ? UNVERIFIED_FG : new Color(0xFF7070));
@@ -160,9 +120,6 @@ public class DumpItemPanel extends JPanel
 		textPanel.add(buyRow);
 		textPanel.add(Box.createVerticalStrut(3));
 
-		// ── Row 3: last-dumped time · cadence ────────────────────────────────
-		// The two remaining "when" signals. Cadence picks up the clock-aligned
-		// orange tint when the engine flagged it (high-confidence pattern).
 		String lastStr = item.lastDumpHoursAgo != null
 			? formatAgo(item.lastDumpHoursAgo) + " ago"
 			: "—";
@@ -218,9 +175,6 @@ public class DumpItemPanel extends JPanel
 			@Override
 			public void mousePressed(MouseEvent e)
 			{
-				// Right-click anywhere on the row queues a Buy at the instant-
-				// sell price (the cheap side of the dump). Matches the Flips
-				// template — direct action, no menu, single source of truth.
 				if (SwingUtilities.isRightMouseButton(e) && !e.isShiftDown() && plugin != null && item.sellPrice > 0)
 				{
 					plugin.queueGeBuy(item.itemId, item.sellPrice, item.name);
@@ -257,11 +211,6 @@ public class DumpItemPanel extends JPanel
 		return chip;
 	}
 
-	/**
-	 * Builds a compact cadence string. Full "YY:00 UTC" is in the tooltip
-	 * — the row label uses the "@HH" shorthand so the line doesn't get
-	 * truncated at side-panel widths. Returns "" when no period is known.
-	 */
 	private static String buildCadenceText(DumpItem item)
 	{
 		if (item.periodHours == null || item.periodHours <= 0)
@@ -319,11 +268,6 @@ public class DumpItemPanel extends JPanel
 		return String.format("%.1fd", hours / 24.0);
 	}
 
-	/**
-	 * 24-bar inline sparkline — oldest bucket on the left, newest on the
-	 * right. Bars scale to the panel's max value so a quiet item still has
-	 * a usable shape rather than a flat line of nothing.
-	 */
 	private static final class HourlyVolumesSparkline extends JPanel
 	{
 		private static final int WIDTH  = 64;

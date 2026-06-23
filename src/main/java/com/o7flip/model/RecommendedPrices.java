@@ -24,11 +24,6 @@
  */
 package com.o7flip.model;
 
-/**
- * Result of {@code GET /api/runelite/recommended-prices?itemId=…}. All four
- * price fields are non-null together (server returns null for all when the
- * item has fewer than 10 snapshots in the last hour).
- */
 public class RecommendedPrices
 {
 	public int itemId;

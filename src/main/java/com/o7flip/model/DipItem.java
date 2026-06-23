@@ -24,13 +24,6 @@
  */
 package com.o7flip.model;
 
-/**
- * One row from /api/runelite/dips. The endpoint mixes two row shapes
- * (distinguished by the {@code type} field): {@code "24h_dip"} rows
- * carry {@code avg24hBuy} + {@code dipPct}, {@code "atl"} rows carry
- * {@code atlFloor} + {@code buyVsAtlPct}. The other type's fields are
- * null.
- */
 public class DipItem
 {
 	public int     itemId;
@@ -42,23 +35,15 @@ public class DipItem
 	public boolean members;
 	public String  lastUpdated;
 
-	/** "24h_dip" or "atl". */
 	public String  type;
 
-	// 24h_dip fields (null when type == "atl")
 	public Long    avg24hBuy;
 	public Double  dipPct;
 
-	// Window-specific dip percentages — server now ships all three on every
-	// dip row, so the UI can show "↓ X% in 7d" without re-fetching when the
-	// user switches windows. Nullable when the data window doesn't have
-	// enough history (server returns null below the minimum sample size).
 	public Double  dipPct1d;
 	public Double  dipPct7d;
 	public Double  dipPct30d;
 
-	// atl fields (null when type == "24h_dip"). The atl_floor now uses a
-	// 5-year lookback (was 1-year) — purely additive, semantics unchanged.
 	public Long    atlFloor;
 	public Double  buyVsAtlPct;
 }

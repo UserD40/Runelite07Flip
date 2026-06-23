@@ -56,12 +56,6 @@ import javax.swing.TransferHandler;
 import javax.swing.border.EmptyBorder;
 import net.runelite.client.ui.ColorScheme;
 
-/**
- * Favourites reorder / remove popup. Shows the user's favourites as a single
- * draggable list — drag a row (or use ▲ / ▼) to reposition it, and Remove to
- * drop it from favourites. On Save the new order (and the implied removals)
- * are handed back to the panel.
- */
 public class FavouritesReorderDialog extends JDialog
 {
 	private static final Color ORANGE = new Color(0xFF981F);
@@ -71,7 +65,6 @@ public class FavouritesReorderDialog extends JDialog
 	private static final DataFlavor ENTRY_FLAVOR =
 		new DataFlavor(Entry.class, "FavouritesReorderDialog/entry");
 
-	/** One favourite row — renders its name, carries its item id. */
 	private static final class Entry
 	{
 		final int itemId;
@@ -90,11 +83,6 @@ public class FavouritesReorderDialog extends JDialog
 		}
 	}
 
-	/**
-	 * @param favourites current favourites in display order
-	 * @param onSave     receives the kept item ids in their new order; the
-	 *                   panel diffs this against the originals to find removals
-	 */
 	public static void show(Component owner, List<FlipItem> favourites, Consumer<List<Integer>> onSave)
 	{
 		java.awt.Window parent = owner == null ? null : javax.swing.SwingUtilities.getWindowAncestor(owner);
@@ -136,7 +124,6 @@ public class FavouritesReorderDialog extends JDialog
 		scroll.setPreferredSize(new Dimension(220, 280));
 		scroll.setBorder(BorderFactory.createLineBorder(BG_ALT));
 
-		// ▲ ▼ Remove column.
 		JButton up     = arrowButton("▲");
 		JButton down   = arrowButton("▼");
 		JButton remove = arrowButton("Remove");
@@ -259,7 +246,6 @@ public class FavouritesReorderDialog extends JDialog
 		return b;
 	}
 
-	/** Single-list drag-to-reorder. */
 	private static final class ReorderHandler extends TransferHandler
 	{
 		private final DefaultListModel<Entry> model;

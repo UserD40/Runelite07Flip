@@ -49,16 +49,6 @@ import net.runelite.client.game.ItemManager;
 import net.runelite.client.ui.ColorScheme;
 import net.runelite.client.util.LinkBrowser;
 
-/**
- * Pop-up showing full per-item context: current buy/sell, recommended
- * buy/sell + profit, GE tax, 07Flip Score, ROI, and a one-click web link.
- *
- * Recommended prices are pulled from the plugin's per-item cache; if the
- * cache is cold, the dialog opens with those rows blank and a small
- * "fetching…" hint, then fills in once {@link O7FlipPlugin#getRecommendedPrices(int)}
- * resolves on the executor thread (the dialog polls the cache every 500 ms
- * for 5 seconds before giving up).
- */
 public class ItemDetailDialog extends JDialog
 {
 	private static final Color BG       = ColorScheme.DARKER_GRAY_COLOR;
@@ -92,7 +82,6 @@ public class ItemDetailDialog extends JDialog
 		root.setBackground(BG);
 		root.setBorder(new EmptyBorder(10, 12, 10, 12));
 
-		// Header row: icon + name + score chip
 		JPanel header = new JPanel(new BorderLayout(8, 0));
 		header.setBackground(BG);
 		header.setBorder(new EmptyBorder(0, 0, 8, 0));
@@ -117,7 +106,6 @@ public class ItemDetailDialog extends JDialog
 
 		root.add(header, BorderLayout.NORTH);
 
-		// Body
 		JPanel body = new JPanel();
 		body.setLayout(new BoxLayout(body, BoxLayout.Y_AXIS));
 		body.setBackground(BG);
@@ -146,7 +134,6 @@ public class ItemDetailDialog extends JDialog
 
 		root.add(body, BorderLayout.CENTER);
 
-		// Footer
 		JButton webBtn   = pillButton("View on 07flip.com");
 		webBtn.setBackground(ORANGE);
 		webBtn.setForeground(Color.BLACK);
@@ -167,7 +154,6 @@ public class ItemDetailDialog extends JDialog
 		setSize(new Dimension(Math.max(300, getWidth()), getHeight()));
 		setResizable(false);
 
-		// Populate recommended-price rows from cache (or kick off a fetch + poll).
 		populateRec(plugin.getRecommendedPrices(flip.itemId), flip);
 		pollTimer = new Timer(500, ev ->
 		{
@@ -181,7 +167,6 @@ public class ItemDetailDialog extends JDialog
 		pollTimer.setRepeats(true);
 		pollTimer.setInitialDelay(500);
 		pollTimer.start();
-		// Stop polling after 5s regardless.
 		Timer stopTimer = new Timer(5000, ev -> pollTimer.stop());
 		stopTimer.setRepeats(false);
 		stopTimer.start();
@@ -211,8 +196,6 @@ public class ItemDetailDialog extends JDialog
 			taxValue.setForeground(SUBTLE);
 			sampleValue.setText("—");
 			sampleValue.setForeground(SUBTLE);
-			// If FlipItem already carries rec_* values from the bundled response,
-			// surface those as a partial fallback.
 			if (flip.recBuyPrice != null && flip.recSellPrice != null)
 			{
 				recBuyValue.setText(FlipItemPanel.formatGp(flip.recBuyPrice) + " gp");

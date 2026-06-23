@@ -26,7 +26,6 @@ package com.o7flip.model;
 
 import java.util.List;
 
-/** One row from /api/runelite/high-alch. */
 public class HighAlchItem
 {
 	public int     itemId;
@@ -40,7 +39,6 @@ public class HighAlchItem
 	public int     dailyVolume;
 	public String  lastUpdated;
 
-	/** Container that ships rune-price context alongside the items. */
 	public static class Response
 	{
 		public long   natureRunePrice;

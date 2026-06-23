@@ -43,15 +43,6 @@ import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.RenderingHints;
 
-/**
- * One row for a live GE offer in the Active sort. Shows item icon, name,
- * direction (Buy/Sell), price, a coloured progress bar based on quantity
- * filled, and the qty completed / qty total.
- *
- * Consumes a pre-resolved {@link ActiveOfferSnapshot} so we never touch the
- * client thread from inside the EDT — name resolution happens upstream in
- * the plugin's GE-state sync code.
- */
 public class ActiveOfferRow extends JPanel
 {
 	private static final Color ODD_BG    = new Color(0x272727);
@@ -84,9 +75,6 @@ public class ActiveOfferRow extends JPanel
 		typeLabel.setForeground(sideCol);
 		typeLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
 
-		// Bar turns green once the offer is fully filled, matching the qty
-		// counter and the completed-trade row — a finished buy reads as "done",
-		// not as an in-progress blue.
 		boolean fullyFilled = offer.totalQuantity > 0 && offer.quantitySold >= offer.totalQuantity;
 		Color barCol = fullyFilled ? SELL_COL : sideCol;
 
@@ -96,11 +84,6 @@ public class ActiveOfferRow extends JPanel
 		JLabel qtyLabel = new JLabel(offer.quantitySold + " / " + offer.totalQuantity, SwingConstants.RIGHT);
 		qtyLabel.setFont(Fonts.SM_BOLD);
 		qtyLabel.setForeground(fullyFilled ? SELL_COL : Color.LIGHT_GRAY);
-		// Reserve the width of the FULLY-FILLED counter ("total / total") so the
-		// bar keeps a constant width as the sold count gains digits while the
-		// offer fills (e.g. 5 → 570 → 2000), instead of shrinking. Only as wide
-		// as this row's quantity actually needs — no global padding that would
-		// crowd the item name.
 		String fullCounter = offer.totalQuantity + " / " + offer.totalQuantity;
 		int qtyW = qtyLabel.getFontMetrics(Fonts.SM_BOLD).stringWidth(fullCounter) + 2;
 		qtyLabel.setPreferredSize(new Dimension(qtyW, qtyLabel.getPreferredSize().height));
@@ -124,12 +107,6 @@ public class ActiveOfferRow extends JPanel
 		setMaximumSize(new Dimension(Integer.MAX_VALUE, getPreferredSize().height));
 	}
 
-	/**
-	 * Tiny progress bar — coloured fill on a grey track, no label inside
-	 * (the qty / qty count sits to the right of the row instead). Fully-
-	 * filled offers get a brighter green tint so a complete order is
-	 * obvious without reading the numbers.
-	 */
 	private static class ProgressBar extends JPanel
 	{
 		private static final int HEIGHT = 6;

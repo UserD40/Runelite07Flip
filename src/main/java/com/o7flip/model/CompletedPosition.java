@@ -24,15 +24,6 @@
  */
 package com.o7flip.model;
 
-/**
- * A finished Optimiser position — one buy→sell cycle that reached CLOSED.
- * Appended to a plugin-local history when a slot closes (there is no shared
- * server store for this yet, so it lives in plugin config as JSON).
- *
- * <p>Profit is realised, after-tax: {@code sellGp - tax(sellGp) - buyGp}.
- * {@link #fillHours} is the wall-clock span from the first buy to the last
- * sell (null when fewer than two trades carried timestamps).</p>
- */
 public class CompletedPosition
 {
 	public int     itemId;
@@ -45,8 +36,6 @@ public class CompletedPosition
 	public Double  fillHours;   // (maxTradeTime − minTradeTime) / 3_600_000; null if < 2 trades
 	public String  closedAt;    // ISO timestamp of the last sell
 
-	/** Identity for de-dup: item + last-sell time. Two closes of the same item
-	 *  at the same instant are the same record (e.g. replayed from a sync). */
 	public String dedupeKey()
 	{
 		return itemId + "@" + (closedAt == null ? "" : closedAt);

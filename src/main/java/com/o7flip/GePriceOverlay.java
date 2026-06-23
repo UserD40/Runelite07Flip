@@ -46,14 +46,6 @@ import java.awt.image.BufferedImage;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
-/**
- * Movable overlay that surfaces 07Flip's recommended buy and sell prices for
- * the item currently open in the GE setup screen. Always shows two rows when
- * data is available: Buy (the lower price you place a buy offer at) and Sell
- * (the higher price you place a sell offer at). Right-click → menu entry
- * fills the in-game custom price input if open, or arms it for the next time
- * "Enter price" is clicked.
- */
 public class GePriceOverlay extends Overlay
 {
 	private static final Color HEADER     = new Color(0xFFD700);
@@ -61,7 +53,6 @@ public class GePriceOverlay extends Overlay
 	private static final Color SELL_GREEN = new Color(0x00C27A);
 	private static final Color INFO_GRAY  = new Color(0xC0C0C0);
 
-	/** Used to identify which overlay raised an OverlayMenuClicked event. */
 	static final String TARGET = "07Flip price";
 
 	private final Client client;
@@ -69,15 +60,8 @@ public class GePriceOverlay extends Overlay
 	private final O7FlipConfig config;
 	private final PanelComponent panel = new PanelComponent();
 
-	/** Maps menu entry option text to the price it represents. Rebuilt every render. */
 	private final Map<String, Long> menuPrices = new LinkedHashMap<>();
 
-	/**
-	 * Most recently rendered mini-chart, keyed by the data it was built from
-	 * so render() can reuse the BufferedImage across frames instead of
-	 * re-rasterising. Overlay render() runs every frame — without this the
-	 * chart would burn ~1ms each tick painting the same pixels.
-	 */
 	private int cachedChartItemId = -1;
 	private int cachedChartDataHash = 0;
 	private BufferedImage cachedChartImage = null;
@@ -98,7 +82,6 @@ public class GePriceOverlay extends Overlay
 		setResettable(true);
 	}
 
-	/** Returns the price associated with a clicked overlay menu option, or -1 if unknown. */
 	long priceForMenuOption(String option)
 	{
 		Long p = menuPrices.get(option);
@@ -113,10 +96,6 @@ public class GePriceOverlay extends Overlay
 			return null;
 		}
 
-		// 07Flip recommended prices are a premium feature, so the whole price
-		// overlay is hidden for non-premium users. The panel right-click still
-		// auto-fills the live buy price; this overlay (rec prices, score, chart)
-		// is premium-only.
 		if (plugin.panel == null || !plugin.panel.isPremium())
 		{
 			return null;
@@ -138,11 +117,6 @@ public class GePriceOverlay extends Overlay
 		String displayName = data != null ? data.name : null;
 		boolean isPremium = plugin.panel != null && plugin.panel.isPremium();
 
-		// Buy/Sell from the SAME /v2/item source the Item panel and the GE
-		// auto-fill use, so the overlay never shows a different "recommended"
-		// number than what gets typed. Premium → 07Flip rec; free → live market
-		// (rec is a paid feature). Falls back to the live market prices already
-		// on hand from a tracked list until /v2/item is cached.
 		Long buyPrice  = null;
 		Long sellPrice = null;
 		com.o7flip.model.ItemInsights ins = plugin.getOverlayInsights(currentItemId);
@@ -172,12 +146,6 @@ public class GePriceOverlay extends Overlay
 			sellPrice = firstNonNull(data.flipSellPrice, data.dumpSellPrice);
 		}
 
-		// Frozen sell pins 07Flip's rec_sell at buy time so the projected margin
-		// survives a market DROP — but it acts only as a FLOOR. If the live
-		// market has risen above the lock, show the higher live price instead so
-		// the user doesn't leave gp on the table (matches the sell-box auto-fill,
-		// which uses max(frozen, live)). Premium-only: the freeze is a paid
-		// feature, so free users always see the live market sell price.
 		Long frozenSell = isPremium ? plugin.getFrozenSell(currentItemId) : null;
 		Long liveSell   = sellPrice;
 		boolean sellIsFrozen = false;
@@ -185,8 +153,6 @@ public class GePriceOverlay extends Overlay
 		{
 			if (liveSell != null && liveSell > frozenSell)
 			{
-				// Market rose above the lock — take the higher live price and
-				// drop the "locked" framing (we're intentionally above the lock).
 				sellPrice = liveSell;
 			}
 			else
@@ -201,10 +167,6 @@ public class GePriceOverlay extends Overlay
 			return null;
 		}
 
-		// Refresh menu entries — at most one Buy and one Sell entry. When auto-
-		// fill is disabled the overlay stays purely informational: we still show
-		// the Buy/Sell price rows but add no "Set price" menu options, since the
-		// fill they'd trigger is a no-op (autoFillPriceInput early-returns).
 		boolean allowFill = config.autoFillGePrice();
 		menuPrices.clear();
 		getMenuEntries().clear();
@@ -212,11 +174,6 @@ public class GePriceOverlay extends Overlay
 		panel.getChildren().clear();
 		panel.setPreferredSize(new Dimension(180, 0));
 
-		// Only show the title when we have a resolved item name. Skipping the
-		// "07Flip" fallback keeps the overlay one row shorter when the item
-		// isn't in any tracked list and the user hasn't loaded its insights
-		// yet — the GE setup screen below already labels the item, so the
-		// title is redundant in that state.
 		if (displayName != null)
 		{
 			panel.getChildren().add(TitleComponent.builder()
@@ -260,11 +217,6 @@ public class GePriceOverlay extends Overlay
 				.rightColor(sellIsFrozen ? HEADER : INFO_GRAY)
 				.build());
 
-			// When the sell price is the locked-from-buy price, surface the
-			// reasoning + the per-item margin. The margin reconciles with the
-			// two rows shown above it: (locked sell) − (recommended buy) − GE
-			// tax, so the number is self-consistent with what's on screen rather
-			// than diverging against a blended open-position cost basis.
 			if (sellIsFrozen)
 			{
 				panel.getChildren().add(LineComponent.builder()
@@ -275,10 +227,6 @@ public class GePriceOverlay extends Overlay
 
 				if (buyPrice != null && buyPrice > 0)
 				{
-					// After-tax margin: subtract the GE sell tax (2%, capped at
-					// 5M/item, exempt under 100 gp) so the figure reflects what
-					// actually lands in the coffer, not the gross spread. Without
-					// this the overlay overstated the per-item profit by the tax.
 					long sellTax = com.o7flip.util.ProfitCalculator.geTaxFor(currentItemId, sellPrice, 1);
 					long marginPerItem = sellPrice - buyPrice - sellTax;
 					String sign = marginPerItem >= 0 ? "+" : "";
@@ -292,10 +240,6 @@ public class GePriceOverlay extends Overlay
 			}
 		}
 
-		// Below the prices: pull in cached item insights — score, hourly
-		// volume, and a compact 24h chart. Fetched lazily by the plugin and
-		// served from cache on subsequent frames; missing data simply omits
-		// the row(s) so the overlay degrades gracefully.
 		com.o7flip.model.ItemInsights insights = plugin.getOverlayInsights(currentItemId);
 		appendInsightsRows(insights, currentItemId);
 		appendInsightsChart(insights, currentItemId);
@@ -303,17 +247,8 @@ public class GePriceOverlay extends Overlay
 		return panel.render(graphics);
 	}
 
-	/**
-	 * Adds score + hourly volume rows when the insights data carries them.
-	 * Skipped entirely when both fields are null so the overlay doesn't grow
-	 * a "Score —" placeholder for items the server has no signal on.
-	 */
 	private void appendInsightsRows(com.o7flip.model.ItemInsights insights, int itemId)
 	{
-		// Score: prefer the same flip07Score the Flips panel displays — that's
-		// the merchant score (0-100). ItemInsights.score.confidence is a
-		// different metric from /v2/item/{id} so using it here would create
-		// a visible inconsistency between the panel and the overlay.
 		Integer score = lookupFlip07Score(itemId);
 
 		int hourlyVol = insights != null && insights.volume != null ? insights.volume.hourly : 0;
@@ -358,12 +293,6 @@ public class GePriceOverlay extends Overlay
 		}
 	}
 
-	/**
-	 * Looks up the 07Flip merchant score for an item from the currently-loaded
-	 * Flips list. Returns null when the item isn't a tracked top flip — the
-	 * overlay then omits the Score row entirely rather than fall back to a
-	 * different metric that would disagree with what the Flips panel shows.
-	 */
 	private Integer lookupFlip07Score(int itemId)
 	{
 		for (com.o7flip.model.FlipItem f : plugin.lastFlips)
@@ -376,13 +305,6 @@ public class GePriceOverlay extends Overlay
 		return null;
 	}
 
-	/**
-	 * Renders the 24h buy/sell sparkline as an {@link ImageComponent} below
-	 * the data rows. Image is cached between frames keyed by item + a hash
-	 * of the data arrays so we only re-rasterise when the cached series
-	 * actually changes (the chart paints sub-millisecond, but every saved
-	 * paint multiplied by 60fps adds up while the overlay is on screen).
-	 */
 	private void appendInsightsChart(com.o7flip.model.ItemInsights insights, int itemId)
 	{
 		if (insights == null || !config.showGeOverlayChart())
@@ -405,12 +327,6 @@ public class GePriceOverlay extends Overlay
 		panel.getChildren().add(new ImageComponent(cachedChartImage));
 	}
 
-	/**
-	 * Resolves the item ID currently shown on the GE setup screen.
-	 * Tries TRADINGPOST_SEARCH first (set when the user picks an item from search),
-	 * then falls back to scanning the setup widget's item icon child (covers the
-	 * drag-from-inventory-to-sell-slot path where the search varplayer is not set).
-	 */
 	private int resolveCurrentItemId(Widget setup)
 	{
 		int searchItemId = client.getVarpValue(VarPlayerID.TRADINGPOST_SEARCH);

@@ -56,15 +56,6 @@ import javax.swing.TransferHandler;
 import javax.swing.border.EmptyBorder;
 import net.runelite.client.ui.ColorScheme;
 
-/**
- * Customise-top-row picker. Two lists: "Top Row" (max 4) on the left, "In
- * Other" on the right. Items can be moved between lists with the &lt;/&gt;
- * buttons, reordered within Top Row with ▲ / ▼, and (where Swing's drag
- * support cooperates) dragged between lists with the mouse.
- *
- * The bottom-row tabs (Flips · My Trades · Item · Other) aren't shown
- * here — they're fixed and out of scope for this picker.
- */
 public class TabOrderDialog extends JDialog
 {
 	private static final Color ORANGE = new Color(0xFF981F);
@@ -72,16 +63,9 @@ public class TabOrderDialog extends JDialog
 	private static final Color BG_ALT = ColorScheme.DARKER_GRAY_COLOR;
 	private static final int   MAX_TOP = 4;
 
-	/** Marker DataFlavor for inter-list drags so we only accept our own payloads. */
 	private static final DataFlavor STRING_LIST_FLAVOR =
 		new DataFlavor(String.class, "TabOrderDialog/list-item");
 
-	/**
-	 * @param currentTop  the user's current top-row selection (≤ 4 items)
-	 * @param pool        all candidates that may live in either list
-	 * @param defaultTop  what "Reset" restores
-	 * @param onSave      receives the new top-row selection in display order
-	 */
 	public static void show(Component owner, List<String> currentTop, List<String> pool,
 		List<String> defaultTop, Consumer<List<String>> onSave)
 	{
@@ -107,11 +91,6 @@ public class TabOrderDialog extends JDialog
 		JList<String> topList = buildList(topModel);
 		JList<String> otherList = buildList(otherModel);
 
-		// Drag-and-drop between lists. The reorder-within behaviour is built
-		// into Swing's MOVE action when we wire a TransferHandler that knows
-		// how to accept the dragged item; cross-list drops use the same code
-		// path because each list's handler removes the dragged item from its
-		// source model and inserts into the target.
 		topList.setTransferHandler(new TabTransferHandler(topModel, otherModel, true));
 		otherList.setTransferHandler(new TabTransferHandler(otherModel, topModel, false));
 		topList.setDragEnabled(true);
@@ -140,7 +119,6 @@ public class TabOrderDialog extends JDialog
 		otherCol.add(otherHeader, BorderLayout.NORTH);
 		otherCol.add(otherScroll, BorderLayout.CENTER);
 
-		// ── Middle button column: ◀ ▶ ▲ ▼ ───────────────────────────────────
 		JButton toTop    = arrowButton("◀");
 		JButton toOther  = arrowButton("▶");
 		JButton moveUp   = arrowButton("▲");
@@ -201,8 +179,6 @@ public class TabOrderDialog extends JDialog
 		{
 			if (topModel.getSize() > MAX_TOP)
 			{
-				// Defensive: shouldn't happen because we cap moves, but trim
-				// any overflow before persisting so the panel layout is sane.
 				while (topModel.getSize() > MAX_TOP) topModel.remove(topModel.getSize() - 1);
 			}
 			List<String> result = new ArrayList<>(topModel.getSize());
@@ -258,8 +234,6 @@ public class TabOrderDialog extends JDialog
 	{
 		int i = srcList.getSelectedIndex();
 		if (i < 0) return;
-		// Cap the top row at MAX_TOP — extra moves silently no-op so the user
-		// can't end up with a 5-item top row.
 		if (intoTop && dstModel.getSize() >= MAX_TOP) return;
 		String item = srcModel.remove(i);
 		dstModel.addElement(item);
@@ -303,12 +277,6 @@ public class TabOrderDialog extends JDialog
 		return b;
 	}
 
-	/**
-	 * TransferHandler that supports drag-and-drop reorder within a single
-	 * list AND drag between two lists. Each list owns one handler instance;
-	 * the {@code source} is its own model, and {@code peer} is the other
-	 * list's model. The handler enforces the top-row 4-item cap.
-	 */
 	private static final class TabTransferHandler extends TransferHandler
 	{
 		private final DefaultListModel<String> source;
@@ -353,8 +321,6 @@ public class TabOrderDialog extends JDialog
 		public boolean canImport(TransferSupport support)
 		{
 			if (!support.isDataFlavorSupported(STRING_LIST_FLAVOR)) return false;
-			// Enforce the top-row cap: refuse cross-list drops that would
-			// push the top row to 5+ entries.
 			if (sourceIsTop) return true; // reordering within top is always fine
 			if (source.getSize() >= MAX_TOP) return false;
 			return true;
@@ -370,8 +336,6 @@ public class TabOrderDialog extends JDialog
 				JList.DropLocation dl = (JList.DropLocation) support.getDropLocation();
 				int dropIndex = dl.getIndex();
 
-				// Reorder within the same list — figure this out by checking
-				// whether the dragged item is already in our model.
 				int existingIdx = source.indexOf(item);
 				if (existingIdx >= 0)
 				{
@@ -383,7 +347,6 @@ public class TabOrderDialog extends JDialog
 					return true;
 				}
 
-				// Cross-list drop — remove from peer, insert into us.
 				int peerIdx = peer.indexOf(item);
 				if (peerIdx < 0) return false;
 				peer.remove(peerIdx);

@@ -26,12 +26,6 @@ package com.o7flip.model;
 
 import java.util.List;
 
-/**
- * Lifecycle state of a {@link LiveSlot} derived from cumulative
- * {@code buys[]} / {@code sells[]} quantities. The website re-derives this
- * after every fill; the wire-format value is the snapshot at last save —
- * useful for fast UI display, but the buys/sells arrays are authoritative.
- */
 public enum SlotState
 {
 	PENDING("pending"),
@@ -60,11 +54,6 @@ public enum SlotState
 		}
 	}
 
-	/**
-	 * Re-derives state from the cumulative fill totals. Mirrors the website's
-	 * {@code deriveState()} so a session reconstructed plugin-side carries
-	 * the same status as a session saved on the web.
-	 */
 	public static SlotState derive(int targetQty, List<SlotFill> buys, List<SlotFill> sells)
 	{
 		int bought = sum(buys);

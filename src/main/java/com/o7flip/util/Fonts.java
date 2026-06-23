@@ -26,11 +26,6 @@ package com.o7flip.util;
 
 import java.awt.Font;
 
-/**
- * Shared font constants. Dialog maps to the OS system sans-serif font
- * (Segoe UI on Windows), which is anti-aliased and much more readable
- * than the RuneScape bitmap pixel fonts.
- */
 public final class Fonts
 {
 	public static final Font TITLE   = new Font("Dialog", Font.BOLD,  14);

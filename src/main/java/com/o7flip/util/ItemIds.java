@@ -27,31 +27,13 @@ package com.o7flip.util;
 import java.util.HashMap;
 import java.util.Map;
 
-/**
- * Fallback item ID mappings for sections whose API endpoints do not yet
- * return an item_id field. When the API is updated to return item_id these
- * lookups become unused and can be removed.
- *
- * Potion IDs sourced from the OSRS Wiki live mapping API (all 337 dose items).
- * Keys are the base item name in lowercase, exactly matching the OSRS Wiki name
- * without dose notation (e.g. "prayer potion", not "prayer potion(4)").
- */
 public final class ItemIds
 {
-	// Potion base-name (lowercase, no dose) → int[4] {1-dose, 2-dose, 3-dose, 4-dose} item IDs.
-	// Keys are the exact OSRS Wiki base names in lowercase.
-	// forPotion() tries exact match first, then a startsWith fallback (longest key wins)
-	// so server names with a trailing " potion" or similar still resolve correctly.
 	private static final Map<String, int[]> POTIONS = new HashMap<>();
 
 	static
 	{
-		// All values: {1-dose, 2-dose, 3-dose, 4-dose}
-		// Keys are exact OSRS Wiki base names (lowercase), verified against the
-		// live Wiki mapping API.  Note: classic RS2-era potions have non-sequential
-		// IDs — the 4-dose was added later at a completely different ID range.
 
-		// ── Basic attack/str/def ─────────────────────────────────────────────
 		POTIONS.put("attack potion",           new int[]{125,   123,   121,   2428});
 		POTIONS.put("strength potion",         new int[]{119,   117,   115,    113});
 		POTIONS.put("defence potion",          new int[]{137,   135,   133,   2432});
@@ -60,25 +42,20 @@ public final class ItemIds
 		POTIONS.put("fishing potion",          new int[]{155,   153,   151,   2438});
 		POTIONS.put("combat potion",           new int[]{9745,  9743,  9741,  9739});
 
-		// ── Super attack/str/def/combat ──────────────────────────────────────
-		// Wiki names have no "potion" suffix for these
 		POTIONS.put("super attack",            new int[]{149,   147,   145,   2436});
 		POTIONS.put("super strength",          new int[]{161,   159,   157,   2440});
 		POTIONS.put("super defence",           new int[]{167,   165,   163,   2442});
 		POTIONS.put("super combat potion",     new int[]{12701, 12699, 12697, 12695});
 
-		// ── Ranging / magic boosters ─────────────────────────────────────────
 		POTIONS.put("bastion potion",          new int[]{22470, 22467, 22464, 22461});
 		POTIONS.put("battlemage potion",       new int[]{22458, 22455, 22452, 22449});
 
-		// ── Restore / prayer ─────────────────────────────────────────────────
 		POTIONS.put("restore potion",          new int[]{131,   129,   127,   2430});
 		POTIONS.put("prayer potion",           new int[]{143,   141,   139,   2434});
 		POTIONS.put("super restore",           new int[]{3030,  3028,  3026,  3024});
 		POTIONS.put("sanfew serum",            new int[]{10931, 10929, 10927, 10925});
 		POTIONS.put("prayer regeneration potion", new int[]{30134, 30131, 30128, 30125});
 
-		// ── Brews ────────────────────────────────────────────────────────────
 		POTIONS.put("saradomin brew",          new int[]{6691,  6689,  6687,  6685});
 		POTIONS.put("zamorak brew",            new int[]{193,   191,   189,   2450});
 		POTIONS.put("ancient brew",            new int[]{26346, 26344, 26342, 26340});
@@ -86,7 +63,6 @@ public final class ItemIds
 		POTIONS.put("forgotten brew",          new int[]{27638, 27635, 27632, 27629});
 		POTIONS.put("guthix balance",          new int[]{7666,  7664,  7662,  7660});
 
-		// ── Energy / stamina / agility ───────────────────────────────────────
 		POTIONS.put("energy potion",           new int[]{3014,  3012,  3010,  3008});
 		POTIONS.put("super energy",            new int[]{3022,  3020,  3018,  3016});
 		POTIONS.put("agility potion",          new int[]{3038,  3036,  3034,  3032});
@@ -94,14 +70,11 @@ public final class ItemIds
 		POTIONS.put("extended stamina",        new int[]{31647, 31644, 31641, 31638});
 		POTIONS.put("extreme energy potion",   new int[]{31623, 31620, 31617, 31614});
 
-		// ── Antifire ─────────────────────────────────────────────────────────
 		POTIONS.put("antifire potion",         new int[]{2458,  2456,  2454,  2452});
 		POTIONS.put("extended antifire",       new int[]{11957, 11955, 11953, 11951});
-		// Wiki name is "Super antifire potion" (with "potion")
 		POTIONS.put("super antifire potion",   new int[]{21987, 21984, 21981, 21978});
 		POTIONS.put("extended super antifire", new int[]{22218, 22215, 22212, 22209});
 
-		// ── Antipoison / antivenom ───────────────────────────────────────────
 		POTIONS.put("antipoison",              new int[]{179,   177,   175,   2446});
 		POTIONS.put("superantipoison",         new int[]{185,   183,   181,   2448});
 		POTIONS.put("antidote+",               new int[]{5949,  5947,  5945,  5943});
@@ -110,8 +83,6 @@ public final class ItemIds
 		POTIONS.put("anti-venom+",             new int[]{12919, 12917, 12915, 12913});
 		POTIONS.put("extended anti-venom+",    new int[]{29833, 29830, 29827, 29824});
 
-		// ── Divine variants ──────────────────────────────────────────────────
-		// Wiki names: "Divine super attack", "Divine bastion potion", etc.
 		POTIONS.put("divine super attack",     new int[]{23706, 23703, 23700, 23697});
 		POTIONS.put("divine super strength",   new int[]{23718, 23715, 23712, 23709});
 		POTIONS.put("divine super defence",    new int[]{23730, 23727, 23724, 23721});
@@ -121,12 +92,10 @@ public final class ItemIds
 		POTIONS.put("divine bastion potion",   new int[]{24644, 24641, 24638, 24635});
 		POTIONS.put("divine battlemage potion",new int[]{24632, 24629, 24626, 24623});
 
-		// ── Hunting / fishing ────────────────────────────────────────────────
 		POTIONS.put("hunter potion",           new int[]{10004, 10002, 10000, 9998});
 		POTIONS.put("super hunter potion",     new int[]{31635, 31632, 31629, 31626});
 		POTIONS.put("super fishing potion",    new int[]{31611, 31608, 31605, 31602});
 
-		// ── Other tradeable potions ──────────────────────────────────────────
 		POTIONS.put("goading potion",          new int[]{30146, 30143, 30140, 30137});
 		POTIONS.put("menaphite remedy",        new int[]{27211, 27208, 27205, 27202});
 		POTIONS.put("relicym's balm",          new int[]{4848,  4846,  4844,  4842});
@@ -136,19 +105,6 @@ public final class ItemIds
 
 	private ItemIds() {}
 
-	/**
-	 * Returns the item ID for the given potion name at the specified dose (1-4).
-	 * Returns 0 if the potion name is unknown.
-	 *
-	 * Matching strategy (in order):
-	 * 1. Exact match (O(1)) — handles names that precisely equal a map key.
-	 * 2. startsWith fallback — handles names where the server appends extra text
-	 *    after the base wiki name (e.g. "Prayer regen potion (e)"). Uses the
-	 *    longest-matching key so that "divine super combat" always wins over
-	 *    "super combat potion" when the name starts with "divine super combat".
-	 *    startsWith (vs contains) prevents "super strength" from spuriously
-	 *    matching "divine super strength".
-	 */
 	public static int forPotion(String potionName, int dose)
 	{
 		if (potionName == null)
@@ -157,13 +113,11 @@ public final class ItemIds
 		}
 		int d = (dose >= 1 && dose <= 4) ? dose : 4;
 		String lower = potionName.toLowerCase();
-		// 1. Exact match
 		int[] doses = POTIONS.get(lower);
 		if (doses != null)
 		{
 			return doses[d - 1];
 		}
-		// 2. startsWith fallback — longest key wins
 		int[] best = null;
 		int bestLen = 0;
 		for (Map.Entry<String, int[]> entry : POTIONS.entrySet())
@@ -178,7 +132,6 @@ public final class ItemIds
 		return best != null ? best[d - 1] : 0;
 	}
 
-	/** Returns a 4-dose potion item ID for the given potion name, or 0. */
 	public static int forPotion(String potionName)
 	{
 		return forPotion(potionName, 4);

@@ -26,35 +26,25 @@ package com.o7flip.model;
 
 import java.util.LinkedHashSet;
 
-/**
- * Aggregated data for a single item ID across all 07Flip API tabs.
- * Fields are boxed (Long/Double) — null means the item is not in that tab.
- * presentIn is an insertion-ordered set (Flips → Alerts → Dumps → Spikes).
- */
 public class TrackedItemData
 {
 	public int    itemId;
 	public String name;
 
-	// Flips
 	public Long   flipBuyPrice;
 	public Long   flipSellPrice;
 	public Long   flipProfit;
 	public Double flipRoiPct;
 
-	// Alerts
 	public Long   alertCurrentPrice;
 	public Long   alertSellTarget;
 	public Double alertUpsidePct;
 
-	// Dumps
 	public Long   dumpBuyPrice;
 	public Long   dumpSellPrice;
 	public Double dumpPct;
 
-	// Spikes
 	public Long   spikeBuyPrice;
 
-	/** Ordered set of tab names that have data for this item. */
 	public LinkedHashSet<String> presentIn = new LinkedHashSet<>();
 }

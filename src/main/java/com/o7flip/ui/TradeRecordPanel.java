@@ -46,17 +46,6 @@ import java.awt.RenderingHints;
 import java.text.SimpleDateFormat;
 import java.util.Date;
 
-/**
- * One row in the Recent My Trades view. Mirrors the Active view's layout
- * (icon + name + "Buy/Sell · X gp ea" + progress bar) and adds the realised
- * profit on the right alongside the filled/total qty counter. Visually
- * unifies "live" and "completed" trade rows so the user reads one consistent
- * row format regardless of which sort tab they're on.
- *
- * Falls back gracefully for legacy {@link TradeRecord} entries that don't
- * carry {@code totalQuantity} (records written before that field existed):
- * such rows render as a fully-filled bar with the historical qty.
- */
 public class TradeRecordPanel extends JPanel
 {
 	private static final Color ODD_BG     = new Color(0x272727);
@@ -80,15 +69,6 @@ public class TradeRecordPanel extends JPanel
 		this(trade, itemManager, odd, matchedProfit, null);
 	}
 
-	/**
-	 * @param matchedProfit FIFO-matched profit for this sell row, summed across
-	 *                      every CompletedFlip whose {@code sellTimestamp}
-	 *                      equals {@code trade.timestamp}. Null for buys, for
-	 *                      sells with no matching buy (phantom flips), and any
-	 *                      time the caller doesn't have a result handy.
-	 * @param plugin       used to route left-click → Insights for this item.
-	 *                     Null disables click routing (e.g. unit tests).
-	 */
 	public TradeRecordPanel(TradeRecord trade, ItemManager itemManager, boolean odd, Long matchedProfit, O7FlipPlugin plugin)
 	{
 		Color bg = odd ? ODD_BG : ColorScheme.DARK_GRAY_COLOR;
@@ -98,23 +78,13 @@ public class TradeRecordPanel extends JPanel
 		setBorder(new EmptyBorder(8, 10, 8, 10));
 		setAlignmentX(Component.LEFT_ALIGNMENT);
 
-		// ── ICON ──────────────────────────────────────────────────────────────
 		JLabel iconLabel = FlipItemPanel.buildIcon(trade.itemId, itemManager);
 
-		// ── NAME ──────────────────────────────────────────────────────────────
 		JLabel nameLabel = new JLabel(trade.name);
 		nameLabel.setFont(Fonts.BOLD);
 		nameLabel.setForeground(Color.WHITE);
 		nameLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
 
-		// ── FILL STATE ────────────────────────────────────────────────────────
-		// Legacy records (no totalQuantity) treat quantity as both filled and
-		// total, so they render as a full bar — accurate to the data we have.
-		// Colour scheme: amber while in-flight (or cancelled mid-flight),
-		// green once fully filled. We deliberately don't colour completed
-		// buys differently from completed sells — the "Buy" / "Sell" word in
-		// the text already carries that distinction, and using a single green
-		// "done" state reads more cleanly across mixed rows.
 		int filled = trade.quantity;
 		int total  = trade.totalQuantity != null && trade.totalQuantity > 0
 			? trade.totalQuantity
@@ -122,24 +92,20 @@ public class TradeRecordPanel extends JPanel
 		boolean fullyFilled = filled >= total;
 		Color sideCol = fullyFilled ? SELL_COL : PART_COL;
 
-		// ── TYPE + PRICE ─────────────────────────────────────────────────────
 		String typeWord = trade.isBuy ? "Buy" : "Sell";
 		JLabel typeLabel = new JLabel(typeWord + " · " + FlipItemPanel.formatGpCompact(trade.priceEach) + " gp ea");
 		typeLabel.setFont(Fonts.SM);
 		typeLabel.setForeground(sideCol);
 		typeLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
 
-		// ── PROGRESS BAR ──────────────────────────────────────────────────────
 		ProgressBar bar = new ProgressBar(filled, total, sideCol);
 		bar.setAlignmentX(Component.LEFT_ALIGNMENT);
 
-		// ── DATE (small caption under the progress bar) ──────────────────────
 		JLabel dateLabel = new JLabel(DATE_FMT.format(new Date(trade.timestamp)));
 		dateLabel.setFont(Fonts.SM);
 		dateLabel.setForeground(MUTED);
 		dateLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
 
-		// ── TEXT COLUMN ──────────────────────────────────────────────────────
 		JPanel textCol = new JPanel();
 		textCol.setLayout(new BoxLayout(textCol, BoxLayout.Y_AXIS));
 		textCol.setBackground(bg);
@@ -152,7 +118,6 @@ public class TradeRecordPanel extends JPanel
 		textCol.add(Box.createVerticalStrut(2));
 		textCol.add(dateLabel);
 
-		// ── RIGHT-SIDE COLUMN: qty counter on top, profit (or "—" phantom) below ──
 		JPanel rightCol = new JPanel();
 		rightCol.setLayout(new BoxLayout(rightCol, BoxLayout.Y_AXIS));
 		rightCol.setBackground(bg);
@@ -193,11 +158,6 @@ public class TradeRecordPanel extends JPanel
 			rightCol.add(phantomLabel);
 		}
 
-		// Reserve the wider of the fully-filled counter ("total / total") and the
-		// profit label, so the bar matches the Active row's bar (which reserves
-		// the same full counter) and never shifts as fill digits grow. Only as
-		// wide as this row's content needs — keeps the item name room. Done after
-		// children are added so the height is correct.
 		int colW = qtyLabel.getFontMetrics(Fonts.SM_BOLD).stringWidth(total + " / " + total);
 		if (matchedProfit != null)
 		{
@@ -227,11 +187,6 @@ public class TradeRecordPanel extends JPanel
 		return Color.LIGHT_GRAY;
 	}
 
-	/**
-	 * Coloured fill on a grey track, no label inside (the qty counter sits to
-	 * the right of the row instead). Same visual as
-	 * {@link ActiveOfferRow.ProgressBar} so Recent and Active rows align.
-	 */
 	private static class ProgressBar extends JPanel
 	{
 		private static final int HEIGHT = 6;

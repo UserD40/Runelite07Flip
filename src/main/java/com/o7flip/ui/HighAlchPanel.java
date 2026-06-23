@@ -42,16 +42,6 @@ import java.awt.GridLayout;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 
-/**
- * Row component for /api/runelite/high-alch. The 4-row text column matches
- * {@link FlipItemPanel} so the tab feels consistent: name + ROI chip, Buy
- * price, Alch value, Profit per cast. The rune cost is surfaced in the
- * tooltips so the row stays scannable.
- *
- * Right-click anywhere queues a Buy on the GE at the row's market buy
- * price — Alch is "buy-then-cast", so the buy is what the user actually
- * needs from the GE.
- */
 public class HighAlchPanel extends JPanel
 {
 	private static final Color ODD_BG    = new Color(0x272727);
@@ -80,10 +70,6 @@ public class HighAlchPanel extends JPanel
 		nameRow.setBackground(bg);
 		nameRow.add(nameLabel, BorderLayout.CENTER);
 
-		// Row 2 — exact buy + exact alch prices on the same line. Full
-		// thousands-separated numbers so the user sees "2,184" not "2.2K"
-		// (alch decisions are sensitive to the last few gp). Cost-per-cast
-		// dropped from the card; it's still in the tooltip for power users.
 		JLabel pricesLabel = new JLabel("<html>"
 			+ "<font color='#FF7070'><b>Buy:</b> " + FlipItemPanel.formatGp(item.buyPrice) + "</font>"
 			+ "  <font color='#888888'>·</font>  "
@@ -98,9 +84,6 @@ public class HighAlchPanel extends JPanel
 			+ "<font color='#666666'>Right-click anywhere to queue a Buy on the GE · Click for insights</font></html>");
 		pricesLabel.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
 
-		// Row 3 — per-cast profit AND the buy-limit-multiplied total so the
-		// user instantly sees what a single 4-hour buy yields end-to-end.
-		// Formula: profit_per_cast × buy_limit = total_profit.
 		String sign = item.profit >= 0 ? "+" : "";
 		String colHex = item.profit >= 0 ? "#00C27A" : "#E85050";
 		Color profitFg = item.profit >= 0 ? GREEN : new Color(0xE85050);

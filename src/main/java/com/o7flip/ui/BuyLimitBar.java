@@ -37,12 +37,6 @@ import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.RenderingHints;
 
-/**
- * A slim buy-limit cooldown bar shown under a Favourites row (Available sort
- * only). Live-queries the plugin each repaint for the item's remaining 4-hour
- * cooldown and progress, drawing a fill bar + a "Rebuy in HH:MM" / "Available
- * now" caption. A repaint timer in the panel drives the live countdown.
- */
 public class BuyLimitBar extends JPanel
 {
 	private static final Color TRACK = new Color(0x202020);
@@ -91,10 +85,8 @@ public class BuyLimitBar extends JPanel
 				return;
 			}
 
-			// Track.
 			g2.setColor(TRACK);
 			g2.fillRoundRect(x, barY, w, barH, radius, radius);
-			// Fill = elapsed fraction, coloured red → orange → green as it nears ready.
 			int fillW = (int) Math.round(Math.max(0.0, Math.min(1.0, progress)) * w);
 			if (fillW > 0)
 			{
@@ -102,7 +94,6 @@ public class BuyLimitBar extends JPanel
 				g2.fillRoundRect(x, barY, fillW, barH, radius, radius);
 			}
 
-			// Countdown text centred inside the bar.
 			String text = ready ? "Buy limit available now" : "Rebuy in " + formatRemaining(ms);
 			g2.setFont(Fonts.SM);
 			g2.setColor(Color.WHITE);
@@ -117,7 +108,6 @@ public class BuyLimitBar extends JPanel
 		}
 	}
 
-	/** Red (far) → orange (halfway) → green (almost ready). */
 	private static Color progressColour(double p)
 	{
 		p = Math.max(0.0, Math.min(1.0, p));
@@ -137,7 +127,6 @@ public class BuyLimitBar extends JPanel
 		return new Color(r, g, bl);
 	}
 
-	/** "1h 23m" when ≥ 1h, else "12m 04s". */
 	private static String formatRemaining(long ms)
 	{
 		long totalSec = ms / 1000L;

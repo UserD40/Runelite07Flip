@@ -33,7 +33,6 @@ public class SearchResultItem
 	public Long    margin;
 	public Long    profit;
 	public Double  roi;
-	/** 07Flip recommended prices — premium-only on /v2/search (null for free/anon). */
 	public Long    recBuyPrice;
 	public Long    recSellPrice;
 	public Long    recProfit;

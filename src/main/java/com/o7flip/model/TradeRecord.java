@@ -32,61 +32,17 @@ public class TradeRecord
 	public int    quantity;
 	public long   priceEach;  // effective fill price = totalGp / quantity
 	public long   totalGp;    // raw value of GrandExchangeOffer.getSpent() at
-	                          // the moment of the fill. For BUYS this is the
-	                          // gp the player paid; for SELLS it is the GROSS
-	                          // (listed price × qty) before the 2% GE tax.
-	                          // ProfitCalculator subtracts the tax when it
-	                          // builds CompletedFlips, so anywhere downstream
-	                          // that reads CompletedFlip.sellTotal sees a NET
-	                          // value — but the raw row stored here remains
-	                          // gross so the dedup fingerprint and POST body
-	                          // stay byte-stable with what the server stores.
 	public long   timestamp;  // System.currentTimeMillis() when recorded
 	public boolean partial;   // true when CANCELLED with a non-zero partial fill
 
-	// Server-issued ID once this trade has been synced or fetched from
-	// 07flip.com. Null for trades recorded locally that have not been
-	// reconciled with the server yet. Backwards-compatible with serialised
-	// TradeRecord JSON written before this field existed.
 	public Long tradeId;
 
-	/**
-	 * Local identifier for "this trade row represents one GE offer". Every
-	 * fill the plugin observes for the same active offer slot reuses the same
-	 * offerInstanceId, so {@code recordTrade} can merge incremental fills
-	 * into a single TradeRecord row instead of appending one row per fill.
-	 *
-	 * Null for legacy records written before this field existed and for
-	 * server-fetched records — those stay as individual rows.
-	 */
 	public Long offerInstanceId;
 
-	/**
-	 * True once the server has confirmed receipt of this row (any 2xx on
-	 * POST /tracker or /tracker/bulk — including the duplicate case, where
-	 * the server already had it). SYNC_CONTRACT §5: a delivered fill must
-	 * never be re-POSTed, so every server-submit path checks this flag
-	 * first. Persisted with the row; legacy JSON deserialises to false and
-	 * the row is re-offered once, where the server's dedup absorbs it.
-	 */
 	public boolean serverSynced;
 
-	/**
-	 * Total quantity the user originally set on this offer (not what filled).
-	 * Captured at first observation from {@code GrandExchangeOffer.getTotalQuantity()}
-	 * so the row can render a progress bar and "filled / total" counter the
-	 * same way the Active view does.
-	 *
-	 * Null for legacy records — display falls back to using {@link #quantity}
-	 * as both filled and total (so they render as a full bar).
-	 */
 	public Integer totalQuantity;
 
-	/**
-	 * Stable fingerprint used for de-duplication when merging server-fetched
-	 * trades with locally-recorded ones that pre-date the {@code tradeId}
-	 * field. Mirrors the server's composite uniqueness key.
-	 */
 	public String fingerprint()
 	{
 		return itemId + "|" + (isBuy ? "B" : "S") + "|" + quantity + "|" + totalGp + "|" + timestamp;

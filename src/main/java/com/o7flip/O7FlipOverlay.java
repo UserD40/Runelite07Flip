@@ -64,23 +64,17 @@ public class O7FlipOverlay extends Overlay
 	@Override
 	public Dimension render(Graphics2D graphics)
 	{
-		// Pass 1 — empty-slot hint when a panel right-click is awaiting a slot pick.
 		if (plugin.hasOverlayQueue())
 		{
 			renderEmptySlotHints(graphics);
 		}
 
-		// Pass 2 — yellow highlight on the "Enter price" / custom-price button
-		// when an auto-fill is armed (covers both buy and sell setup screens).
-		// Suppressed when auto-fill is disabled: the price won't be typed, so
-		// pointing the user at the button as if it will is misleading.
 		if (plugin.pendingGeInputPrice != -1 && plugin.getConfig().showGePriceHint()
 			&& plugin.getConfig().autoFillGePrice())
 		{
 			renderEnterPriceHighlight(graphics);
 		}
 
-		// Pass 4 — yellow highlight on the "Confirm offer" button right after auto-fill.
 		if (plugin.confirmHighlightUntilMs > System.currentTimeMillis()
 			&& plugin.getConfig().showGePriceHint())
 		{
@@ -134,11 +128,6 @@ public class O7FlipOverlay extends Overlay
 			return;
 		}
 
-		// Walk static + dynamic children (the custom-price button on the sell
-		// screen sits in a different sub-widget tree than the buy screen's
-		// "Enter price" button). Match any action whose lowered label looks
-		// like a custom-price entry — covers "Enter price", "Set custom price",
-		// and any future variants without needing exact strings.
 		Widget target = findCustomPriceButton(geSetup);
 		if (target == null)
 		{
@@ -191,9 +180,6 @@ public class O7FlipOverlay extends Overlay
 		{
 			if (a == null) continue;
 			String lower = a.toLowerCase();
-			// "Enter price" (buy setup), "Set custom price" / "Custom price"
-			// (sell setup variants), all match. Avoid plain "price" so we
-			// don't catch the "Price per item:" header.
 			if (lower.equals("enter price")
 				|| lower.contains("custom price")
 				|| lower.equals("set price"))
@@ -204,12 +190,6 @@ public class O7FlipOverlay extends Overlay
 		return false;
 	}
 
-	/**
-	 * Diagnostic that fires up to 4 times if we land on a setup screen and
-	 * can't find the custom-price button. Logs every action across the widget
-	 * tree so we can update the matcher with the real label. Capped low to
-	 * avoid log spam once the matcher does work.
-	 */
 	private static int dumpCount = 0;
 	private static void dumpSetupActionsOnce(Widget root)
 	{
@@ -247,7 +227,6 @@ public class O7FlipOverlay extends Overlay
 
 	private void renderEmptySlotHints(Graphics2D graphics)
 	{
-		// Only highlight when the GE main view is showing (not the setup screen).
 		Widget setup = client.getWidget(InterfaceID.GeOffers.SETUP);
 		if (setup != null && !setup.isHidden())
 		{
@@ -259,9 +238,6 @@ public class O7FlipOverlay extends Overlay
 			return;
 		}
 
-		// Only highlight the button matching the queued direction — Buy slot
-		// for queued buys, Sell slot for queued sells. Painting both would
-		// suggest either is a valid target when only one actually is.
 		boolean wantBuy = plugin.overlayQueueIsBuy();
 
 		Map<Integer, com.o7flip.model.ActiveOfferSnapshot> offers = plugin.activeOffers;
@@ -277,10 +253,6 @@ public class O7FlipOverlay extends Overlay
 			{
 				continue;
 			}
-			// Position-based detection: empty slot has 2 icon buttons laid out
-			// left-to-right (Buy on left, Sell on right). Action-label matching
-			// was unreliable because OSRS exposes both directions on shared
-			// widgets; widget bounds are deterministic.
 			Widget btn = pickDirectionalButton(slot, wantBuy);
 			if (btn == null) continue;
 			Rectangle bounds = btn.getBounds();
@@ -294,33 +266,11 @@ public class O7FlipOverlay extends Overlay
 
 	private static int pickerLogCount = 0;
 
-	/**
-	 * Picks the Buy or Sell icon-button inside a GE empty slot.
-	 *
-	 * Two-tier heuristic, in priority order:
-	 * <ol>
-	 *   <li><b>Action-keyword match.</b> Find widgets whose action text contains
-	 *       the wanted direction's keyword ("buy" / "sell") and not the
-	 *       opposite. This is the most reliable — OSRS labels its
-	 *       create-offer actions distinctly per button.</li>
-	 *   <li><b>Position fallback.</b> If no widget has a directional action
-	 *       label (the widget tree exposes only generic "Make-offer" text),
-	 *       sort the icon-sized candidates by X and pick leftmost for Buy,
-	 *       rightmost for Sell.</li>
-	 * </ol>
-	 *
-	 * Returns null when no candidate matches either path so we don't draw
-	 * the highlight on the wrong button — a visible mistake (wrong direction
-	 * highlighted) is worse than no hint at all.
-	 */
 	private static Widget pickDirectionalButton(Widget slot, boolean wantBuy)
 	{
 		java.util.List<Widget> clickable = new java.util.ArrayList<>();
 		collectClickable(slot, clickable);
 
-		// Tier 1: action-keyword match. Prefer a widget whose action text
-		// names the direction unambiguously. Tracks which widgets matched so
-		// the position fallback can run only when tier 1 finds nothing.
 		String wantWord  = wantBuy ? "buy"  : "sell";
 		String otherWord = wantBuy ? "sell" : "buy";
 		Widget keywordHit = null;
@@ -331,9 +281,6 @@ public class O7FlipOverlay extends Overlay
 			{
 				continue;
 			}
-			// If multiple widgets carry the direction keyword (e.g. icon +
-			// container), prefer the largest visible one — the actual button
-			// icon usually has the biggest hitbox among directional matches.
 			Rectangle b = c.getBounds();
 			int area = b == null ? 0 : b.width * b.height;
 			if (keywordHit == null || area > keywordHitArea)
@@ -348,18 +295,6 @@ public class O7FlipOverlay extends Overlay
 			return keywordHit;
 		}
 
-		// Tier 2: position fallback over visible icon candidates only.
-		//
-		// The full clickable list also contains non-icon widgets (invisible
-		// anchor children, tooltip-zone overlays, slot frames) whose bounds
-		// don't correspond to anything the user can see. Sorting all of them
-		// by X and grabbing the extreme has been unreliable because those
-		// invisible widgets land at unexpected coordinates and push the real
-		// Buy / Sell icons out of the leftmost / rightmost slots.
-		//
-		// Filter to widgets that actually render an icon — those have a
-		// non-default spriteId (i.e. > -1). Visually leftmost of THAT subset
-		// is the Buy icon in OSRS's empty-slot layout.
 		java.util.List<Widget> withSprite = new java.util.ArrayList<>();
 		for (Widget c : clickable)
 		{
@@ -385,14 +320,6 @@ public class O7FlipOverlay extends Overlay
 		return posHit;
 	}
 
-	/**
-	 * True when widget {@code w}'s primary (first / left-click) action contains
-	 * {@code wantWord} (case-insensitive) and not {@code otherWord}. Checking
-	 * the primary action only — not the whole menu — is more discriminating
-	 * because OSRS slot buttons often expose every related option (Buy / Sell /
-	 * Cancel / Examine) as menu siblings, while their primary left-click action
-	 * is direction-specific.
-	 */
 	private static boolean actionMatchesDirection(Widget w, String wantWord, String otherWord)
 	{
 		String[] actions = w.getActions();
@@ -403,13 +330,6 @@ public class O7FlipOverlay extends Overlay
 		return lower.contains(wantWord) && !lower.contains(otherWord);
 	}
 
-	/**
-	 * Diagnostic. Logs each pick decision so we can verify (or debug) which
-	 * tier fired and what the candidate set looked like. Deduped per chosen
-	 * widget bounds — same widget chosen repeatedly across frames stays quiet,
-	 * but a DIFFERENT widget (different bounds = different slot) emits a new
-	 * log line so we can see every slot's pick independently.
-	 */
 	private static String lastPickKey = "";
 
 	private static void logPick(String tier, boolean wantBuy, Widget chosen, java.util.List<Widget> all)
@@ -458,12 +378,6 @@ public class O7FlipOverlay extends Overlay
 		}
 	}
 
-	/**
-	 * Icon-button heuristic: has at least one non-empty action AND a roughly
-	 * square / icon-sized bounds (the Buy and Sell icons in OSRS GE are
-	 * approx 32×32 px). Excludes the "Empty" label and slot-spanning bg
-	 * widgets that share menu options with the buttons.
-	 */
 	private static boolean isIconSizedButton(Widget w)
 	{
 		String[] actions = w.getActions();
@@ -485,9 +399,6 @@ public class O7FlipOverlay extends Overlay
 	@SuppressWarnings("unused")
 	private static java.util.List<Widget> collectCreateOfferButtons(Widget slot, boolean wantBuy)
 	{
-		// Kept as a reference / fallback. The position-based pickDirectionalButton
-		// above is the active path. Action-label matching was unreliable so this
-		// helper is no longer called from the render loop.
 		java.util.List<Widget> out = new java.util.ArrayList<>(1);
 		Widget[] dyn = slot.getDynamicChildren();
 		if (dyn != null)

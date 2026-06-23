@@ -38,25 +38,6 @@ import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.awt.event.MouseMotionAdapter;
 
-/**
- * Two-line price sparkline shared by the Insights tab and the Alerts feed.
- * Buy line is orange-red, sell line is green. Both lines render on shared
- * min/max so the vertical gap between them visually represents the live
- * margin. Now also draws a basic Y axis (3 gp ticks: low / mid / high)
- * and X axis (start / now) so users can read the price range without
- * hovering.
- *
- * Either array may be null or under-populated — the component is forgiving:
- * <ul>
- *   <li>null on either side → that line is simply not drawn</li>
- *   <li>{@code null} entries inside an array → polyline breaks cleanly,
- *       not interpolated through</li>
- *   <li>fewer than 2 valid points across both series → centred placeholder
- *       "Collecting price history…" with a dashed track. Reserves the same
- *       vertical space as a populated chart so neighbour cards don't
- *       jitter when scrolled past.</li>
- * </ul>
- */
 public class BuySellSparkline extends JPanel
 {
 	public static final Color BUY_COL  = new Color(0xFF7070);
@@ -66,21 +47,10 @@ public class BuySellSparkline extends JPanel
 	private static final Color AXIS_LINE   = new Color(0x404040);
 	private static final Color PLACE_TRACK = new Color(0x3A3A3A);
 
-	/** Pixel width reserved on the left for Y-axis gp labels (label text + gap to chart). */
 	private static final int Y_LABEL_WIDTH = 56;
-	/** Pixel height reserved at the bottom for X-axis labels (label + gap to chart). */
 	private static final int X_LABEL_HEIGHT = 16;
-	/** Horizontal gap between the right edge of a Y label and the left edge of the chart. */
 	private static final int Y_LABEL_GAP = 6;
-	/**
-	 * Right-side gutter. Without it, the "now" X-axis label's last character
-	 * (typically a tall ascender or descender like 'w') and the chart's
-	 * rightmost vertex would render at the very right edge of the component
-	 * and get clipped by Swing's redraw bounds — a few pixels of breathing
-	 * room here keeps everything visible without changing the panel size.
-	 */
 	private static final int RIGHT_PAD = 4;
-	/** Pixel padding inside the plot area so the line doesn't graze the top/bottom edges. */
 	private static final int PLOT_PAD = 4;
 
 	private static final java.time.format.DateTimeFormatter TIME_FMT =
@@ -90,9 +60,7 @@ public class BuySellSparkline extends JPanel
 	private static final java.time.format.DateTimeFormatter DATE_FMT =
 		java.time.format.DateTimeFormatter.ofPattern("d MMM");
 
-	/** Crosshair colour for the hover readout. */
 	private static final Color HOVER_LINE = new Color(0xB0B0B0);
-	/** Background of the hover price tooltip box. */
 	private static final Color HOVER_BOX  = new Color(0x10, 0x10, 0x10, 0xE0);
 	private static final Color HOVER_BORD = new Color(0x505050);
 
@@ -102,12 +70,9 @@ public class BuySellSparkline extends JPanel
 	private final String xStartLabel;
 	private final String xEndLabel;
 
-	/** Epoch ms of bucket[0], or -1 when unknown (no hover timestamp shown). */
 	private final long startEpochMs;
-	/** Minutes between consecutive buckets, or 0 when unknown. */
 	private final int  intervalMinutes;
 
-	/** Current mouse x within the component, or -1 when not hovering. */
 	private int hoverX = -1;
 
 	public BuySellSparkline(Long[] buy, Long[] sell)
@@ -140,9 +105,6 @@ public class BuySellSparkline extends JPanel
 		setMaximumSize(new Dimension(Integer.MAX_VALUE, height));
 		setMinimumSize(new Dimension(50, height));
 
-		// Hover readout: track the cursor x and repaint so the crosshair +
-		// price box follow it. Clearing on exit removes the overlay. Motion
-		// listeners don't interfere with the click routing attached elsewhere.
 		addMouseMotionListener(new MouseMotionAdapter()
 		{
 			@Override
@@ -196,7 +158,6 @@ public class BuySellSparkline extends JPanel
 			int plotH = h - PLOT_PAD - X_LABEL_HEIGHT;
 			if (plotW < 30 || plotH < 16)
 			{
-				// Too small to be useful with axes — fall back to line-only.
 				drawSeries(g2, buy,  Math.max(buy.length, sell.length), 0, w, PLOT_PAD, h - 2 * PLOT_PAD, min, max, BUY_COL);
 				drawSeries(g2, sell, Math.max(buy.length, sell.length), 0, w, PLOT_PAD, h - 2 * PLOT_PAD, min, max, SELL_COL);
 				return;
@@ -219,19 +180,12 @@ public class BuySellSparkline extends JPanel
 		}
 	}
 
-	/**
-	 * Draws the hover crosshair and a small price box for the data point under
-	 * the cursor. Snaps to the nearest bucket so the readout matches a real
-	 * sample rather than an interpolated pixel. No-op when not hovering, or when
-	 * the cursor is outside the plot area (e.g. over the Y-axis labels).
-	 */
 	private void paintHover(Graphics2D g2, int plotX, int plotY, int plotW, int plotH, long min, long max, int n)
 	{
 		if (hoverX < 0 || n < 2 || plotW < 2)
 		{
 			return;
 		}
-		// Ignore hovering left of the plot (Y labels) or past the right edge.
 		if (hoverX < plotX - 2 || hoverX > plotX + plotW + 2)
 		{
 			return;
@@ -249,12 +203,10 @@ public class BuySellSparkline extends JPanel
 			return;   // gap on both series here — nothing meaningful to show
 		}
 
-		// Vertical crosshair.
 		g2.setColor(HOVER_LINE);
 		g2.setStroke(new BasicStroke(1f));
 		g2.drawLine(snappedX, plotY, snappedX, plotY + plotH);
 
-		// Marker dots at the actual sample heights.
 		if (buyAt != null)
 		{
 			int y = plotY + (int) Math.round((1.0 - (buyAt - min) / (double) (max - min)) * plotH);
@@ -268,9 +220,6 @@ public class BuySellSparkline extends JPanel
 			g2.fillOval(snappedX - 3, y - 3, 6, 6);
 		}
 
-		// Price box. Up to three short lines — a faint timestamp, then the
-		// colour-coded Buy / Sell prices — in a dark rounded panel that flips to
-		// the left of the crosshair when it would overflow the right edge.
 		g2.setFont(Fonts.SM);
 		FontMetrics fm = g2.getFontMetrics();
 		String timeText = hoverTimeLabel(idx);
@@ -306,8 +255,6 @@ public class BuySellSparkline extends JPanel
 			g2.drawString(timeText, boxX + padX, textY);
 			textY += lineH;
 		}
-		// Sell above Buy — matches the chart (sell line sits above the buy line)
-		// and the rest of the plugin's price ordering.
 		if (sellText != null)
 		{
 			g2.setColor(SELL_COL);
@@ -321,12 +268,6 @@ public class BuySellSparkline extends JPanel
 		}
 	}
 
-	/**
-	 * Local-time label for the hovered bucket, computed from {@code bucket[0]}'s
-	 * timestamp plus {@code idx × interval}. Format scales with the bucket size:
-	 * "HH:mm" for intraday buckets, "d MMM HH:mm" for multi-hour (7d), "d MMM"
-	 * for daily (30d). Returns null when the timing isn't known.
-	 */
 	private String hoverTimeLabel(int idx)
 	{
 		if (startEpochMs <= 0 || intervalMinutes <= 0)
@@ -352,7 +293,6 @@ public class BuySellSparkline extends JPanel
 		return zdt.format(fmt);
 	}
 
-	/** Value at index if it's a real (non-null, positive) sample, else null. */
 	private static Long valueAt(Long[] series, int idx)
 	{
 		if (series == null || idx < 0 || idx >= series.length)
@@ -363,11 +303,6 @@ public class BuySellSparkline extends JPanel
 		return (v == null || v <= 0) ? null : v;
 	}
 
-	/**
-	 * Renders the Y axis (3 gp ticks — low / mid / high) and the X axis
-	 * (start / now labels). Gridlines are drawn lightly so they don't
-	 * compete with the price lines for attention.
-	 */
 	private void paintAxes(Graphics2D g2, int plotX, int plotY, int plotW, int plotH, long min, long max)
 	{
 		g2.setFont(Fonts.SM);
@@ -375,7 +310,6 @@ public class BuySellSparkline extends JPanel
 		int ascent = fm.getAscent();
 		long mid = min + (max - min) / 2;
 
-		// Light horizontal gridlines at min / mid / max
 		g2.setColor(AXIS_LINE);
 		g2.setStroke(new BasicStroke(1f));
 		int gridLeft = plotX;
@@ -384,21 +318,12 @@ public class BuySellSparkline extends JPanel
 		g2.drawLine(gridLeft, plotY + plotH / 2,    gridRight, plotY + plotH / 2);
 		g2.drawLine(gridLeft, plotY + plotH,        gridRight, plotY + plotH);
 
-		// Y-axis labels: right edge sits {@code Y_LABEL_GAP} px clear of the
-		// plot left edge. Baselines are positioned so the max label sits just
-		// above its gridline, the mid label centres on its gridline, and the
-		// min label sits just below — keeps all three visually inside the
-		// chart's vertical band without overlapping the price lines.
 		int rightX = plotX - Y_LABEL_GAP;
 		g2.setColor(GRAY_LBL);
 		drawRightAligned(g2, fm, formatGpCompact(max), rightX, plotY + ascent / 2);
 		drawRightAligned(g2, fm, formatGpCompact(mid), rightX, plotY + plotH / 2 + ascent / 2);
 		drawRightAligned(g2, fm, formatGpCompact(min), rightX, plotY + plotH + ascent / 2);
 
-		// X-axis labels sit in their own band below the plot — leave a small
-		// gap so the lowest Y label's descenders don't kiss the start/end
-		// labels. {@code X_LABEL_HEIGHT} reserves that band; place the label
-		// baselines near its bottom so the text sits clear of the chart.
 		int xLabelY = plotY + plotH + X_LABEL_HEIGHT - 2;
 		g2.drawString(xStartLabel, plotX, xLabelY);
 		int endWidth = fm.stringWidth(xEndLabel);
@@ -411,10 +336,6 @@ public class BuySellSparkline extends JPanel
 		g2.drawString(text, rightX - textW, baselineY);
 	}
 
-	/**
-	 * Compact gp formatter inlined here so the chart doesn't depend on
-	 * FlipItemPanel for a tiny utility. Same B/M/K convention used elsewhere.
-	 */
 	private static String formatGpCompact(long amount)
 	{
 		long abs = Math.abs(amount);
@@ -435,7 +356,6 @@ public class BuySellSparkline extends JPanel
 
 	private static String trim(String s)
 	{
-		// "22.50" → "22.5", "5.00" → "5"
 		if (s.contains("."))
 		{
 			s = s.replaceAll("0+$", "");
@@ -447,11 +367,6 @@ public class BuySellSparkline extends JPanel
 		return s;
 	}
 
-	/**
-	 * Draws one polyline, breaking on null/zero entries. Contiguous runs of
-	 * non-null values are emitted as their own polylines so a gap appears
-	 * as a visible break rather than a straight bridge across the hole.
-	 */
 	private static void drawSeries(Graphics2D g2, Long[] series, int n, int plotX, int plotW, int plotY, int plotH, long min, long max, Color colour)
 	{
 		if (series.length < 2)
@@ -502,7 +417,6 @@ public class BuySellSparkline extends JPanel
 		int th = g2.getFontMetrics().getAscent();
 		int tx = (w - tw) / 2;
 		int ty = midY - 6;
-		// Mask the dashed line where the text sits so it doesn't slash through.
 		Color parentBg = getParent() != null ? getParent().getBackground() : Color.BLACK;
 		g2.setColor(parentBg);
 		g2.fillRect(tx - 4, ty - th, tw + 8, th + 4);
