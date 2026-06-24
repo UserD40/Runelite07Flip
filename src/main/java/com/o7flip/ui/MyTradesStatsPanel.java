@@ -115,6 +115,10 @@ public class MyTradesStatsPanel extends JPanel
 	private final JPanel worstRow;
 	private final JPanel bondsRow;
 
+	private final JPanel body = new JPanel();
+	private final JLabel collapseToggle = toggleLabel("▾");
+	private boolean collapsed = false;
+
 	private Runnable onMembershipToggle = () -> {};
 
 	private Runnable onMembershipAdjust = () -> {};
@@ -126,22 +130,61 @@ public class MyTradesStatsPanel extends JPanel
 		setBorder(new EmptyBorder(8, 10, 8, 10));
 		setAlignmentX(Component.LEFT_ALIGNMENT);
 
-		add(profitHeader);
-		add(row(totalProfitLabel, totalProfitValue));
+		add(buildHeaderBar());
+
+		body.setLayout(new BoxLayout(body, BoxLayout.Y_AXIS));
+		body.setBackground(SECTION_BG);
+		body.setAlignmentX(Component.LEFT_ALIGNMENT);
+
+		body.add(row(totalProfitLabel, totalProfitValue));
 		bestRow  = row("Best",  bestNameValue,  bestProfitValue);
 		worstRow = row("Worst", worstNameValue, worstProfitValue);
-		add(bestRow);
-		add(worstRow);
+		body.add(bestRow);
+		body.add(worstRow);
 
-		add(Box.createVerticalStrut(8));
-		add(sectionHeaderLabel("Performance"));
-		add(row("Trades",     tradesValue));
-		add(row("Win rate",   winRateValue));
-		add(row("Avg ROI",    avgRoiValue));
-		add(row("GE tax paid", taxValue));
-		add(row("Invested",   investedValue));
+		body.add(Box.createVerticalStrut(8));
+		body.add(sectionHeaderLabel("Performance"));
+		body.add(row("Trades",     tradesValue));
+		body.add(row("Win rate",   winRateValue));
+		body.add(row("Avg ROI",    avgRoiValue));
+		body.add(row("GE tax paid", taxValue));
+		body.add(row("Invested",   investedValue));
 		bondsRow = stackedBondsRow();
-		add(bondsRow);
+		body.add(bondsRow);
+
+		add(body);
+	}
+
+	private JPanel buildHeaderBar()
+	{
+		JPanel bar = new JPanel(new BorderLayout());
+		bar.setBackground(SECTION_BG);
+		bar.setAlignmentX(Component.LEFT_ALIGNMENT);
+		bar.setMaximumSize(new Dimension(Integer.MAX_VALUE, 20));
+
+		collapseToggle.setToolTipText("Hide stats");
+		collapseToggle.addMouseListener(new MouseAdapter()
+		{
+			@Override
+			public void mouseClicked(MouseEvent e)
+			{
+				setCollapsed(!collapsed);
+			}
+		});
+
+		bar.add(profitHeader,   BorderLayout.WEST);
+		bar.add(collapseToggle, BorderLayout.EAST);
+		return bar;
+	}
+
+	private void setCollapsed(boolean c)
+	{
+		collapsed = c;
+		body.setVisible(!c);
+		collapseToggle.setText(c ? "▴" : "▾");
+		collapseToggle.setToolTipText(c ? "Show stats" : "Hide stats");
+		revalidate();
+		repaint();
 	}
 
 	public void setOnMembershipToggle(Runnable r)
