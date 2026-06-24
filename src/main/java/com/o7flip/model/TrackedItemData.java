@@ -36,6 +36,4 @@ public class TrackedItemData
 
 	public Long   dumpBuyPrice;
 	public Long   dumpSellPrice;
-
-	public Long   spikeBuyPrice;
 }

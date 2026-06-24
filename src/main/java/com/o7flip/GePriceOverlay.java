@@ -140,7 +140,7 @@ public class GePriceOverlay extends Overlay
 		}
 		if (buyPrice == null && data != null)
 		{
-			buyPrice = firstNonNull(data.flipBuyPrice, data.spikeBuyPrice, data.dumpBuyPrice);
+			buyPrice = firstNonNull(data.flipBuyPrice, data.dumpBuyPrice);
 		}
 		if (sellPrice == null && data != null)
 		{
