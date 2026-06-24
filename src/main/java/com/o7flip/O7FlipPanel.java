@@ -2040,12 +2040,7 @@ public class O7FlipPanel extends PluginPanel
 
 	private O7FlipConfig.CapitalMode currentCapitalMode()
 	{
-		O7FlipConfig.CapitalMode mode = config != null ? config.capitalMode() : O7FlipConfig.CapitalMode.OFF;
-		if (mode == O7FlipConfig.CapitalMode.OFF && config != null && config.usePersonalisedFlips())
-		{
-			return O7FlipConfig.CapitalMode.AUTO;
-		}
-		return mode;
+		return config != null ? config.capitalMode() : O7FlipConfig.CapitalMode.OFF;
 	}
 
 	private void focusCapitalFieldIfEditable()
@@ -2113,11 +2108,6 @@ public class O7FlipPanel extends PluginPanel
 
 	public void onInventoryCoinsChanged()
 	{
-		if (currentCapitalMode() == O7FlipConfig.CapitalMode.AUTO && capitalField != null)
-		{
-			capitalField.setText(formatCapital(displayedCapital()));
-			updateCapitalReadout();
-		}
 	}
 
 	private long displayedCapital()
@@ -2153,10 +2143,6 @@ public class O7FlipPanel extends PluginPanel
 			if (total > 0) html.append("  ");
 			html.append("<font color='#00C27A'>Free ").append(formatCapital(free)).append("</font>")
 				.append(" <font color='#888888'>· GE ").append(formatCapital(deployed)).append("</font>");
-		}
-		else if (mode == O7FlipConfig.CapitalMode.AUTO && total > 0)
-		{
-			html.append("  <font color='#888888'>(inventory)</font>");
 		}
 		html.append("</html>");
 		capitalReadout.setText(html.toString());

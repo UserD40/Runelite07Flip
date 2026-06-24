@@ -3129,11 +3129,9 @@ public class O7FlipPlugin extends Plugin
 
 	public long freeCapital()
 	{
-		O7FlipConfig.CapitalMode mode = resolveCapitalMode();
+		O7FlipConfig.CapitalMode mode = config.capitalMode();
 		switch (mode)
 		{
-			case AUTO:
-				return Math.max(0L, inventoryCoins);
 			case MANUAL:
 				return Math.max(0L, config.capitalManual() - deployedCapital());
 			case OFF:
@@ -3144,11 +3142,9 @@ public class O7FlipPlugin extends Plugin
 
 	public long totalCapital()
 	{
-		O7FlipConfig.CapitalMode mode = resolveCapitalMode();
+		O7FlipConfig.CapitalMode mode = config.capitalMode();
 		switch (mode)
 		{
-			case AUTO:
-				return Math.max(0L, inventoryCoins) + deployedCapital();
 			case MANUAL:
 				return Math.max(0L, config.capitalManual());
 			case OFF:
@@ -3173,16 +3169,6 @@ public class O7FlipPlugin extends Plugin
 			}
 		}
 		return sum;
-	}
-
-	private O7FlipConfig.CapitalMode resolveCapitalMode()
-	{
-		O7FlipConfig.CapitalMode mode = config.capitalMode();
-		if (mode == O7FlipConfig.CapitalMode.OFF && config.usePersonalisedFlips())
-		{
-			return O7FlipConfig.CapitalMode.AUTO;
-		}
-		return mode;
 	}
 
 	public void onCapitalChanged()
@@ -3211,10 +3197,6 @@ public class O7FlipPlugin extends Plugin
 		else
 		{
 			configManager.setConfiguration("o7flip", "capitalMode", O7FlipConfig.CapitalMode.OFF);
-			if (config.usePersonalisedFlips())
-			{
-				configManager.setConfiguration("o7flip", "usePersonalisedFlips", false);
-			}
 		}
 		onCapitalChanged();
 	}
