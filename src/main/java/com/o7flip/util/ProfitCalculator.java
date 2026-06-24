@@ -34,63 +34,18 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-/**
- * Pure LIFO cost-basis calculator over a list of {@link TradeRecord}.
- * Returns completed flips (buy/sell pairs), remaining open positions,
- * and aggregate stats — used by the My Trades stats panel, the GP drop
- * overlay, and any future profit charting.
- *
- * LIFO (newest open buy consumed first) is used so a fresh, cheaper batch of
- * an item is paired with the sells that flip it, instead of an older, pricier
- * bag of the same item bleeding a phantom loss into today's sells. This MUST
- * match the server's LIFO P&L recompute so the plugin and website agree (same
- * tax rules, same rounding, same equal-timestamp tiebreak — newest first).
- *
- * Stateless and side-effect-free. Safe to call from any thread.
- */
 public final class ProfitCalculator
 {
-	/**
-	 * Old school bond. Skipped entirely by the FIFO loop — bonds aren't
-	 * flips, they're a one-way membership purchase. The lifetime
-	 * gp/count tally backing the panel's "Membership cost" row lives in
-	 * {@link com.o7flip.util.BondLedger}, persisted by O7FlipPlugin
-	 * outside the 200-row trade-history sliding window so it survives a
-	 * year of heavy flipping. ProfitCalculator just leaves bond rows alone:
-	 * no completed flips, no open positions, no contribution to totalProfit
-	 * or win-rate. A bond that does get sold back to GE is also skipped
-	 * here; the ledger handles the decrement.
-	 */
 	public static final int BOND_ITEM_ID = 13190;
 
-	// ── GE tax constants ────────────────────────────────────────────────────
-	/** OSRS GE sells 2% sales tax. Buyers pay no tax. */
 	private static final double GE_TAX_RATE = 0.02;
-	/** Items selling for less than 100 gp/item are exempt from the GE tax. */
 	private static final long   GE_TAX_MIN_PRICE_PER_ITEM = 100L;
-	/** Tax is capped at 5,000,000 gp per individual item sold. */
 	private static final long   GE_TAX_CAP_PER_ITEM = 5_000_000L;
 
 	private ProfitCalculator()
 	{
 	}
 
-	/**
-	 * Computes the OSRS GE sales tax that would be deducted from a sell at
-	 * the supplied <b>gross</b> sale value. Mirrors the in-game rules:
-	 * <ul>
-	 *   <li>Sells only — buys pay no tax.</li>
-	 *   <li>2% of the per-item sale price, rounded down per item.</li>
-	 *   <li>No tax on items selling for less than 100 gp.</li>
-	 *   <li>Capped at 5,000,000 gp per individual item.</li>
-	 *   <li>Bonds ({@link #BOND_ITEM_ID}) are tax-exempt.</li>
-	 * </ul>
-	 *
-	 * Do NOT feed this {@code GrandExchangeOffer.getSpent()} for a sell —
-	 * that value is already <b>net</b> (post-tax) in current RuneLite; pass
-	 * gross only. For tax derived from net, see
-	 * {@link #estimateTaxFromNet(int, long, int)}.
-	 */
 	public static long geTaxFor(int itemId, long grossSellTotal, int quantity)
 	{
 		if (itemId == BOND_ITEM_ID || quantity <= 0 || grossSellTotal <= 0)
@@ -110,19 +65,6 @@ public final class ProfitCalculator
 		return taxPerItem * quantity;
 	}
 
-	/**
-	 * Back-calculates the GE tax taken on a sell when only the <b>net</b>
-	 * received amount is known. Inverse of {@link #geTaxFor} — used because
-	 * RuneLite's {@code GrandExchangeOffer.getSpent()} reports net for
-	 * sells, but the panel still needs an honest "GE tax paid" figure.
-	 *
-	 * For non-capped tiers: {@code gross ≈ round(net / 0.98)}, then
-	 * {@code tax = gross − net}. For per-item gross at or above 250M
-	 * (where the 5M cap kicks in) the relationship becomes linear:
-	 * {@code gross = net + 5M}.
-	 *
-	 * Sub-100 gp items, zero-qty offers, and bonds return 0.
-	 */
 	public static long estimateTaxFromNet(int itemId, long netSellTotal, int quantity)
 	{
 		if (itemId == BOND_ITEM_ID || quantity <= 0 || netSellTotal <= 0)
@@ -130,15 +72,11 @@ public final class ProfitCalculator
 			return 0L;
 		}
 		long netPerItem = netSellTotal / quantity;
-		// Gross-per-item must exceed 100gp for tax to apply at all. If the
-		// net is already below 100, gross is too — exempt either way.
 		if (netPerItem < GE_TAX_MIN_PRICE_PER_ITEM)
 		{
 			return 0L;
 		}
 		long taxPerItem;
-		// Cap range: gross-per-item ≥ 250M → tax fixed at 5M → net ≥ 245M.
-		// Detect by checking the uncapped 2% estimate against the cap.
 		long uncapped = Math.round(netPerItem / 0.98) - netPerItem;
 		if (uncapped > GE_TAX_CAP_PER_ITEM)
 		{
@@ -151,23 +89,6 @@ public final class ProfitCalculator
 		return taxPerItem * quantity;
 	}
 
-	/**
-	 * Compute completed flips, open positions, and lifetime stats.
-	 *
-	 * Trades are sorted by timestamp ascending before processing — the input
-	 * list is not modified (a stable sort, so equal-timestamp trades keep their
-	 * existing list order). LIFO matching: each sell consumes the newest open
-	 * buy(s) of the same item; among equal-timestamp lots the most recently
-	 * added (latest in list order) is consumed first.
-	 *
-	 * Defensive: a sell with no prior buy emits a "phantom" completed flip
-	 * with {@code buyTotal=0}. This shouldn't happen in normal OSRS GE use
-	 * but keeps the math monotonic if the trade history is incomplete.
-	 *
-	 * Precision: gp values are long. Partial consumption of a buy lot uses
-	 * half-up rounding on the consumed portion; the remainder is tracked
-	 * exactly so accumulated drift stays under ~1 gp per partial fill.
-	 */
 	public static Result compute(List<TradeRecord> trades)
 	{
 		if (trades == null || trades.isEmpty())
@@ -187,9 +108,6 @@ public final class ProfitCalculator
 			{
 				continue;
 			}
-			// Bonds are tracked by BondLedger, not as flips. Skip them
-			// entirely — no completed flips, no open positions, no
-			// pollution of totalProfit/winRate by membership purchases.
 			if (trade.itemId == BOND_ITEM_ID)
 			{
 				continue;
@@ -225,21 +143,6 @@ public final class ProfitCalculator
 
 	private static void consumeSell(TradeRecord sell, Deque<OpenLot> queue, List<CompletedFlip> out)
 	{
-		// sell.totalGp is the raw value from offer.getSpent(), which for sells
-		// is GROSS (pre-tax) — the listed price × qty. The CompletedFlip
-		// constructor splits it into net + tax via geTaxFor; this method just
-		// allocates gross proportionally when a sell is LIFO-split across
-		// multiple buy lots.
-		//
-		// LIFO: a sell consumes the NEWEST open buy lot first (the tail of the
-		// deque, where buys are appended in timestamp order). This keeps a
-		// freshly-bought cheaper batch paired with the sells that flip it,
-		// rather than charging an older, more expensive bag of the same item
-		// against today's sells (which FIFO did, producing a phantom loss while
-		// the cheap stock was still being sold). Total realised profit is
-		// invariant to lot order; only per-flip / per-day attribution changes.
-		// MUST stay identical to the server's LIFO recompute, including the
-		// equal-timestamp tiebreak (newest-ingested lot consumed first).
 		int sellRemainingQty = sell.quantity;
 		long sellRemainingGross = sell.totalGp;
 
@@ -299,7 +202,6 @@ public final class ProfitCalculator
 		}
 	}
 
-	// ── Data classes ────────────────────────────────────────────────────────
 
 	public static final class Result
 	{
@@ -329,34 +231,14 @@ public final class ProfitCalculator
 		public final int itemId;
 		public final String name;
 		public final int quantity;
-		/** Total gp paid for the buy leg(s), FIFO-matched. */
 		public final long buyTotal;
-		/**
-		 * <b>Net</b> sale value — what the seller actually received after the
-		 * GE took its 2% tax. Computed in this constructor as {@code gross −
-		 * tax}; the constructor accepts gross as input because that's what
-		 * {@code GrandExchangeOffer.getSpent()} reports for sells in current
-		 * RuneLite (a long-standing comment in {@link TradeRecord} previously
-		 * documented this field as net, which it never actually was).
-		 */
 		public final long sellTotal;
-		/** GE sales tax deducted from this sell (always {@code >= 0}).
-		 *  Computed from the gross sale via {@link #geTaxFor} and already
-		 *  subtracted from {@link #profit}. */
 		public final long tax;
-		/** Net realised profit — {@code sellTotal - buyTotal}, where
-		 *  {@code sellTotal} is the net (post-tax) amount the user received. */
 		public final long profit;
-		/** ROI computed on net profit over buy cost. */
 		public final double roiPct;
 		public final long firstBuyTimestamp;
 		public final long sellTimestamp;
 
-		/**
-		 * @param sellGross gross sale value (pre-tax). The constructor derives
-		 *                  {@link #tax} from this via {@link #geTaxFor} and
-		 *                  stores {@link #sellTotal} as {@code sellGross − tax}.
-		 */
 		CompletedFlip(int itemId, String name, int quantity, long buyTotal, long sellGross,
 			long firstBuyTimestamp, long sellTimestamp)
 		{
@@ -425,12 +307,8 @@ public final class ProfitCalculator
 	{
 		static final Stats EMPTY = new Stats(0L, 0L, 0L, 0, 0, 0, 0, 0.0, 0.0, null, null);
 
-		/** Net realised profit summed across matched flips (sellTotal − buyTotal each, where sellTotal is already net of GE tax). */
 		public final long totalProfit;
-		/** Net gp received from sells, summed across matched flips
-		 *  (post-tax — see {@link CompletedFlip#sellTotal}). */
 		public final long totalGpSold;
-		/** Total GE tax paid across matched flips — the authoritative tax figure shown in the stats panel. */
 		public final long totalTaxPaid;
 		public final int completedFlipCount;
 		public final int winCount;
@@ -475,21 +353,14 @@ public final class ProfitCalculator
 			CompletedFlip worst = null;
 			for (CompletedFlip f : flips)
 			{
-				// Phantom flips (sells with no matching buy in tracked history)
-				// are excluded from every aggregate stat. Including their gross
-				// proceeds inflates totalProfit dramatically when the underlying
-				// buy was made before the plugin started recording, which is
-				// exactly when phantom flips occur. The flip itself still
-				// appears in the completedFlips list so it shows in trade
-				// history; it just doesn't pollute the summary numbers.
 				if (f.buyTotal <= 0)
 				{
 					continue;
 				}
 				matchedCount++;
-				totalProfit += f.profit;     // net (sellTotal − buyTotal, post-tax)
-				totalGpSold += f.sellTotal;  // net sale value (post-tax)
-				totalTaxPaid += f.tax;       // GE tax deducted from this flip
+				totalProfit += f.profit;
+				totalGpSold += f.sellTotal;
+				totalTaxPaid += f.tax;
 				if (f.profit > 0)
 				{
 					wins++;
@@ -523,7 +394,6 @@ public final class ProfitCalculator
 		}
 	}
 
-	// ── Internal mutable lot holder ─────────────────────────────────────────
 
 	private static final class OpenLot
 	{

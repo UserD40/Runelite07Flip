@@ -39,12 +39,10 @@ public class DipItem
 
 	public String  type = "24h_dip";
 
-	// JSON key is avg_24h_buy; the snake_case policy would yield avg24h_buy.
 	@SerializedName("avg_24h_buy")
 	public Long    avg24hBuy;
 	public Double  dipPct;
 
-	// JSON keys are dip_pct_1d/_7d/_30d; the snake_case policy would yield dip_pct1d etc.
 	@SerializedName("dip_pct_1d")
 	public Double  dipPct1d;
 	@SerializedName("dip_pct_7d")

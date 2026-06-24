@@ -34,7 +34,7 @@ import static org.junit.Assert.assertSame;
 public class BondLedgerTest
 {
 	private static final int BOND       = BondLedger.BOND_ITEM_ID;
-	private static final int OTHER_ITEM = 28997; // Dual macuahuitl — anything non-bond
+	private static final int OTHER_ITEM = 28997;
 
 	@Test
 	public void empty_constants_are_zero()
@@ -66,7 +66,7 @@ public class BondLedgerTest
 		BondLedger l = BondLedger.EMPTY
 			.apply(buy(BOND, 1, 15_174_000L))
 			.apply(buy(BOND, 1, 15_174_000L))
-			.apply(sell(BOND, 1, 15_092_000L)); // sold one back at the GE buy price
+			.apply(sell(BOND, 1, 15_092_000L));
 
 		assertEquals(15_256_000L, l.spend);
 		assertEquals(1, l.count);
@@ -88,9 +88,9 @@ public class BondLedgerTest
 	{
 		BondLedger l = BondLedger.seedFromHistory(Arrays.asList(
 			buy(BOND, 1, 15_174_000L),
-			buy(OTHER_ITEM, 7, 42_000_000L),       // non-bond — ignored
+			buy(OTHER_ITEM, 7, 42_000_000L),
 			buy(BOND, 1, 15_174_000L),
-			sell(BOND, 1, 15_092_000L),            // sold one back
+			sell(BOND, 1, 15_092_000L),
 			buy(BOND, 1, 15_174_000L)
 		));
 

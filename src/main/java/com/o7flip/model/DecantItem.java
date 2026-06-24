@@ -31,7 +31,6 @@ public class DecantItem
 	public int    itemId;
 	public String potionName = "Unknown";
 	public String strategy = "";
-	// JSON key is profit_per_4dose; the snake_case policy would yield profit_per4dose.
 	@SerializedName("profit_per_4dose")
 	public long   profitPer4dose;
 	public long   profitPerDose;

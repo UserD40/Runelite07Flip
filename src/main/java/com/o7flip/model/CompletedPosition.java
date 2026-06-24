@@ -29,12 +29,12 @@ public class CompletedPosition
 	public int     itemId;
 	public String  name;
 	public int     qty;
-	public long    buyGp;       // Σ buys.qty × price_each
-	public long    sellGp;      // Σ sells.qty × price_each (gross, pre-tax)
-	public long    profit;      // sellGp − GE tax(sellGp) − buyGp
+	public long    buyGp;
+	public long    sellGp;
+	public long    profit;
 	public boolean partial;
-	public Double  fillHours;   // (maxTradeTime − minTradeTime) / 3_600_000; null if < 2 trades
-	public String  closedAt;    // ISO timestamp of the last sell
+	public Double  fillHours;
+	public String  closedAt;
 
 	public String dedupeKey()
 	{

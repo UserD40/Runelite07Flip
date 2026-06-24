@@ -52,14 +52,14 @@ public class DumpItemPanel extends JPanel
 {
 	private static final Color ODD_BG   = new Color(0x272727);
 	private static final Color HOVER_BG = new Color(0x3A3A3A);
-	private static final Color HIGH     = new Color(0xFF4444);  // score >= 70
-	private static final Color MID      = new Color(0xFFAA00);  // score >= 30
-	private static final Color LOW      = new Color(0x888888);  // score < 30
+	private static final Color HIGH     = new Color(0xFF4444);
+	private static final Color MID      = new Color(0xFFAA00);
+	private static final Color LOW      = new Color(0x888888);
 	private static final Color CLOCK    = new Color(0xFF981F);
 	private static final Color MUTED    = new Color(0x666666);
 	private static final Color UNVERIFIED_FG = new Color(0xAAAAAA);
-	private static final Color CONFIRMED_TIER = new Color(0x00C27A); // emerald
-	private static final Color LIKELY_TIER    = new Color(0xE8A838); // amber
+	private static final Color CONFIRMED_TIER = new Color(0x00C27A);
+	private static final Color LIKELY_TIER    = new Color(0xE8A838);
 
 	public DumpItemPanel(DumpItem item, ItemManager itemManager, boolean odd, O7FlipPlugin plugin)
 	{

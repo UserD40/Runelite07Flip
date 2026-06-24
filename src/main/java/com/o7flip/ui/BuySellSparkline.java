@@ -200,7 +200,7 @@ public class BuySellSparkline extends JPanel
 		Long sellAt = valueAt(sell, idx);
 		if (buyAt == null && sellAt == null)
 		{
-			return;   // gap on both series here — nothing meaningful to show
+			return;
 		}
 
 		g2.setColor(HOVER_LINE);
@@ -238,7 +238,7 @@ public class BuySellSparkline extends JPanel
 		int boxX = snappedX + 8;
 		if (boxX + boxW > plotX + plotW)
 		{
-			boxX = snappedX - 8 - boxW;   // flip to the left
+			boxX = snappedX - 8 - boxW;
 		}
 		boxX = Math.max(plotX, Math.min(boxX, plotX + plotW - boxW));
 		int boxY = plotY + 2;

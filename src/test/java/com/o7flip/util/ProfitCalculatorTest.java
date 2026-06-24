@@ -112,7 +112,7 @@ public class ProfitCalculatorTest
 		assertEquals(1, r.completedFlips.size());
 		ProfitCalculator.CompletedFlip flip = r.completedFlips.get(0);
 		assertEquals(40, flip.quantity);
-		assertEquals(40_000L, flip.buyTotal);  // 100_000 * 40 / 100
+		assertEquals(40_000L, flip.buyTotal);
 		assertEquals(47_040L, flip.sellTotal);
 		assertEquals(960L,   flip.tax);
 		assertEquals(7_040L, flip.profit);
@@ -152,7 +152,7 @@ public class ProfitCalculatorTest
 		ProfitCalculator.OpenPosition pos = r.openPositions.get(1);
 		assertNotNull(pos);
 		assertEquals(20, pos.remainingQty);
-		assertEquals(20_000L, pos.remainingCostBasis); // 50_000 - 30_000
+		assertEquals(20_000L, pos.remainingCostBasis);
 	}
 
 	@Test
@@ -284,12 +284,12 @@ public class ProfitCalculatorTest
 		assertEquals(1, r.completedFlips.size());
 		ProfitCalculator.CompletedFlip f = r.completedFlips.get(0);
 		assertEquals(10, f.quantity);
-		assertEquals(20_000L, f.buyTotal); // buyB (later in list) consumed first
+		assertEquals(20_000L, f.buyTotal);
 
 		ProfitCalculator.OpenPosition pos = r.openPositions.get(1);
 		assertNotNull(pos);
 		assertEquals(10, pos.remainingQty);
-		assertEquals(10_000L, pos.remainingCostBasis); // buyA stays open
+		assertEquals(10_000L, pos.remainingCostBasis);
 	}
 
 	@Test

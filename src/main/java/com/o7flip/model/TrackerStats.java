@@ -32,7 +32,7 @@ public class TrackerStats
 	public int closedCount;
 	public double winRate;
 	public double hitRate;
-	public BestFlip bestFlip;   // null if user has no closed flips
+	public BestFlip bestFlip;
 	public String updatedAt;
 
 	public static class BestFlip

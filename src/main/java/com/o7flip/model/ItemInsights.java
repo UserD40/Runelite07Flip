@@ -30,17 +30,17 @@ public class ItemInsights
 	public String  name;
 	public boolean members;
 	public int     buyLimit;
-	public Integer highAlch;        // null if item has no alch value
+	public Integer highAlch;
 	public Integer lowAlch;
 
 	public Current current;
 	public Volume  volume;
 	public Ranges  ranges;
 	public Score   score;
-	public Projection projection;   // null for free users or ineligible items
-	public Frozen  frozen;          // null when the requesting user has no freeze for this item
-	public Indicators indicators;   // premium-only, null when free
-	public Liquidity  liquidity;    // premium-only, null when free
+	public Projection projection;
+	public Frozen  frozen;
+	public Indicators indicators;
+	public Liquidity  liquidity;
 
 	public Long[]  sparkline24hBuy;
 	public Long[]  sparkline24hSell;
@@ -72,7 +72,7 @@ public class ItemInsights
 		public long   tax;
 		public long   profit;
 		public double roiPct;
-		public Long   recBuy;        // premium-only, null when locked
+		public Long   recBuy;
 		public Long   recSell;
 		public Long   recProfit;
 		public Integer buyAgeMinutes;
@@ -103,7 +103,7 @@ public class ItemInsights
 	{
 		public int    confidence;
 		public String tier;          // "poor" | "fair" | "good" | "great"
-		public String signal;        // premium-only, null when locked
+		public String signal;
 	}
 
 	public static class Projection
@@ -130,8 +130,8 @@ public class ItemInsights
 		public Double  rsi14;
 		public Double  macdHist;
 		public String  macdCross;      // "bullish" | "bearish" | null
-		public Double  bbPositionPct;  // 0–100 position within Bollinger bands
-		public Double  volSurge;       // current vs baseline volume ratio
+		public Double  bbPositionPct;
+		public Double  volSurge;
 		public Long    ma7d;
 		public Long    ma30d;
 		public String  maCross;        // "bullish" | "bearish" | null — 7d vs 30d
@@ -143,11 +143,11 @@ public class ItemInsights
 
 	public static class Liquidity
 	{
-		public Integer hourlyBuyVolume;       // instant buys (wiki lowPriceVolume)
-		public Integer hourlySellVolume;      // instant sells (wiki highPriceVolume)
-		public Double  volumeImbalancePct;    // + = buy pressure, − = sell pressure
-		public Integer crossedHours24h;       // hours of last 24 with inverted margin
-		public Double  estHoursToFillLimit;   // volume-throughput proxy, not a queue model
+		public Integer hourlyBuyVolume;
+		public Integer hourlySellVolume;
+		public Double  volumeImbalancePct;
+		public Integer crossedHours24h;
+		public Double  estHoursToFillLimit;
 	}
 
 }

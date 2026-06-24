@@ -41,7 +41,7 @@ public class OptimizeResult
 		public int     slotsUsed;
 		public int     slotsRequested;
 		public String  risk;            // "low" | "medium" | "high"
-		public Boolean members;         // null = both, true = members, false = F2P
+		public Boolean members;
 		public long    expectedProfitTotal;
 		public Double  avgFillConfidence;
 		public Double  minFillConfidence;

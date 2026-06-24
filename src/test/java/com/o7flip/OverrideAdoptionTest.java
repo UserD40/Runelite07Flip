@@ -91,7 +91,7 @@ public class OverrideAdoptionTest
 		assertEquals(1, local.appliedOverrideRev);
 		assertFalse(local.pendingOfflineReconcile);
 		assertEquals(1, local.sells.size());
-		assertEquals(10, local.sells.get(0).qty);   // authoritative sold count adopted
+		assertEquals(10, local.sells.get(0).qty);
 	}
 
 	@Test
@@ -234,9 +234,9 @@ public class OverrideAdoptionTest
 
 		assertEquals(2, local.slots.size());
 		assertTrue(itemIds(local).contains(EYE_OF_AYAK));
-		assertTrue(itemIds(local).contains(CRYSTAL_SEED));        // added
-		assertFalse(itemIds(local).contains(BANDOS_CHESTPLATE));  // dropped
-		assertEquals(GEN_NEW, local.generatedAt);                 // no-clobber: version caught up
+		assertTrue(itemIds(local).contains(CRYSTAL_SEED));
+		assertFalse(itemIds(local).contains(BANDOS_CHESTPLATE));
+		assertEquals(GEN_NEW, local.generatedAt);
 	}
 
 	@Test
@@ -246,17 +246,17 @@ public class OverrideAdoptionTest
 			Arrays.asList(fill(6, 100)), new ArrayList<>());
 		lEye.offerInstanceId = 17_000_000_003L;
 		lEye.buyPrice = 100;
-		Allocation rEye = plain(EYE_OF_AYAK, 12);   // new plan: qty 12, fresh, no fills
+		Allocation rEye = plain(EYE_OF_AYAK, 12);
 		rEye.buyPrice = 105;
 
 		OptimizerSession local = sessionAt(GEN_OLD, lEye);
 		O7FlipPlugin.mergeRemoteFills(local, sessionAt(GEN_NEW, rEye));
 
 		Allocation merged = local.slots.get(0);
-		assertEquals(6, merged.buys.get(0).qty);                       // local fills carried
-		assertEquals(Long.valueOf(17_000_000_003L), merged.offerInstanceId); // epoch carried
-		assertEquals(105, merged.buyPrice);                            // server plan field taken
-		assertEquals(12, merged.qty);                                  // server plan field taken
+		assertEquals(6, merged.buys.get(0).qty);
+		assertEquals(Long.valueOf(17_000_000_003L), merged.offerInstanceId);
+		assertEquals(105, merged.buyPrice);
+		assertEquals(12, merged.qty);
 	}
 
 	@Test
@@ -272,7 +272,7 @@ public class OverrideAdoptionTest
 		O7FlipPlugin.mergeRemoteFills(local, sessionAt(GEN_NEW, rEye));
 
 		Allocation adopted = local.slots.get(0);
-		assertEquals(10, adopted.buys.get(0).qty);   // §7 override → server fills win, not local 6
+		assertEquals(10, adopted.buys.get(0).qty);
 		assertEquals(10, adopted.sells.get(0).qty);
 		assertEquals(1, adopted.appliedOverrideRev);
 		assertEquals(SlotState.CLOSED, adopted.state);
@@ -285,9 +285,9 @@ public class OverrideAdoptionTest
 		O7FlipPlugin.mergeRemoteFills(local, sessionAt(GEN_OLD, plain(EYE_OF_AYAK, 10), plain(CRYSTAL_SEED, 5)));
 
 		assertTrue(itemIds(local).contains(EYE_OF_AYAK));
-		assertTrue(itemIds(local).contains(BANDOS_CHESTPLATE)); // local-only kept
-		assertFalse(itemIds(local).contains(CRYSTAL_SEED));     // remote-only NOT added (same version)
-		assertEquals(GEN_OLD, local.generatedAt);               // unchanged
+		assertTrue(itemIds(local).contains(BANDOS_CHESTPLATE));
+		assertFalse(itemIds(local).contains(CRYSTAL_SEED));
+		assertEquals(GEN_OLD, local.generatedAt);
 	}
 
 	@Test
@@ -297,7 +297,7 @@ public class OverrideAdoptionTest
 		assertFalse(O7FlipPlugin.isRemoteStructurallyNewer(sessionAt(GEN_NEW), sessionAt(GEN_OLD)));
 		assertFalse(O7FlipPlugin.isRemoteStructurallyNewer(sessionAt(GEN_OLD), sessionAt(GEN_OLD)));
 		assertFalse(O7FlipPlugin.isRemoteStructurallyNewer(sessionAt(GEN_OLD), sessionAt("")));   // empty = no version
-		assertTrue(O7FlipPlugin.isRemoteStructurallyNewer(sessionAt(null), sessionAt(GEN_OLD))); // local has none
+		assertTrue(O7FlipPlugin.isRemoteStructurallyNewer(sessionAt(null), sessionAt(GEN_OLD)));
 	}
 
 	@Test

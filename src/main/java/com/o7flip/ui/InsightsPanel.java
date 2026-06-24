@@ -822,7 +822,7 @@ public class InsightsPanel extends JPanel
 		if (locked && frozenBuy != null && frozenBuy > 0 && frozenSell != null && frozenSell > 0)
 		{
 			JPanel panel = sectionPanel("07Flip recommended (locked)");
-			long fProfit = Math.round(frozenSell * 0.98) - frozenBuy;   // after ~2% GE tax
+			long fProfit = Math.round(frozenSell * 0.98) - frozenBuy;
 			panel.add(rowGp("Buy",    frozenBuy,  "frozen", FROZEN_COL));
 			panel.add(rowGp("Sell",   frozenSell, "frozen", FROZEN_COL));
 			panel.add(rowGp("Profit", fProfit,    null,     margingColor(fProfit)));
@@ -1084,8 +1084,8 @@ public class InsightsPanel extends JPanel
 		final Long[] buy;
 		final Long[] sell;
 		final String axisStart;
-		final long   startEpochMs;     // bucket[0] time, -1 if unknown
-		final int    intervalMinutes;  // minutes per bucket
+		final long   startEpochMs;
+		final int    intervalMinutes;
 
 		ChartPeriod(String label, Long[] buy, Long[] sell, String axisStart, String startIso, int intervalMinutes)
 		{

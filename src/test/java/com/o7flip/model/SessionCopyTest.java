@@ -119,7 +119,7 @@ public class SessionCopyTest
 		OptimizerSession orig = sample();
 		OptimizerSession copy = orig.copy();
 
-		orig.slots.clear();                         // recycle/replace style edit
+		orig.slots.clear();
 		orig.inputs.excludeItemIds.add(99);
 
 		assertEquals(1, copy.slots.size());

@@ -135,11 +135,11 @@ public class O7FlipPanel extends PluginPanel
 	private static final String[] MIN_PROFIT_LABELS = {"Any profit", "100K+", "500K+", "1M+"};
 
 	private static final long[][] CAPITAL_RANGES = {
-		{0,            Long.MAX_VALUE}, // Any
-		{0,            100_000},        // Under 100K
-		{100_000,      1_000_000},      // 100K – 1M
-		{1_000_000,    10_000_000},     // 1M – 10M
-		{10_000_000,   Long.MAX_VALUE}, // 10M+
+		{0,            Long.MAX_VALUE},
+		{0,            100_000},
+		{100_000,      1_000_000},
+		{1_000_000,    10_000_000},
+		{10_000_000,   Long.MAX_VALUE},
 	};
 	private static final String[] CAPITAL_LABELS = {
 		"Any capital",
@@ -153,18 +153,18 @@ public class O7FlipPanel extends PluginPanel
 	private static final String[] DUMP_MIN_PROFIT_LABELS = {"Any Profit", "1K+", "5K+", "25K+", "100K+"};
 
 	private static final long[][] PRICE_RANGES = {
-		{0,               Long.MAX_VALUE},  // Any Price
-		{0,               10_000},          // 0 – 10K
-		{10_000,          50_000},          // 10K – 50K
-		{50_000,          100_000},         // 50K – 100K
-		{100_000,         500_000},         // 100K – 500K
-		{500_000,         1_000_000},       // 500K – 1M
-		{1_000_000,       5_000_000},       // 1M – 5M
-		{5_000_000,       10_000_000},      // 5M – 10M
-		{10_000_000,      25_000_000},      // 10M – 25M
-		{25_000_000,      50_000_000},      // 25M – 50M
-		{50_000_000,      100_000_000},     // 50M – 100M
-		{100_000_000,     Long.MAX_VALUE},  // 100M+
+		{0,               Long.MAX_VALUE},
+		{0,               10_000},
+		{10_000,          50_000},
+		{50_000,          100_000},
+		{100_000,         500_000},
+		{500_000,         1_000_000},
+		{1_000_000,       5_000_000},
+		{5_000_000,       10_000_000},
+		{10_000_000,      25_000_000},
+		{25_000_000,      50_000_000},
+		{50_000_000,      100_000_000},
+		{100_000_000,     Long.MAX_VALUE},
 	};
 	private static final String[] PRICE_RANGE_LABELS = {
 		"Any Price",
@@ -251,7 +251,7 @@ public class O7FlipPanel extends PluginPanel
 
 	private int flipsSortIdx   = 0;
 	private int dumpsSortIdx   = 0;
-	private int myFlipsSortIdx = 0;  // 0=Active 1=Recent 2=Margin
+	private int myFlipsSortIdx = 0;
 	private int myFlipsPage    = 0;
 	private static final int MY_FLIPS_PAGE_SIZE = 5;
 	private int myFlipsMarginSortIdx = 0;
@@ -269,18 +269,18 @@ public class O7FlipPanel extends PluginPanel
 	private JPanel dipsListPanel;
 	private JPanel decantListPanel;
 	private JPanel favouritesListPanel;
-	private JPanel optimizerListPanel;       // results column (cards + summary)
+	private JPanel optimizerListPanel;
 	private com.o7flip.model.OptimizeResult lastOptimize;
 	private int     optSlots         = 8;
 	private String  optRisk          = "medium";
 	private int     optMaxFillHours  = 4;
-	private Boolean optMembers       = null;  // null = both, true = members, false = F2P
+	private Boolean optMembers       = null;
 	private int     optMinProfitPct  = 0;
 	private boolean optShowingHistory;
 	private boolean optInFlight;
 	private boolean optFormCollapsed;
 	private JPanel  optCollapsedPanel;    // the "Active plan · Reconfigure" header strip
-	private JPanel  optInputsHost;        // hosts the strip while a plan is live, empty otherwise
+	private JPanel  optInputsHost;
 	private String lastOtherSubTab;
 	private JPanel myFlipsListPanel;
 	private com.o7flip.ui.MyTradesStatsPanel myFlipsStatsPanel;
@@ -289,8 +289,8 @@ public class O7FlipPanel extends PluginPanel
 	private JScrollPane searchScrollPane;
 
 	private JButton[] dumpsSortBtns;
-	private JButton[] dumpsTierBtns;       // [All, Confirmed, Likely]
-	private JPanel    dumpsTierBar;        // container for the segmented control
+	private JButton[] dumpsTierBtns;
+	private JPanel    dumpsTierBar;
 	private JButton[] dipsSortBtns;
 	private JButton[] decantSortBtns;
 	private JButton[] myFlipsSortBtns;
@@ -648,7 +648,7 @@ public class O7FlipPanel extends PluginPanel
 		flipsTotal = total;
 		flipsPage = page;
 		renderFlips(filtered());
-		pushInsightsRecommendations();   // refresh the Item-tab empty state if it's showing
+		pushInsightsRecommendations();
 		updateTimestamp();
 		setLoading(false);
 	}
@@ -730,7 +730,7 @@ public class O7FlipPanel extends PluginPanel
 		{
 			if (f.itemId == item.itemId)
 			{
-				return;   // already shown
+				return;
 			}
 		}
 		List<FlipItem> updated = new ArrayList<>();
@@ -903,10 +903,10 @@ public class O7FlipPanel extends PluginPanel
 	{
 		switch (favouritesSortIdx)
 		{
-			case 1: // Margin — the market margin shown on each card, highest first
+			case 1:
 				list.sort((a, b) -> Long.compare(b.profit, a.profit));
 				break;
-			case 2: // Available — items on cooldown first (soonest to free up), then the rest
+			case 2:
 				if (plugin != null)
 				{
 					list.sort((a, b) ->
@@ -920,7 +920,7 @@ public class O7FlipPanel extends PluginPanel
 					});
 				}
 				break;
-			default: // Default — the user's saved manual order (else natural order)
+			default:
 				applyManualOrder(list);
 				break;
 		}
@@ -1117,9 +1117,6 @@ public class O7FlipPanel extends PluginPanel
 		{
 			return;
 		}
-		// The /decanting endpoint returns the full list once, so pagination is
-		// client-side: slice the sorted list to the current page window and let
-		// fillListPaged own the free-row / sign-in / page-label logic.
 		List<DecantItem> all = sortDecants(fDecants(q));
 		int total = all.size();
 		int ps    = isSignedIn ? PAGE_SIZE : FREE_ROWS;
@@ -1373,7 +1370,7 @@ public class O7FlipPanel extends PluginPanel
 
 		switch (myFlipsRecentSortIdx)
 		{
-			case 1: // ROI desc — sells with matched buys first, then everything else by qty desc
+			case 1:
 				filtered.sort((a, b) ->
 				{
 					double ra = roiFor(a, profitBySellTimestamp, buyTotalBySellTimestamp);
@@ -1383,7 +1380,7 @@ public class O7FlipPanel extends PluginPanel
 					return Long.compare(b.timestamp, a.timestamp);
 				});
 				break;
-			case 2: // Quantity desc
+			case 2:
 				filtered.sort((a, b) ->
 				{
 					int cmp = Integer.compare(b.quantity, a.quantity);
@@ -1391,7 +1388,7 @@ public class O7FlipPanel extends PluginPanel
 					return Long.compare(b.timestamp, a.timestamp);
 				});
 				break;
-			default: // Profit desc — sells with matched profit first; buys (no profit) by timestamp
+			default:
 				filtered.sort((a, b) ->
 				{
 					long pa = profitFor(a, profitBySellTimestamp);
@@ -1436,14 +1433,14 @@ public class O7FlipPanel extends PluginPanel
 				return java.time.LocalDate.now().minusDays(30)
 					.atStartOfDay(java.time.ZoneId.systemDefault())
 					.toInstant().toEpochMilli();
-			default: // ALL_TIME
+			default:
 				return Long.MIN_VALUE;
 		}
 	}
 
 	private static long profitFor(TradeRecord t, Map<Long, Long> profitBySellTimestamp)
 	{
-		if (t.isBuy) return Long.MIN_VALUE; // buys sort below sells when sorting by profit desc
+		if (t.isBuy) return Long.MIN_VALUE;
 		Long p = profitBySellTimestamp.get(t.timestamp);
 		return p != null ? p : Long.MIN_VALUE;
 	}
@@ -1888,11 +1885,11 @@ public class O7FlipPanel extends PluginPanel
 	}
 
 
-	private JPanel     capitalContainer;   // the swappable shell — collapsed or expanded
+	private JPanel     capitalContainer;
 	private JTextField capitalField;
 	private JLabel     capitalReadout;
-	private JLabel     capitalHeaderChip;  // small pen icon in the title bar
-	private boolean    capitalExpanded;    // ephemeral — UI state, not persisted
+	private JLabel     capitalHeaderChip;
+	private boolean    capitalExpanded;
 
 	private JPanel buildCapitalRow()
 	{
@@ -2224,14 +2221,10 @@ public class O7FlipPanel extends PluginPanel
 		return false;
 	}
 
-	// The flip-finder sub-tabs shown inside the "Other" tab, in display order.
 	public static final List<String> OTHER_SUB_TABS = java.util.Arrays.asList(
 		"Dips", "Dumps", "Decant"
 	);
 
-	// Fixed main-tab order. The JTabbedPane uses WRAP_TAB_LAYOUT, which renders the
-	// first-added tabs as the bottom run and later-added as the top run — so this list
-	// yields bottom=[Flips, Trades, Other], top=[Plan, Item, Favs].
 	public static final List<String> MAIN_TAB_ORDER = java.util.Arrays.asList(
 		"Flips", "Trades", "Other", "Plan", "Item", "Favs"
 	);
@@ -2443,9 +2436,9 @@ public class O7FlipPanel extends PluginPanel
 				private int perRowFor(int n)
 				{
 					if (n <= 4) return Math.max(1, n);
-					if (n <= 6) return 3;   // 5 → 3+2, 6 → 3+3
-					if (n <= 8) return 4;   // 7 → 4+3, 8 → 4+4
-					return (int) Math.ceil(n / 2.0); // 9+ → ceil(n/2) per row, 2 rows
+					if (n <= 6) return 3;
+					if (n <= 8) return 4;
+					return (int) Math.ceil(n / 2.0);
 				}
 			});
 			pane.setOpaque(true);
@@ -2584,7 +2577,7 @@ public class O7FlipPanel extends PluginPanel
 			i ->
 			{
 				myFlipsSortIdx = i;
-				myFlipsPage    = 0;   // reset to first page when switching sort
+				myFlipsPage    = 0;
 				renderMyFlips();
 			},
 			false);

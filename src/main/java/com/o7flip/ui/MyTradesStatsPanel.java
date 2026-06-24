@@ -364,11 +364,11 @@ public class MyTradesStatsPanel extends JPanel
 	{
 		if ("declared".equals(source))
 		{
-			return new Color(0xE8A838);   // amber — projection, not real fill
+			return new Color(0xE8A838);
 		}
 		if ("mixed".equals(source))
 		{
-			return new Color(0xC4A052);   // dimmer gold — partial fill backing
+			return new Color(0xC4A052);
 		}
 		return Color.WHITE;
 	}

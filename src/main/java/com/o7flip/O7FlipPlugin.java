@@ -528,7 +528,7 @@ public class O7FlipPlugin extends Plugin
 			{
 				notifier.notify("07Flip: buy limit available again for " + itemNameFor(itemId));
 			}
-			it.remove();   // window expired — drop it
+			it.remove();
 			changed = true;
 		}
 		if (changed)
@@ -846,7 +846,7 @@ public class O7FlipPlugin extends Plugin
 		fetchAuthStatus();
 		authRefreshTask = executor.scheduleAtFixedRate(
 			this::fetchAuthStatus, 15, 15, TimeUnit.MINUTES);
-		executor.execute(() -> fetchAll(true)); // forced — panel not yet visible at startup
+		executor.execute(() -> fetchAll(true));
 		executor.execute(this::doSyncTrackerHistory);
 		executor.execute(this::doBulkSyncToServer);
 		executor.execute(this::doFetchTrackerStats);
@@ -1187,7 +1187,7 @@ public class O7FlipPlugin extends Plugin
 
 		if (shown > 0 && slotItem > 0 && shown != slotItem)
 		{
-			return -1;   // ambiguous (stale/lingering varbit) — don't open the wrong item
+			return -1;
 		}
 		if (shown > 0)
 		{
@@ -2353,8 +2353,8 @@ public class O7FlipPlugin extends Plugin
 		for (int i = list.size() - 1, scanned = 0; i >= 0 && scanned < searchDepth; i--, scanned++)
 		{
 			TradeRecord t = list.get(i);
-			if (t.offerInstanceId != null) continue;        // already-owned row
-			if (!t.partial)                continue;        // legacy completed — leave alone
+			if (t.offerInstanceId != null) continue;
+			if (!t.partial)                continue;
 			if (t.itemId != itemId)        continue;
 			if (t.isBuy != isBuy)          continue;
 			if (t.priceEach != priceEach)  continue;
@@ -2375,8 +2375,8 @@ public class O7FlipPlugin extends Plugin
 		for (int i = list.size() - 1, scanned = 0; i >= 0 && scanned < searchDepth; i--, scanned++)
 		{
 			TradeRecord t = list.get(i);
-			if (t.offerInstanceId == null) continue;          // need a locally-merged row
-			if (!t.partial)                continue;          // terminal row isn't this active offer
+			if (t.offerInstanceId == null) continue;
+			if (!t.partial)                continue;
 			if (t.itemId != itemId)        continue;
 			if (t.isBuy != isBuy)          continue;
 			if (t.totalQuantity == null || t.totalQuantity != totalQuantity) continue;
@@ -2400,12 +2400,12 @@ public class O7FlipPlugin extends Plugin
 		for (int i = list.size() - 1, scanned = 0; i >= 0 && scanned < searchDepth; i--, scanned++)
 		{
 			TradeRecord t = list.get(i);
-			if (t.offerInstanceId == null) continue;          // need a locally-merged row
+			if (t.offerInstanceId == null) continue;
 			if (t.itemId != itemId)        continue;
 			if (t.isBuy != isBuy)          continue;
 			if (t.totalQuantity == null || t.totalQuantity != totalQuantity) continue;
-			if (t.offerInstanceId % 10 != slot) continue;     // offer-epoch slot continuity
-			if (t.quantity != currentQty) continue;           // exact-match only — see javadoc
+			if (t.offerInstanceId % 10 != slot) continue;
+			if (t.quantity != currentQty) continue;
 			if (t.totalGp  != currentGp)  continue;
 			return i;
 		}
@@ -2421,7 +2421,7 @@ public class O7FlipPlugin extends Plugin
 		virtualSell.quantity  = deltaQty;
 		virtualSell.totalGp   = deltaGp;
 		virtualSell.priceEach = deltaQty > 0 ? deltaGp / deltaQty : 0L;
-		virtualSell.timestamp = fillTimestamp + 1L;  // sort after history
+		virtualSell.timestamp = fillTimestamp + 1L;
 		probe.add(virtualSell);
 		com.o7flip.util.ProfitCalculator.Result r = com.o7flip.util.ProfitCalculator.compute(probe);
 		long total = 0L;
@@ -3266,9 +3266,6 @@ public class O7FlipPlugin extends Plugin
 		});
 	}
 
-	// The /decanting endpoint ships the full list in one shot, so sort + paging
-	// are handled client-side in the panel — a page/sort change just re-renders
-	// the rows already held, no refetch needed.
 	void onDecantPageChanged(int page)
 	{
 		SwingUtilities.invokeLater(() -> panel.rerenderDecants());
@@ -3883,7 +3880,7 @@ public class O7FlipPlugin extends Plugin
 				l.buys                    = new java.util.ArrayList<>(r.buys);
 				l.sells                   = new java.util.ArrayList<>(r.sells);
 				l.state                   = r.state;
-				l.sellListed              = r.sellListed;   // §7 correction wins outright
+				l.sellListed              = r.sellListed;
 				l.overrideRev             = r.overrideRev;
 				l.overrideSource          = r.overrideSource;
 				l.appliedOverrideRev      = r.overrideRev;
@@ -4203,7 +4200,7 @@ public class O7FlipPlugin extends Plugin
 		com.o7flip.model.SlotState prevState = slot.state;
 
 		int countedQty = cappedFillQty(isBuy, slot, qty);
-		if (countedQty <= 0) return;   // leg already at its cap — counted in My Trades only
+		if (countedQty <= 0) return;
 
 		String tradedAt = java.time.Instant.ofEpochMilli(timestampMs).toString();
 		foldFill(isBuy ? slot.buys : slot.sells, countedQty, pricePer, tradedAt, !isBuy);
@@ -4220,7 +4217,7 @@ public class O7FlipPlugin extends Plugin
 		if (prevState != com.o7flip.model.SlotState.CLOSED
 			&& slot.state == com.o7flip.model.SlotState.CLOSED)
 		{
-			slot.sellListed = false;   // §10 — the listing resolved; flag is spent
+			slot.sellListed = false;
 			appendCompletedPosition(slot);
 		}
 
@@ -4305,7 +4302,7 @@ public class O7FlipPlugin extends Plugin
 				if (o != null && o.getItemId() == itemId
 					&& o.getState() == GrandExchangeOfferState.SELLING)
 				{
-					return;   // still listed elsewhere
+					return;
 				}
 			}
 		}
@@ -4328,7 +4325,7 @@ public class O7FlipPlugin extends Plugin
 	{
 		if (s == null || s.slots == null) return false;
 		java.time.Instant gen = parseInstantOrNull(s.generatedAt);
-		if (gen == null) return false;   // no anchor — can't safely scope history
+		if (gen == null) return false;
 		long genMs = gen.toEpochMilli();
 		java.util.List<TradeRecord> history = tradeHistory;
 		if (history == null || history.isEmpty()) return false;
@@ -4339,7 +4336,7 @@ public class O7FlipPlugin extends Plugin
 			if (slot == null || slot.itemId <= 0 || slot.qty <= 0) continue;
 			if (!slot.buys.isEmpty() || !slot.sells.isEmpty()) continue;
 			boolean slotChanged = false;
-			for (TradeRecord t : history)   // chronological append order
+			for (TradeRecord t : history)
 			{
 				if (t == null || t.itemId != slot.itemId || t.quantity <= 0) continue;
 				if (t.timestamp < genMs) continue;
@@ -4368,8 +4365,8 @@ public class O7FlipPlugin extends Plugin
 	{
 		if (slot == null) return 0;
 		int capacity = isBuy
-			? slot.qty - sumQty(slot.buys)              // headroom to the plan target
-			: sumQty(slot.buys) - sumQty(slot.sells);   // can't sell beyond counted-bought
+			? slot.qty - sumQty(slot.buys)
+			: sumQty(slot.buys) - sumQty(slot.sells);
 		return Math.min(qty, Math.max(0, capacity));
 	}
 
@@ -4433,11 +4430,11 @@ public class O7FlipPlugin extends Plugin
 		com.o7flip.model.OptimizeResult.Allocation slot = s.slots.get(slotIdx);
 		if (slot == null) return;
 		int bought = sumQty(slot.buys);
-		if (bought <= 0 || slot.partial) return;   // nothing bought yet, or already partial
+		if (bought <= 0 || slot.partial) return;
 
-		slot.reservedGp     = slot.gpAllocated;                 // remember original budget
-		slot.qty            = bought;                           // cap target → advances state
-		slot.gpAllocated    = sumGp(slot.buys);                 // actual spend
+		slot.reservedGp     = slot.gpAllocated;
+		slot.qty            = bought;
+		slot.gpAllocated    = sumGp(slot.buys);
 		slot.expectedProfit = (long) bought * slot.profitPerUnit;
 		slot.partial        = true;
 		slot.state          = com.o7flip.model.SlotState.derive(slot.qty, slot.buys, slot.sells);
@@ -4483,7 +4480,7 @@ public class O7FlipPlugin extends Plugin
 			{
 				if (existing != null && existing.dedupeKey().equals(key)) { added = false; break; }
 			}
-			if (added) completedPositions.add(0, cp);   // newest-first
+			if (added) completedPositions.add(0, cp);
 		}
 		if (added && panel != null) SwingUtilities.invokeLater(panel::onCompletedPositionsChanged);
 

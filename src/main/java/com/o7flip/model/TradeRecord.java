@@ -30,10 +30,10 @@ public class TradeRecord
 	public String name;
 	public boolean isBuy;
 	public int    quantity;
-	public long   priceEach;  // effective fill price = totalGp / quantity
-	public long   totalGp;    // raw value of GrandExchangeOffer.getSpent() at
-	public long   timestamp;  // System.currentTimeMillis() when recorded
-	public boolean partial;   // true when CANCELLED with a non-zero partial fill
+	public long   priceEach;
+	public long   totalGp;
+	public long   timestamp;
+	public boolean partial;
 
 	public Long tradeId;
 

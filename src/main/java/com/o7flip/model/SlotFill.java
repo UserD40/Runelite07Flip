@@ -28,7 +28,7 @@ public class SlotFill
 {
 	public int    qty;
 	public long   priceEach;
-	public String tradedAt;   // ISO datetime
+	public String tradedAt;
 
 	public SlotFill copy()
 	{

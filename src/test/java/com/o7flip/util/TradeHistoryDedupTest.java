@@ -214,7 +214,7 @@ public class TradeHistoryDedupTest
 		TradeRecord a = merged(13239, "Primordial boots", false, 1, 22_142_881L, 1_000_000L);
 		a.totalQuantity = 2;
 		TradeRecord b = merged(13239, "Primordial boots", false, 1, 22_142_881L,
-			1_000_000L + 8L * 24 * 60 * 60_000L); // 8 days later
+			1_000_000L + 8L * 24 * 60 * 60_000L);
 		b.totalQuantity = 2;
 
 		List<TradeRecord> out = TradeHistoryDedup.scrub(Arrays.asList(a, b));
@@ -241,7 +241,7 @@ public class TradeHistoryDedupTest
 		TradeRecord original = merged(13239, "Primordial boots", false, 1, 22_142_881L, 1_000_000L);
 		original.totalQuantity = 2;
 		TradeRecord reObs    = merged(13239, "Primordial boots", false, 1, 22_142_881L,
-			1_000_000L + 60L * 60_000L * 60); // 60h later
+			1_000_000L + 60L * 60_000L * 60);
 		reObs.totalQuantity = 2;
 
 		List<TradeRecord> out = TradeHistoryDedup.scrub(Arrays.asList(original, reObs));
@@ -269,9 +269,9 @@ public class TradeHistoryDedupTest
 	@Test
 	public void heal_rewritesBackdatedBuyToObservedTime()
 	{
-		long observedReal = 1_778_697_167_813L; // 2026-05-13 20:32:47 UTC
-		long backdatedTs  = 1_778_687_668_071L; // 1ms before the older BUY 2
-		long offerId      = observedReal * 10L + 2L; // slot 2
+		long observedReal = 1_778_697_167_813L;
+		long backdatedTs  = 1_778_687_668_071L;
+		long offerId      = observedReal * 10L + 2L;
 
 		TradeRecord buy3 = merged(MACUAHUITL, "Dual macuahuitl", true, 3, 188_722_932L, backdatedTs);
 		buy3.offerInstanceId = offerId;
@@ -306,7 +306,7 @@ public class TradeHistoryDedupTest
 		row.isBuy = true;
 		row.quantity = 1;
 		row.totalGp = 6_000_000L;
-		row.timestamp = 1L;             // wildly low
+		row.timestamp = 1L;
 		row.tradeId = 999L;
 
 		List<TradeRecord> out = TradeHistoryDedup.healBackdatedTimestamps(Collections.singletonList(row));

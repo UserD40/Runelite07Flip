@@ -65,13 +65,9 @@ public class O7FlipApiClient
 
 	private static final String    BASE_URL        = "https://07flip.com/api/runelite";
 	private static final String    USER_AGENT      = "07Flip-RuneLite/1.0";
-	private static final int       PAGE_LIMIT      = 10;   // items per page — must match O7FlipPanel.PAGE_SIZE
+	private static final int       PAGE_LIMIT      = 10;
 	private static final MediaType MEDIA_TYPE_JSON = MediaType.get("application/json; charset=utf-8");
 
-	// Auto-deserialization for plain DTO endpoints whose JSON keys are the snake_case
-	// form of the field name. Gson's internal reflection is permitted; only OUR code
-	// must avoid java.lang.reflect. Use @SerializedName on any field whose JSON key is
-	// not the lower_underscore form of its name (e.g. digit boundaries).
 	private static final Gson PARSER = new GsonBuilder()
 		.setFieldNamingPolicy(FieldNamingPolicy.LOWER_CASE_WITH_UNDERSCORES)
 		.create();
@@ -102,7 +98,7 @@ public class O7FlipApiClient
 	private synchronized void markRateLimited(Response response)
 	{
 		long now     = System.currentTimeMillis();
-		long retryMs = parseRetryAfterMs(response);          // -1 when absent/unparseable
+		long retryMs = parseRetryAfterMs(response);
 		long base    = retryMs > 0 ? retryMs : RATE_LIMIT_BASE_MS;
 
 		if (now < backoffUntil)
@@ -118,7 +114,7 @@ public class O7FlipApiClient
 		if (now - backoffUntil > RATE_LIMIT_RESET_MS) rateLimitIncidents = 0;
 		rateLimitIncidents++;
 
-		double mult     = Math.min(Math.pow(2, rateLimitIncidents - 1), 8.0);   // 1,2,4,8
+		double mult     = Math.min(Math.pow(2, rateLimitIncidents - 1), 8.0);
 		long   cooldown = Math.min((long) (base * mult), RATE_LIMIT_MAX_MS);
 		backoffUntil    = now + withJitter(cooldown);
 		log.warn("[07Flip] Rate limited (429) — pausing requests ~{}s (incident #{}, retry-after={})",
@@ -195,8 +191,6 @@ public class O7FlipApiClient
 		okHttpClient.newCall(builder.build()).enqueue(callback);
 	}
 
-	// GET a paged list endpoint with the standard log-and-empty-on-failure + parse-on-success
-	// callback. label is used only for the failure warn line.
 	private <T> void fetchPaged(String url, String label, String arrayKey,
 	                            JsonMapper<T> mapper, BiConsumer<List<T>, Integer> callback)
 	{
@@ -217,8 +211,6 @@ public class O7FlipApiClient
 		});
 	}
 
-	// GET an endpoint that yields a plain list (no total), with log-and-empty-on-failure +
-	// parseArray-on-success. label is used only for the failure warn line.
 	private <T> void fetchList(String url, String label, String arrayKey,
 	                           JsonMapper<T> mapper, Consumer<List<T>> callback)
 	{
@@ -245,9 +237,6 @@ public class O7FlipApiClient
 		T parse(Response response) throws IOException;
 	}
 
-	// GET an endpoint parsed via a custom Response parser, with log-and-default-on-failure.
-	// The parser owns success/HTTP handling; the default is only used when the request itself
-	// fails. label is used only for the failure warn line.
 	private <T> void fetchParsed(String url, String label,
 	                             ResponseParser<T> parser,
 	                             T emptyDefault, Consumer<T> callback)
@@ -278,8 +267,6 @@ public class O7FlipApiClient
 			fetchList(BASE_URL + "/v2/search?q=" + encoded + "&limit=10", "fetchSearch", "items", obj ->
 			{
 				SearchResultItem item = PARSER.fromJson(obj, SearchResultItem.class);
-				// String defaults: Gson sets null on an explicit JSON null; the manual
-				// mapper kept the default. Restore the defaults to stay byte-identical.
 				if (item.name == null)        item.name        = "Unknown";
 				if (item.lastUpdated == null) item.lastUpdated = "";
 				return item;
@@ -2193,10 +2180,6 @@ public class O7FlipApiClient
 		});
 	}
 
-	// -------------------------------------------------------------------------
-	// /decanting — potion decant profitability (anon, no auth). Returns the
-	// full list once; the panel paginates client-side.
-	// -------------------------------------------------------------------------
 
 	public void fetchDecanting(Consumer<List<DecantItem>> callback)
 	{
@@ -2206,9 +2189,6 @@ public class O7FlipApiClient
 
 	private DecantItem parseDecantItem(JsonObject obj)
 	{
-		// Plain DTO: keys are the snake_case form of the field names. potion_name and
-		// strategy default to "Unknown"/"" (set as field initializers on DecantItem);
-		// profit_per_4dose needs @SerializedName since the policy yields profit_per4dose.
 		return PARSER.fromJson(obj, DecantItem.class);
 	}
 
@@ -2280,16 +2260,12 @@ public class O7FlipApiClient
 
 	private RecommendedPrices parseRecommendedPrices(JsonObject obj)
 	{
-		// Plain DTO: all keys are the snake_case form of the field names
-		// (item_id, rec_buy_price, rec_sell_price, ge_tax, rec_profit, sample_size).
 		return PARSER.fromJson(obj, RecommendedPrices.class);
 	}
 
 	private FlipItem parseFlipItem(JsonObject obj)
 	{
 		FlipItem item = PARSER.fromJson(obj, FlipItem.class);
-		// String defaults: Gson sets null on an explicit JSON null; the manual
-		// parser kept the default. Restore the defaults to stay byte-identical.
 		if (item.name == null) item.name = "Unknown";
 		return item;
 	}
@@ -2308,12 +2284,10 @@ public class O7FlipApiClient
 		DumpItem item = PARSER.fromJson(obj, DumpItem.class);
 		if (item.name == null)       item.name       = "Unknown";
 		if (item.dumpStatus == null) item.dumpStatus = "none";
-		// tier: manual parser collapsed an empty string to null.
 		if (item.tier != null && item.tier.isEmpty())
 		{
 			item.tier = null;
 		}
-		// buyPrice falls back to current_price when absent/zero.
 		if (item.buyPrice == 0)
 		{
 			item.buyPrice = getLong(obj, "current_price", 0);

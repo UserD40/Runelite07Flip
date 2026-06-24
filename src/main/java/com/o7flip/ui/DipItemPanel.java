@@ -112,7 +112,7 @@ public class DipItemPanel extends JPanel
 			+ "<br><font color='#666666'>Right-click anywhere to queue a Buy on the GE · Click for insights</font></html>");
 		priceRow.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
 
-		Double dipForWindow = item.dipPct;  // fallback
+		Double dipForWindow = item.dipPct;
 		String windowLabel = "24h";
 		if ("7d".equalsIgnoreCase(window))
 		{
