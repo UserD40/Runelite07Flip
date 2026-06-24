@@ -263,7 +263,7 @@ public class O7FlipApiClient
 		try
 		{
 			String encoded = java.net.URLEncoder.encode(query.trim(), "UTF-8");
-			fetchList(BASE_URL + "/v2/search?q=" + encoded + "&limit=10", "fetchSearch", "items", obj ->
+			fetchList(BASE_URL + "/v2/search?q=" + encoded + "&limit=100", "fetchSearch", "items", obj ->
 			{
 				SearchResultItem item = PARSER.fromJson(obj, SearchResultItem.class);
 				if (item.name == null)        item.name        = "Unknown";
