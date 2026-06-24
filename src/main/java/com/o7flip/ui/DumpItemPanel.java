@@ -52,9 +52,6 @@ public class DumpItemPanel extends JPanel
 {
 	private static final Color ODD_BG   = new Color(0x272727);
 	private static final Color HOVER_BG = new Color(0x3A3A3A);
-	private static final Color HIGH     = new Color(0xFF4444);
-	private static final Color MID      = new Color(0xFFAA00);
-	private static final Color LOW      = new Color(0x888888);
 	private static final Color CLOCK    = new Color(0xFF981F);
 	private static final Color MUTED    = new Color(0x666666);
 	private static final Color UNVERIFIED_FG = new Color(0xAAAAAA);
@@ -236,59 +233,5 @@ public class DumpItemPanel extends JPanel
 			return String.format("%.1fh", hours);
 		}
 		return String.format("%.1fd", hours / 24.0);
-	}
-
-	private static final class HourlyVolumesSparkline extends JPanel
-	{
-		private static final int WIDTH  = 64;
-		private static final int HEIGHT = 24;
-		private static final Color BAR_BG = new Color(0x3A3A3A);
-		private static final Color BAR_FG = new Color(0x6FB8FF);
-
-		private final int[] values;
-		private final Color background;
-
-		HourlyVolumesSparkline(int[] values, Color background)
-		{
-			this.values = values;
-			this.background = background;
-			setOpaque(false);
-			Dimension d = new Dimension(WIDTH, HEIGHT);
-			setPreferredSize(d);
-			setMaximumSize(d);
-			setMinimumSize(d);
-			setAlignmentY(Component.CENTER_ALIGNMENT);
-		}
-
-		@Override
-		protected void paintComponent(Graphics g)
-		{
-			Graphics2D g2 = (Graphics2D) g.create();
-			g2.setColor(background);
-			g2.fillRect(0, 0, getWidth(), getHeight());
-
-			int n = values.length;
-			if (n <= 0)
-			{
-				g2.dispose();
-				return;
-			}
-			int max = 1;
-			for (int v : values) if (v > max) max = v;
-
-			float barW = (float) getWidth() / (float) n;
-			int gap = barW >= 3f ? 1 : 0;
-			for (int i = 0; i < n; i++)
-			{
-				int v = values[i];
-				int h = (int) Math.round((double) v / (double) max * (getHeight() - 2));
-				if (h < 1 && v > 0) h = 1;
-				int x = (int) Math.floor(i * barW);
-				int w = Math.max(1, (int) Math.floor(barW) - gap);
-				g2.setColor(v > 0 ? BAR_FG : BAR_BG);
-				g2.fillRect(x, getHeight() - h - 1, w, h);
-			}
-			g2.dispose();
-		}
 	}
 }

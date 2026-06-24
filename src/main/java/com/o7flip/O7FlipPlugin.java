@@ -3185,11 +3185,6 @@ public class O7FlipPlugin extends Plugin
 		configManager.setConfiguration("o7flip", "capitalManual", gp);
 	}
 
-	public void persistCapitalLocked(boolean locked)
-	{
-		configManager.setConfiguration("o7flip", "capitalLocked", locked);
-	}
-
 	private void adjustCapitalForTrade(int itemId, boolean isBuy, int deltaQty, long deltaGp)
 	{
 		if (config.capitalMode() != O7FlipConfig.CapitalMode.MANUAL || deltaQty <= 0)
@@ -4142,7 +4137,7 @@ public class O7FlipPlugin extends Plugin
 			com.o7flip.model.OptimizerSession live = activeSession;
 			if (live == null) return;
 			com.o7flip.model.OptimizerSession snapshot = live.copy();
-			apiClient.postActiveSession(snapshot, ok -> { /* fire-and-forget */ });
+			apiClient.postActiveSession(snapshot, ok -> { });
 		});
 	}
 

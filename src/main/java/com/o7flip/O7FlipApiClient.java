@@ -1009,17 +1009,6 @@ public class O7FlipApiClient
 		});
 	}
 
-	public void fetchAuthStatus(Consumer<AuthStatus> callback)
-	{
-		fetchAuthStatus(callback, null);
-	}
-
-	public void fetchFlips(String preset, long minProfit, long priceMin, long priceMax,
-	                       int page, BiConsumer<List<FlipItem>, Integer> callback)
-	{
-		fetchFlips(preset, "flip07Score", minProfit, priceMin, priceMax, 0L, page, callback, null);
-	}
-
 	public void fetchFlips(String preset, String sort, long minProfit, long priceMin, long priceMax,
 	                       long cashStack, int page,
 	                       BiConsumer<List<FlipItem>, Integer> callback,

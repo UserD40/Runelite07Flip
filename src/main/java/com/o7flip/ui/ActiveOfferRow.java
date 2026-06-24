@@ -34,7 +34,6 @@ import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.SwingConstants;
 import javax.swing.border.EmptyBorder;
-import java.awt.BasicStroke;
 import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Component;
@@ -151,8 +150,6 @@ public class ActiveOfferRow extends JPanel
 						g2.fillRoundRect(0, 0, fillW, h, radius, radius);
 					}
 				}
-
-				g2.setStroke(new BasicStroke(1f));
 			}
 			finally
 			{

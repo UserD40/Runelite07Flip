@@ -35,7 +35,6 @@ import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.SwingConstants;
 import javax.swing.border.EmptyBorder;
-import java.awt.BasicStroke;
 import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Component;
@@ -58,16 +57,6 @@ public class TradeRecordPanel extends JPanel
 	private static final Color MUTED      = new Color(0x888888);
 
 	private static final SimpleDateFormat DATE_FMT = new SimpleDateFormat("d MMM");
-
-	public TradeRecordPanel(TradeRecord trade, ItemManager itemManager, boolean odd)
-	{
-		this(trade, itemManager, odd, null, null);
-	}
-
-	public TradeRecordPanel(TradeRecord trade, ItemManager itemManager, boolean odd, Long matchedProfit)
-	{
-		this(trade, itemManager, odd, matchedProfit, null);
-	}
 
 	public TradeRecordPanel(TradeRecord trade, ItemManager itemManager, boolean odd, Long matchedProfit, O7FlipPlugin plugin)
 	{
@@ -231,8 +220,6 @@ public class TradeRecordPanel extends JPanel
 						g2.fillRoundRect(0, 0, fillW, h, radius, radius);
 					}
 				}
-
-				g2.setStroke(new BasicStroke(1f));
 			}
 			finally
 			{

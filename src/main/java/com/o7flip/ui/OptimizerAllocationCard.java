@@ -207,7 +207,6 @@ public class OptimizerAllocationCard extends JPanel
 			swap.setBorder(new EmptyBorder(0, 4, 0, 4));
 			swap.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
 			swap.setToolTipText("Replace this auto-picked item with the next best one");
-			swap.setVisible(true);
 			swap.addMouseListener(new MouseAdapter()
 			{
 				@Override

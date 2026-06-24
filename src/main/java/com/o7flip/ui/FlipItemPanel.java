@@ -30,11 +30,8 @@ import com.o7flip.util.Fonts;
 import net.runelite.client.game.ItemManager;
 import net.runelite.client.ui.ColorScheme;
 import net.runelite.client.util.AsyncBufferedImage;
-import net.runelite.client.util.LinkBrowser;
 import javax.swing.JLabel;
-import javax.swing.JMenuItem;
 import javax.swing.JPanel;
-import javax.swing.JPopupMenu;
 import javax.swing.SwingConstants;
 import javax.swing.SwingUtilities;
 import javax.swing.border.EmptyBorder;
@@ -368,21 +365,5 @@ public class FlipItemPanel extends JPanel
 			return "";
 		}
 		return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
-	}
-
-	static void openUrl(String url)
-	{
-		LinkBrowser.browse(url);
-	}
-
-	public static void addHideMenuItem(JPopupMenu menu, com.o7flip.O7FlipPlugin plugin, int itemId, String name)
-	{
-		if (plugin == null || itemId <= 0)
-		{
-			return;
-		}
-		JMenuItem hide = new JMenuItem("Hide — " + name);
-		hide.addActionListener(ae -> plugin.addToBlocklist(itemId));
-		menu.add(hide);
 	}
 }

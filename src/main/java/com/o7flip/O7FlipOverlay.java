@@ -260,8 +260,6 @@ public class O7FlipOverlay extends Overlay
 		}
 	}
 
-	private static int pickerLogCount = 0;
-
 	private static Widget pickDirectionalButton(Widget slot, boolean wantBuy)
 	{
 		java.util.List<Widget> clickable = new java.util.ArrayList<>();
@@ -335,7 +333,6 @@ public class O7FlipOverlay extends Overlay
 		String key = tier + "|" + wantBuy + "|" + boundsStr;
 		if (key.equals(lastPickKey)) return;
 		lastPickKey = key;
-		pickerLogCount++;
 		org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger("com.o7flip.O7FlipOverlay");
 		log.debug("[07Flip] pickDirectionalButton[{}]: wantBuy={}, chosen spriteId={} bounds={} actions={}",
 			tier, wantBuy, chosen.getSpriteId(), chosen.getBounds(),
@@ -387,52 +384,6 @@ public class O7FlipOverlay extends Overlay
 		Rectangle b = w.getBounds();
 		if (b == null) return false;
 		return b.width > 8 && b.height > 8 && b.width < 80 && b.height < 80;
-	}
-
-	@SuppressWarnings("unused")
-	private static int collectLogCount = 0;
-
-	@SuppressWarnings("unused")
-	private static java.util.List<Widget> collectCreateOfferButtons(Widget slot, boolean wantBuy)
-	{
-		java.util.List<Widget> out = new java.util.ArrayList<>(1);
-		Widget[] dyn = slot.getDynamicChildren();
-		if (dyn != null)
-		{
-			for (Widget c : dyn)
-			{
-				if (c == null || c.isHidden()) continue;
-				if (matchesCreateOfferAction(c, wantBuy)) out.add(c);
-			}
-		}
-		Widget[] stat = slot.getStaticChildren();
-		if (stat != null)
-		{
-			for (Widget c : stat)
-			{
-				if (c == null || c.isHidden()) continue;
-				if (matchesCreateOfferAction(c, wantBuy)) out.add(c);
-			}
-		}
-		return out;
-	}
-
-	@SuppressWarnings("unused")
-	private static boolean matchesCreateOfferAction(Widget w, boolean wantBuy)
-	{
-		String[] actions = w.getActions();
-		if (actions == null) return false;
-		String wanted = wantBuy ? "buy" : "sell";
-		for (String a : actions)
-		{
-			if (a == null) continue;
-			String lower = a.toLowerCase();
-			if (lower.contains("create") && lower.contains("offer") && lower.contains(wanted))
-			{
-				return true;
-			}
-		}
-		return false;
 	}
 
 }

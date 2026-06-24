@@ -46,10 +46,6 @@ public class DipItemPanel extends JPanel
 {
 	private static final Color ODD_BG    = new Color(0x272727);
 	private static final Color HOVER_BG  = new Color(0x3A3A3A);
-	private static final Color GREEN     = new Color(0x00C27A);
-	private static final Color RED       = new Color(0xFF7070);
-	private static final Color ORANGE    = new Color(0xFF981F);
-	private static final Color GRAY      = new Color(0xAAAAAA);
 
 	public DipItemPanel(DipItem item, ItemManager itemManager, boolean odd, O7FlipPlugin plugin)
 	{

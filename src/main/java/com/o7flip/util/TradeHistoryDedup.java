@@ -27,7 +27,6 @@ package com.o7flip.util;
 import com.o7flip.model.TradeRecord;
 import java.util.ArrayList;
 import java.util.BitSet;
-import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -202,13 +201,6 @@ public final class TradeHistoryDedup
 		boolean aAuth = A.tradeId != null || !A.partial;
 		boolean bAuth = B.tradeId != null || !B.partial;
 		return aAuth != bAuth;
-	}
-
-	public static List<TradeRecord> scrubAndSort(List<TradeRecord> trades)
-	{
-		List<TradeRecord> out = scrub(trades);
-		out.sort(Comparator.comparingLong(t -> t.timestamp));
-		return out;
 	}
 
 	private static final long BACKDATE_TOLERANCE_MS = 5L * 60L * 1000L;

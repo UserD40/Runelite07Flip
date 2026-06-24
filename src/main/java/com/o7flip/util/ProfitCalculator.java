@@ -65,30 +65,6 @@ public final class ProfitCalculator
 		return taxPerItem * quantity;
 	}
 
-	public static long estimateTaxFromNet(int itemId, long netSellTotal, int quantity)
-	{
-		if (itemId == BOND_ITEM_ID || quantity <= 0 || netSellTotal <= 0)
-		{
-			return 0L;
-		}
-		long netPerItem = netSellTotal / quantity;
-		if (netPerItem < GE_TAX_MIN_PRICE_PER_ITEM)
-		{
-			return 0L;
-		}
-		long taxPerItem;
-		long uncapped = Math.round(netPerItem / 0.98) - netPerItem;
-		if (uncapped > GE_TAX_CAP_PER_ITEM)
-		{
-			taxPerItem = GE_TAX_CAP_PER_ITEM;
-		}
-		else
-		{
-			taxPerItem = Math.max(0L, uncapped);
-		}
-		return taxPerItem * quantity;
-	}
-
 	public static Result compute(List<TradeRecord> trades)
 	{
 		if (trades == null || trades.isEmpty())

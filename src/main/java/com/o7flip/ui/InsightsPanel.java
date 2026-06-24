@@ -80,19 +80,8 @@ public class InsightsPanel extends JPanel
 	private JLabel  lockLabel;
 	private javax.swing.Timer headerCooldownTimer;
 
-	private static final Color CHIP_BG    = new Color(0x2A2A2A);
 	private static final Color CHIP_HOVER = new Color(0x3C3C3C);
 	private static final Color FROZEN_COL = new Color(0xFFC845);
-
-	public InsightsPanel(ItemManager itemManager)
-	{
-		this(itemManager, null, null);
-	}
-
-	public InsightsPanel(ItemManager itemManager, O7FlipPlugin plugin)
-	{
-		this(itemManager, plugin, null);
-	}
 
 	public InsightsPanel(ItemManager itemManager, O7FlipPlugin plugin, O7FlipConfig config)
 	{
@@ -778,7 +767,7 @@ public class InsightsPanel extends JPanel
 		}
 		boolean wasFav = plugin.isFavourite(currentItemId);
 		plugin.toggleFavourite(currentItemId, wasFav,
-			() -> { /* success — UI already updated optimistically */ },
+			() -> { },
 			() ->
 			{
 				paintStar();

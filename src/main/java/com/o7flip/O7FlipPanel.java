@@ -70,7 +70,6 @@ import java.awt.Component;
 import java.awt.Cursor;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
-import java.awt.Font;
 import java.awt.FontMetrics;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
@@ -278,7 +277,7 @@ public class O7FlipPanel extends PluginPanel
 	private boolean optShowingHistory;
 	private boolean optInFlight;
 	private boolean optFormCollapsed;
-	private JPanel  optCollapsedPanel;    // the "Active plan · Reconfigure" header strip
+	private JPanel  optCollapsedPanel;
 	private JPanel  optInputsHost;
 	private String lastOtherSubTab;
 	private JPanel myFlipsListPanel;
@@ -684,11 +683,6 @@ public class O7FlipPanel extends PluginPanel
 	public void rerenderDecants()
 	{
 		renderDecants(filtered());
-	}
-
-	public int getDecantPage()
-	{
-		return decantPage;
 	}
 
 	public String getDipsSortKey()

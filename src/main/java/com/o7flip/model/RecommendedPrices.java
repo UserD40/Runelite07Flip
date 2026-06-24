@@ -32,9 +32,4 @@ public class RecommendedPrices
 	public Long geTax;
 	public Long recProfit;
 	public Integer sampleSize;
-
-	public boolean hasPrices()
-	{
-		return recBuyPrice != null && recSellPrice != null;
-	}
 }

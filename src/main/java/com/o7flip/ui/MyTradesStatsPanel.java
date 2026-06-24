@@ -154,33 +154,6 @@ public class MyTradesStatsPanel extends JPanel
 		this.onMembershipAdjust = r != null ? r : () -> {};
 	}
 
-	public void update(ProfitCalculator.Result result)
-	{
-		update(result, null, BondLedger.EMPTY, Period.ALL_TIME, false);
-	}
-
-	public void update(ProfitCalculator.Result result, TrackerStats server, BondLedger bonds)
-	{
-		update(result, server, bonds, Period.ALL_TIME, false);
-	}
-
-	public void update(ProfitCalculator.Result result, TrackerStats server, BondLedger bonds, Period period)
-	{
-		update(result, server, bonds, period, false, 0L);
-	}
-
-	public void update(ProfitCalculator.Result result, TrackerStats server, BondLedger bonds,
-		Period period, boolean membershipHidden)
-	{
-		update(result, server, bonds, period, membershipHidden, 0L, 0L);
-	}
-
-	public void update(ProfitCalculator.Result result, TrackerStats server, BondLedger bonds,
-		Period period, boolean membershipHidden, long activeBuyGp)
-	{
-		update(result, server, bonds, period, membershipHidden, activeBuyGp, 0L);
-	}
-
 	public void update(ProfitCalculator.Result result, TrackerStats server, BondLedger bonds,
 		Period period, boolean membershipHidden, long activeBuyGp, long heldCostBasisInActiveSells)
 	{

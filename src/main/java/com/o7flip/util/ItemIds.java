@@ -131,9 +131,4 @@ public final class ItemIds
 		}
 		return best != null ? best[d - 1] : 0;
 	}
-
-	public static int forPotion(String potionName)
-	{
-		return forPotion(potionName, 4);
-	}
 }

@@ -75,21 +75,6 @@ public class BuySellSparkline extends JPanel
 
 	private int hoverX = -1;
 
-	public BuySellSparkline(Long[] buy, Long[] sell)
-	{
-		this(buy, sell, 80, "start", "now");
-	}
-
-	public BuySellSparkline(Long[] buy, Long[] sell, int height)
-	{
-		this(buy, sell, height, "start", "now");
-	}
-
-	public BuySellSparkline(Long[] buy, Long[] sell, int height, String xStartLabel, String xEndLabel)
-	{
-		this(buy, sell, height, xStartLabel, xEndLabel, -1L, 0);
-	}
-
 	public BuySellSparkline(Long[] buy, Long[] sell, int height, String xStartLabel, String xEndLabel,
 	                        long startEpochMs, int intervalMinutes)
 	{
