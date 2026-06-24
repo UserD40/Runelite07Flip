@@ -464,7 +464,7 @@ public class InsightsPanel extends JPanel
 		final boolean hasKey = plugin != null && plugin.hasApiKeyPublic();
 
 		boolean canAutofill = plugin != null && buyTarget > 0;
-		row.add(actionChip("💰", canAutofill
+		row.add(actionChip("💰", VectorIcon.Kind.AUTOFILL, canAutofill
 				? "Autofill — queue a GE buy at the recommended price"
 				: "Autofill unavailable — no buy price for this item",
 			canAutofill, () -> plugin.queueGeBuy(itemId, buyTarget, name)));
@@ -508,16 +508,16 @@ public class InsightsPanel extends JPanel
 		}
 		row.add(lockLabel);
 
-		row.add(actionChip("🌐", "Open this item on 07flip.com", true,
+		row.add(actionChip("🌐", VectorIcon.Kind.GLOBE, "Open this item on 07flip.com", true,
 			() -> net.runelite.client.util.LinkBrowser.browse("https://07flip.com/item/" + itemId)));
 
 		return row;
 	}
 
-	private JLabel actionChip(String glyph, String tooltip, boolean enabled, Runnable onClick)
+	private JLabel actionChip(String winGlyph, VectorIcon.Kind kind, String tooltip, boolean enabled, Runnable onClick)
 	{
 		JLabel l = newStateChip();
-		l.setText(glyph);
+		VectorIcon.apply(l, winGlyph, kind, 14, enabled ? Color.WHITE : new Color(0x555555));
 		l.setToolTipText(tooltip);
 		if (!enabled)
 		{
@@ -544,7 +544,7 @@ public class InsightsPanel extends JPanel
 	private JLabel newStateChip()
 	{
 		JLabel l = new JLabel("", SwingConstants.CENTER);
-		l.setFont(l.getFont().deriveFont(15f));
+		l.setFont(l.getFont().deriveFont(14f));
 		l.setOpaque(false);
 		l.setBackground(CHIP_HOVER);
 		l.setForeground(Color.WHITE);
@@ -577,15 +577,17 @@ public class InsightsPanel extends JPanel
 		}
 		if (!lockable)
 		{
-			lockLabel.setText("🔒");
+			VectorIcon.apply(lockLabel, "🔒", VectorIcon.Kind.LOCK, 14, new Color(0x555555));
 			lockLabel.setForeground(new Color(0x555555));
 			lockLabel.setCursor(Cursor.getDefaultCursor());
 			lockLabel.setToolTipText("Lock pins the 07Flip recommended sell price (premium).");
 			return;
 		}
 		boolean locked = plugin != null && plugin.isPriceLocked(currentItemId);
-		lockLabel.setText(locked ? "🔒" : "🔓");
-		lockLabel.setForeground(locked ? new Color(0xFFC845) : new Color(0xAAAAAA));
+		Color lc = locked ? new Color(0xFFC845) : new Color(0xAAAAAA);
+		VectorIcon.apply(lockLabel, locked ? "🔒" : "🔓",
+			locked ? VectorIcon.Kind.LOCK : VectorIcon.Kind.UNLOCK, 14, lc);
+		lockLabel.setForeground(lc);
 		lockLabel.setToolTipText(locked
 			? "Price locked — click to unlock."
 			: "Click to lock the recommended sell price.");
@@ -739,20 +741,20 @@ public class InsightsPanel extends JPanel
 		boolean favourited = plugin != null && plugin.isFavourite(currentItemId);
 		if (!hasKey)
 		{
-			starLabel.setText("☆");
+			VectorIcon.apply(starLabel, "☆", VectorIcon.Kind.STAR_OUTLINE, 18, new Color(0x444444));
 			starLabel.setForeground(new Color(0x444444));
 			starLabel.setToolTipText("<html>Paste your 07flip.com API key in the plugin config<br>"
 				+ "to use favourites.</html>");
 		}
 		else if (favourited)
 		{
-			starLabel.setText("★");
+			VectorIcon.apply(starLabel, "★", VectorIcon.Kind.STAR, 18, new Color(0xFFC845));
 			starLabel.setForeground(new Color(0xFFC845));
 			starLabel.setToolTipText("Favourited — click to remove from your list.");
 		}
 		else
 		{
-			starLabel.setText("☆");
+			VectorIcon.apply(starLabel, "☆", VectorIcon.Kind.STAR_OUTLINE, 18, new Color(0xAAAAAA));
 			starLabel.setForeground(new Color(0xAAAAAA));
 			starLabel.setToolTipText("Click to favourite this item — it'll appear in the Favs tab.");
 		}

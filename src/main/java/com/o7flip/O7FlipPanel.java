@@ -35,6 +35,7 @@ import com.o7flip.ui.DumpItemPanel;
 import com.o7flip.ui.FlipItemPanel;
 import com.o7flip.ui.SearchResultPanel;
 import com.o7flip.ui.TradeRecordPanel;
+import com.o7flip.ui.VectorIcon;
 import com.o7flip.util.Fonts;
 import net.runelite.client.game.ItemManager;
 import net.runelite.client.ui.ColorScheme;
@@ -1144,7 +1145,7 @@ public class O7FlipPanel extends PluginPanel
 			else if (shown.isEmpty())
 			{
 				favouritesListPanel.add(emptyLabel("No favourites yet",
-					"Tap the ★ on any item's Insights tab to add it here."));
+					"Tap the star on any item's Insights tab to add it here."));
 			}
 			else
 			{
@@ -1736,8 +1737,9 @@ public class O7FlipPanel extends PluginPanel
 		statusLabel.setFont(Fonts.SM);
 		statusLabel.setForeground(new Color(0xFFAA00));
 
-		capitalHeaderChip = new JLabel("✎");
-		capitalHeaderChip.setFont(capitalHeaderChip.getFont().deriveFont(15f));
+		capitalHeaderChip = new JLabel();
+		VectorIcon.apply(capitalHeaderChip, "✎", VectorIcon.Kind.PENCIL, 13, new Color(0x666666));
+		capitalHeaderChip.setFont(Fonts.SM);
 		capitalHeaderChip.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
 		capitalHeaderChip.setBorder(new EmptyBorder(0, 4, 0, 4));
 		updateCapitalHeaderChip();
@@ -1907,7 +1909,14 @@ public class O7FlipPanel extends PluginPanel
 		if (capitalHeaderChip == null) return;
 		long value = displayedCapital();
 		boolean active = value > 0;
-		capitalHeaderChip.setForeground(active ? ORANGE : new Color(0x666666));
+		Color cc = active ? ORANGE : new Color(0x666666);
+		capitalHeaderChip.setForeground(cc);
+		javax.swing.Icon ic = capitalHeaderChip.getIcon();
+		if (ic instanceof VectorIcon)
+		{
+			((VectorIcon) ic).setColor(cc);
+			capitalHeaderChip.repaint();
+		}
 		capitalHeaderChip.setToolTipText(active
 			? "Capital: " + formatCapital(value) + " · click to edit"
 			: "Set capital — items filter to what's affordable");
@@ -1978,7 +1987,7 @@ public class O7FlipPanel extends PluginPanel
 			}
 		});
 
-		JButton saveBtn = pillButton("💾");
+		JButton saveBtn = pillButton(Fonts.iconOr("💾", "Save"));
 		saveBtn.setFont(saveBtn.getFont().deriveFont(15f));
 		saveBtn.setBackground(ORANGE);
 		saveBtn.setForeground(Color.BLACK);
@@ -3338,7 +3347,7 @@ public class O7FlipPanel extends PluginPanel
 
 		JButton activeBtn = pillButton("Active");
 		activeBtn.setToolTipText("<html>When on, only items currently dumping or due soon<br>"
-			+ "(dump_status ∈ {dumping, due_soon}) are shown.</html>");
+			+ "(dump_status is dumping or due_soon) are shown.</html>");
 		applyToggleStyle(activeBtn, dumpsActiveOnly);
 		activeBtn.addActionListener(e ->
 		{
@@ -3581,7 +3590,7 @@ public class O7FlipPanel extends PluginPanel
 			},
 			false);
 
-		JButton reorderBtn = pillButton("☰");
+		JButton reorderBtn = pillButton("⇅");
 		reorderBtn.setToolTipText("Reorder or remove favourites");
 		reorderBtn.addActionListener(e ->
 			com.o7flip.ui.FavouritesReorderDialog.show(this, favouritesForReorder(), this::applyFavouritesOrder));

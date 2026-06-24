@@ -34,5 +34,15 @@ public final class Fonts
 	public static final Font SM      = new Font("Dialog", Font.PLAIN, 11);
 	public static final Font SM_BOLD = new Font("Dialog", Font.BOLD,  11);
 
+	public static final boolean WINDOWS =
+		System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT).contains("win");
+
+	// Windows renders emoji/symbol glyphs (via font substitution); macOS/Java cannot,
+	// so non-Windows gets a plain glyph the JVM can always draw.
+	public static String iconOr(String windowsGlyph, String fallback)
+	{
+		return WINDOWS ? windowsGlyph : fallback;
+	}
+
 	private Fonts() {}
 }

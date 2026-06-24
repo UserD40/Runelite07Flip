@@ -201,7 +201,7 @@ public class OptimizerAllocationCard extends JPanel
 		final boolean swappable = a.state == null || a.state == SlotState.PENDING;
 		if (onSwapClicked != null && swappable)
 		{
-			JLabel swap = new JLabel("⟳");
+			JLabel swap = new JLabel("↻");
 			swap.setFont(swap.getFont().deriveFont(16f));
 			swap.setForeground(new Color(0x666666));
 			swap.setBorder(new EmptyBorder(0, 4, 0, 4));
