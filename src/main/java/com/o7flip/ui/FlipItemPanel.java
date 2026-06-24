@@ -306,7 +306,6 @@ public class FlipItemPanel extends JPanel
 		setMaximumSize(new Dimension(Integer.MAX_VALUE, getPreferredSize().height));
 	}
 
-
 	public static JLabel buildIcon(int itemId, ItemManager itemManager)
 	{
 		JLabel lbl = new JLabel();

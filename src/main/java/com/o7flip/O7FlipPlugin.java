@@ -133,7 +133,6 @@ public class O7FlipPlugin extends Plugin
 	private ScheduledFuture<?> refreshTask;
 	private ScheduledFuture<?> authRefreshTask;
 
-
 	volatile int    pendingGeBuyItemId = -1;
 	volatile long   pendingGeBuyPrice  = -1;
 	volatile String pendingGeBuyName   = null;
@@ -162,7 +161,6 @@ public class O7FlipPlugin extends Plugin
 	private volatile long   overlayQueuePrice    = -1;
 	private volatile boolean overlayQueueIsBuy   = false;
 	private volatile long   overlayQueueExpiresAt = 0L;
-
 
 	List<FlipItem>  lastFlips  = Collections.emptyList();
 	private List<DumpItem>  lastDumps  = Collections.emptyList();
@@ -224,7 +222,6 @@ public class O7FlipPlugin extends Plugin
 			this.frozenAtMillis = frozenAtMillis;
 		}
 	}
-
 
 	private static final long BUY_LIMIT_WINDOW_MS = 4L * 60L * 60L * 1000L;
 	private static final String BUY_LIMIT_WINDOWS_KEY = "buyLimitWindows";
@@ -336,7 +333,6 @@ public class O7FlipPlugin extends Plugin
 		notifier.notify("Open GE \u2192 click a sell slot \u2192 select " + name + " from inventory \u2014 use the 07Flip overlay to set the price");
 	}
 
-
 	private void setOverlayQueue(int itemId, long price, boolean isBuy)
 	{
 		overlayQueueItemId = itemId;
@@ -400,7 +396,6 @@ public class O7FlipPlugin extends Plugin
 		return frozenBuyByItemId.get(itemId);
 	}
 
-
 	public boolean isPriceLocked(int itemId)
 	{
 		return frozenSellByItemId.get(itemId) != null;
@@ -424,7 +419,6 @@ public class O7FlipPlugin extends Plugin
 		frozenBuyByItemId.remove(itemId);
 		apiClient.postUnfreeze(itemId, null);
 	}
-
 
 	private void recordBuyForLimit(int itemId, int qty, long timestamp)
 	{
@@ -891,8 +885,6 @@ public class O7FlipPlugin extends Plugin
 		clientToolbar.removeNavigation(navButton);
 		log.debug("[07Flip] Stopped");
 	}
-
-
 
 	@Subscribe
 	public void onGameStateChanged(GameStateChanged event)
@@ -1380,7 +1372,6 @@ public class O7FlipPlugin extends Plugin
 		}
 	}
 
-
 	private void autoFillPriceInput(long price)
 	{
 		if (!config.autoFillGePrice())
@@ -1396,7 +1387,6 @@ public class O7FlipPlugin extends Plugin
 		client.setVarcStrValue(VarClientID.MESLAYERINPUT, String.valueOf(price));
 		confirmHighlightUntilMs = System.currentTimeMillis() + 3000L;
 	}
-
 
 	@Subscribe
 	public void onOverlayMenuClicked(OverlayMenuClicked event)
@@ -1440,7 +1430,6 @@ public class O7FlipPlugin extends Plugin
 			pendingGeInputPrice = price;
 		});
 	}
-
 
 	@Subscribe
 	public void onConfigChanged(ConfigChanged event)
@@ -1517,7 +1506,6 @@ public class O7FlipPlugin extends Plugin
 		);
 	}
 
-
 	void fetchAll(boolean forced)
 	{
 		if (!forced && !panel.isShowing())
@@ -1533,7 +1521,6 @@ public class O7FlipPlugin extends Plugin
 		SwingUtilities.invokeLater(() -> panel.setLoading(true));
 
 		JsonObject sections = new JsonObject();
-
 
 		if (config.showDumps() && !panel.dumpsUsesBotEndpoint())
 		{
@@ -1621,7 +1608,6 @@ public class O7FlipPlugin extends Plugin
 				});
 		}
 	}
-
 
 	private static final int CACHE_MAX_BYTES = 200_000;
 
@@ -1712,7 +1698,6 @@ public class O7FlipPlugin extends Plugin
 
 	}
 
-
 	private void rebuildTrackedItems()
 	{
 		Map<Integer, TrackedItemData> map = new HashMap<>();
@@ -1746,7 +1731,6 @@ public class O7FlipPlugin extends Plugin
 		trackedItems = Collections.unmodifiableMap(map);
 	}
 
-
 	@Subscribe
 	public void onItemContainerChanged(ItemContainerChanged event)
 	{
@@ -1777,7 +1761,6 @@ public class O7FlipPlugin extends Plugin
 			SwingUtilities.invokeLater(panel::onInventoryCoinsChanged);
 		}
 	}
-
 
 	private long lastActiveOffersHash = 0L;
 
@@ -2655,7 +2638,6 @@ public class O7FlipPlugin extends Plugin
 		}
 	}
 
-
 	public boolean isBlocked(int itemId)
 	{
 		return blocklist.contains(itemId);
@@ -2739,8 +2721,6 @@ public class O7FlipPlugin extends Plugin
 		}
 		configManager.setConfiguration("o7flip", BLOCKLIST_KEY, sb.toString());
 	}
-
-
 
 	public com.o7flip.model.RecommendedPrices getRecommendedPrices(int itemId)
 	{
@@ -3077,7 +3057,6 @@ public class O7FlipPlugin extends Plugin
 		SwingUtilities.invokeLater(() -> panel.updateMyFlips(snap));
 	}
 
-
 	void onFlipsPageChanged(int page)
 	{
 		executor.execute(() -> fetchFlipsAtPage(page));
@@ -3285,7 +3264,6 @@ public class O7FlipPlugin extends Plugin
 		});
 	}
 
-
 	private final java.util.Map<String, Long> lastTabSelectFetchMs = new java.util.concurrent.ConcurrentHashMap<>();
 	private static final long TAB_SELECT_FRESHNESS_MS = 30_000L;
 
@@ -3327,7 +3305,6 @@ public class O7FlipPlugin extends Plugin
 			pushFavouritesToPanel(items);
 		}));
 	}
-
 
 	private volatile java.util.Set<Integer> favouriteItemIds = java.util.Collections.emptySet();
 
@@ -3639,7 +3616,6 @@ public class O7FlipPlugin extends Plugin
 			upgradeUrl -> SwingUtilities.invokeLater(() -> panel.onOptimizePremiumRequired(upgradeUrl)),
 			reason -> SwingUtilities.invokeLater(() -> panel.onOptimizeError(reason))));
 	}
-
 
 	private volatile com.o7flip.model.OptimizerSession activeSession;
 	private volatile boolean offlineReconcileArmed = false;
@@ -4451,8 +4427,6 @@ public class O7FlipPlugin extends Plugin
 		SwingUtilities.invokeLater(() -> panel.hydrateOptimizerSession(snap));
 	}
 
-
-
 	private void appendCompletedPosition(com.o7flip.model.OptimizeResult.Allocation closed)
 	{
 		if (closed == null) return;
@@ -4621,8 +4595,6 @@ public class O7FlipPlugin extends Plugin
 				page, cb);
 		}
 	}
-
-
 
 	void onDumpsSortChanged(String sort)
 	{

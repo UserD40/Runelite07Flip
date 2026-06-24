@@ -258,7 +258,6 @@ public class O7FlipApiClient
 		});
 	}
 
-
 	public void fetchSearch(String query, Consumer<List<SearchResultItem>> callback)
 	{
 		try
@@ -278,7 +277,6 @@ public class O7FlipApiClient
 			callback.accept(new ArrayList<>());
 		}
 	}
-
 
 	public void postTradeRecordsBulk(List<TradeRecord> trades, Consumer<BulkSyncResult> callback)
 	{
@@ -957,7 +955,6 @@ public class O7FlipApiClient
 		return (el == null || el.isJsonNull() || !el.isJsonObject()) ? null : el.getAsJsonObject();
 	}
 
-
 	public void fetchAuthStatus(Consumer<AuthStatus> onSuccess, Runnable onTransient)
 	{
 		String key = sanitizedApiKey();
@@ -1016,7 +1013,6 @@ public class O7FlipApiClient
 	{
 		fetchAuthStatus(callback, null);
 	}
-
 
 	public void fetchFlips(String preset, long minProfit, long priceMin, long priceMax,
 	                       int page, BiConsumer<List<FlipItem>, Integer> callback)
@@ -1137,7 +1133,6 @@ public class O7FlipApiClient
 		}
 		fetchPaged(url.toString(), "fetchDips", "dips", this::parseDipItem, callback);
 	}
-
 
 	public void fetchFavourites(Consumer<List<FlipItem>> callback)
 	{
@@ -1284,7 +1279,6 @@ public class O7FlipApiClient
 			}
 		});
 	}
-
 
 	public void fetchOptimize(long capital, int slots, String risk,
 	                          int maxFillHours, Boolean members, java.util.List<Integer> excludeItemIds,
@@ -1571,7 +1565,6 @@ public class O7FlipApiClient
 		}
 	}
 
-
 	public void fetchActiveSession(Consumer<com.o7flip.model.OptimizerSession> callback)
 	{
 		String key = sanitizedApiKey();
@@ -1847,7 +1840,6 @@ public class O7FlipApiClient
 		return arr;
 	}
 
-
 	public void fetchCompletedPositions(Consumer<List<com.o7flip.model.CompletedPosition>> callback)
 	{
 		String key = sanitizedApiKey();
@@ -2102,7 +2094,6 @@ public class O7FlipApiClient
 		fetchParsed(url.toString(), "fetchBotDumps", this::parseDumpsResponse, emptyDumpsResponse(), callback);
 	}
 
-
 	public void fetchBundle(
 		JsonObject sections,
 		BiConsumer<List<FlipItem>, Integer>  onFlips,
@@ -2180,7 +2171,6 @@ public class O7FlipApiClient
 		});
 	}
 
-
 	public void fetchDecanting(Consumer<List<DecantItem>> callback)
 	{
 		fetchList(BASE_URL + "/decanting", "fetchDecanting", "decants",
@@ -2191,7 +2181,6 @@ public class O7FlipApiClient
 	{
 		return PARSER.fromJson(obj, DecantItem.class);
 	}
-
 
 	public void fetchRecommendedPrices(int itemId, Consumer<RecommendedPrices> callback)
 	{
@@ -2294,7 +2283,6 @@ public class O7FlipApiClient
 		}
 		return item;
 	}
-
 
 	@FunctionalInterface
 	private interface JsonMapper<T>

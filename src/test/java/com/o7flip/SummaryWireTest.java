@@ -24,7 +24,6 @@
  */
 package com.o7flip;
 
-import com.google.gson.JsonObject;
 import com.o7flip.model.OptimizeResult;
 import org.junit.Test;
 import static org.junit.Assert.assertEquals;

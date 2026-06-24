@@ -91,8 +91,6 @@ public interface O7FlipConfig extends Config
 	)
 	String trackerSection = "tracker";
 
-
-
 	@ConfigItem(
 		keyName = "apiKey",
 		name = "API key",
@@ -163,7 +161,6 @@ public interface O7FlipConfig extends Config
 	{
 		return true;
 	}
-
 
 	@ConfigItem(
 		keyName = "showFlips",
@@ -255,7 +252,6 @@ public interface O7FlipConfig extends Config
 	{
 		return true;
 	}
-
 
 	@ConfigItem(
 		keyName = "autoFillGePrice",
@@ -386,7 +382,6 @@ public interface O7FlipConfig extends Config
 	{
 		return true;
 	}
-
 
 	enum GpDropFontType
 	{
@@ -526,7 +521,6 @@ public interface O7FlipConfig extends Config
 		return new Color(0xE85050);
 	}
 
-
 	@ConfigItem(
 		keyName = "shareTradeData",
 		name = "Share trade data with 07flip.com",
@@ -540,7 +534,6 @@ public interface O7FlipConfig extends Config
 	{
 		return false;
 	}
-
 
 	@ConfigItem(
 		keyName = "itemTabLivePrices",

@@ -114,7 +114,6 @@ public class BondLedgerTest
 		assertEquals(0,  l.count);
 	}
 
-
 	private static TradeRecord buy(int itemId, int qty, long totalGp)
 	{
 		TradeRecord t = new TradeRecord();

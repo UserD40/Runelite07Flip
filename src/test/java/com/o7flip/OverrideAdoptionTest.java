@@ -200,7 +200,6 @@ public class OverrideAdoptionTest
 		assertEquals(10, local.sells.get(0).qty);
 	}
 
-
 	private static final int CRYSTAL_SEED = 23_956;
 	private static final String GEN_OLD = "2026-06-09T20:00:00Z";
 	private static final String GEN_NEW = "2026-06-09T21:00:00Z";

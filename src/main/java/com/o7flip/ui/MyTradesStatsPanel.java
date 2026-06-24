@@ -391,7 +391,6 @@ public class MyTradesStatsPanel extends JPanel
 			+ "Backed by real GE trades captured by the plugin.</html>";
 	}
 
-
 	private static final class PeriodStats
 	{
 		final long totalProfit;
@@ -460,7 +459,6 @@ public class MyTradesStatsPanel extends JPanel
 				winRate, avgRoi, best, worst, phantoms);
 		}
 	}
-
 
 	private static void setProfit(JLabel label, long profit)
 	{

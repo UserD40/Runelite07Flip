@@ -480,7 +480,6 @@ public class InsightsPanel extends JPanel
 				: "Autofill unavailable — no buy price for this item",
 			canAutofill, () -> plugin.queueGeBuy(itemId, buyTarget, name)));
 
-
 		final boolean lockable = hasKey && ins.current != null
 			&& ins.current.recSell != null && ins.current.recSell > 0;
 		final Long recBuy  = ins.current != null ? ins.current.recBuy  : null;
@@ -602,7 +601,6 @@ public class InsightsPanel extends JPanel
 			? "Price locked — click to unlock."
 			: "Click to lock the recommended sell price.");
 	}
-
 
 	private void startHeaderCooldownTimer()
 	{
@@ -1319,7 +1317,6 @@ public class InsightsPanel extends JPanel
 
 		return panel;
 	}
-
 
 	private JPanel sectionPanel(String header)
 	{

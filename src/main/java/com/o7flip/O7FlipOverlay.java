@@ -24,11 +24,7 @@
  */
 package com.o7flip;
 
-import com.o7flip.model.TrackedItemData;
-import com.o7flip.util.ProfitCalculator;
 import net.runelite.api.Client;
-import net.runelite.api.GrandExchangeOffer;
-import net.runelite.api.GrandExchangeOfferState;
 import net.runelite.api.gameval.InterfaceID;
 import net.runelite.api.widgets.Widget;
 import net.runelite.client.ui.overlay.Overlay;

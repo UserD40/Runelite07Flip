@@ -189,7 +189,6 @@ public class TradeHistoryDedupTest
 		assertSame(local, out.get(0));
 	}
 
-
 	@Test
 	public void stuckPartialDuplicates_areCollapsed()
 	{
@@ -265,7 +264,6 @@ public class TradeHistoryDedupTest
 		assertEquals(2, out.size());
 	}
 
-
 	@Test
 	public void heal_rewritesBackdatedBuyToObservedTime()
 	{
@@ -313,7 +311,6 @@ public class TradeHistoryDedupTest
 
 		assertSame(row, out.get(0));
 	}
-
 
 	private static TradeRecord merged(int itemId, String name, boolean isBuy, int qty, long totalGp, long ts)
 	{

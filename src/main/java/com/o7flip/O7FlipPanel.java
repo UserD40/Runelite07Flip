@@ -215,7 +215,6 @@ public class O7FlipPanel extends PluginPanel
 	public boolean isPremium()  { return isPremium;  }
 	private boolean authChecked = false;
 
-
 	@Override
 	public void onActivate()
 	{
@@ -343,7 +342,6 @@ public class O7FlipPanel extends PluginPanel
 		setLayout(new BorderLayout());
 		setBackground(ColorScheme.DARK_GRAY_COLOR);
 
-
 		tabsWrapper = new JPanel(new BorderLayout());
 		tabsWrapper.setBackground(ColorScheme.DARK_GRAY_COLOR);
 		tabsWrapper.add(buildTabs(), BorderLayout.CENTER);
@@ -369,7 +367,6 @@ public class O7FlipPanel extends PluginPanel
 		add(mainArea,      BorderLayout.CENTER);
 		add(buildFooter(), BorderLayout.SOUTH);
 	}
-
 
 	public void updateAuthStatus(boolean signedIn, boolean premium)
 	{
@@ -557,7 +554,6 @@ public class O7FlipPanel extends PluginPanel
 		}
 		panel.add(lbl);
 	}
-
 
 	public String getSelectedPreset()
 	{
@@ -768,7 +764,6 @@ public class O7FlipPanel extends PluginPanel
 			insightsPanel.refreshFavouriteState();
 		}
 	}
-
 
 	private String filtered()
 	{
@@ -996,12 +991,10 @@ public class O7FlipPanel extends PluginPanel
 		}
 	}
 
-
 	private List<DumpItem> sortDumps(List<DumpItem> items)
 	{
 		return items;
 	}
-
 
 	private void renderFlips(String q)
 	{
@@ -1640,7 +1633,6 @@ public class O7FlipPanel extends PluginPanel
 		searchScrollPane.repaint();
 	}
 
-
 	private void renderLocked(JPanel panel, String title, String sub)
 	{
 		panel.removeAll();
@@ -1683,7 +1675,6 @@ public class O7FlipPanel extends PluginPanel
 		renderLocked(p, title, sub);
 		return p;
 	}
-
 
 	@FunctionalInterface
 	private interface RowFactory<T>
@@ -1883,7 +1874,6 @@ public class O7FlipPanel extends PluginPanel
 		top.add(topInner,  BorderLayout.SOUTH);
 		return top;
 	}
-
 
 	private JPanel     capitalContainer;
 	private JTextField capitalField;
@@ -2191,7 +2181,6 @@ public class O7FlipPanel extends PluginPanel
 		if (s == null) return "";
 		return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
 	}
-
 
 	private boolean shouldShowTab(String name)
 	{
@@ -2755,7 +2744,6 @@ public class O7FlipPanel extends PluginPanel
 			net.runelite.client.util.LinkBrowser.browse(url);
 		}
 	}
-
 
 	public boolean selectTab(String tabName)
 	{
@@ -4000,7 +3988,6 @@ public class O7FlipPanel extends PluginPanel
 		return p;
 	}
 
-
 	private enum HistorySort { RECENT, QUICKEST, MOST_PROFIT }
 	private HistorySort optHistorySort = HistorySort.RECENT;
 
@@ -4248,7 +4235,6 @@ public class O7FlipPanel extends PluginPanel
 		return wrap;
 	}
 
-
 	private JScrollPane buildSearchView()
 	{
 		searchResultsPanel = new JPanel();
@@ -4265,9 +4251,6 @@ public class O7FlipPanel extends PluginPanel
 		searchScrollPane.getVerticalScrollBar().setPreferredSize(new Dimension(6, 0));
 		return searchScrollPane;
 	}
-
-
-
 
 	private JPanel buildSortBar(JButton[] store, String[] labels, IntSupplier get, IntConsumer set)
 	{
@@ -4390,7 +4373,6 @@ public class O7FlipPanel extends PluginPanel
 		}
 	}
 
-
 	private JPanel buildPageBar(JLabel label, JButton prev, JButton next)
 	{
 		JPanel bar = new JPanel(new FlowLayout(FlowLayout.CENTER, 8, 4));
@@ -4422,7 +4404,6 @@ public class O7FlipPanel extends PluginPanel
 		return b;
 	}
 
-
 	private JPanel assembleTab(JPanel topBar, JPanel list, JPanel pageBar)
 	{
 		ListWrapperPanel wrapper = new ListWrapperPanel(list);
@@ -4447,7 +4428,6 @@ public class O7FlipPanel extends PluginPanel
 		}
 		return tab;
 	}
-
 
 	private JPanel buildFooter()
 	{
@@ -4496,7 +4476,6 @@ public class O7FlipPanel extends PluginPanel
 		footer.add(lastUpdatedLabel, BorderLayout.SOUTH);
 		return footer;
 	}
-
 
 	private JPanel listPanel()
 	{
@@ -4582,7 +4561,6 @@ public class O7FlipPanel extends PluginPanel
 	{
 		LinkBrowser.browse(url);
 	}
-
 
 	private static class ListWrapperPanel extends JPanel implements Scrollable
 	{

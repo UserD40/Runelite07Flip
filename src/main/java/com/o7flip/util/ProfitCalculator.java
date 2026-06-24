@@ -202,7 +202,6 @@ public final class ProfitCalculator
 		}
 	}
 
-
 	public static final class Result
 	{
 		public final List<CompletedFlip> completedFlips;
@@ -393,7 +392,6 @@ public final class ProfitCalculator
 				winRate, avgRoi, best, worst);
 		}
 	}
-
 
 	private static final class OpenLot
 	{
