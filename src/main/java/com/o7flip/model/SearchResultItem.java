@@ -27,7 +27,7 @@ package com.o7flip.model;
 public class SearchResultItem
 {
 	public int     itemId;
-	public String  name;
+	public String  name = "Unknown";
 	public Long    buyPrice;
 	public Long    sellPrice;
 	public Long    margin;
@@ -41,5 +41,5 @@ public class SearchResultItem
 	public int     buyLimit;
 	public boolean members;
 	public Integer highAlch;
-	public String  lastUpdated;
+	public String  lastUpdated = "";
 }

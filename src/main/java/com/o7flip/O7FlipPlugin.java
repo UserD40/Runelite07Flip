@@ -3496,6 +3496,7 @@ public class O7FlipPlugin extends Plugin
 		if (ins != null && ins.itemId == itemId)
 		{
 			FlipItem f = new FlipItem();
+			f.members = false;
 			f.itemId = itemId;
 			f.name   = ins.name;
 			if (ins.current != null)
@@ -3522,6 +3523,7 @@ public class O7FlipPlugin extends Plugin
 			if (f.itemId == itemId) return f;
 		}
 		FlipItem stub = new FlipItem();
+		stub.members = false;
 		stub.itemId = itemId;
 		stub.name   = "Item " + itemId;
 		return stub;

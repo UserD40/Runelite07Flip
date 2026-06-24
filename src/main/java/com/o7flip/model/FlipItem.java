@@ -27,14 +27,14 @@ package com.o7flip.model;
 public class FlipItem
 {
 	public int itemId;
-	public String name;
+	public String name = "Unknown";
 	public long buyPrice;
 	public long sellPrice;
 	public long profit;
 	public double roiPct;
 	public long potentialProfit;
 	public int buyLimit;
-	public boolean members;
+	public boolean members = true;
 
 	public Integer affordableQty;
 

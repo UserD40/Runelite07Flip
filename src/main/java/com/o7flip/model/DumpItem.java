@@ -29,17 +29,17 @@ public class DumpItem
 	public String  tier;
 
 	public int     itemId;
-	public String  name;
+	public String  name = "Unknown";
 	public long    buyPrice;
 	public long    sellPrice;
 	public long    profit;
 	public int     dumpScore;
 	public double  dumpPct;
-	public String  dumpStatus;
+	public String  dumpStatus = "none";
 	public Double  lastDumpHoursAgo;
 	public int     hourlyVolume;
 	public int     buyLimit;
-	public boolean members;
+	public boolean members = true;
 
 	public Double   roiPct;
 	public Boolean  patternStale;

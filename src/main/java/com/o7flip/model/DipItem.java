@@ -24,24 +24,32 @@
  */
 package com.o7flip.model;
 
+import com.google.gson.annotations.SerializedName;
+
 public class DipItem
 {
 	public int     itemId;
-	public String  name;
+	public String  name = "Unknown";
 	public long    buyPrice;
 	public int     hourlyVolume;
 	public int     dailyVolume;
 	public int     buyLimit;
-	public boolean members;
-	public String  lastUpdated;
+	public boolean members = true;
+	public String  lastUpdated = "";
 
-	public String  type;
+	public String  type = "24h_dip";
 
+	// JSON key is avg_24h_buy; the snake_case policy would yield avg24h_buy.
+	@SerializedName("avg_24h_buy")
 	public Long    avg24hBuy;
 	public Double  dipPct;
 
+	// JSON keys are dip_pct_1d/_7d/_30d; the snake_case policy would yield dip_pct1d etc.
+	@SerializedName("dip_pct_1d")
 	public Double  dipPct1d;
+	@SerializedName("dip_pct_7d")
 	public Double  dipPct7d;
+	@SerializedName("dip_pct_30d")
 	public Double  dipPct30d;
 
 	public Long    atlFloor;

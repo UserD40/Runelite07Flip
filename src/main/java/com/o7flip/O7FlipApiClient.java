@@ -277,23 +277,11 @@ public class O7FlipApiClient
 			String encoded = java.net.URLEncoder.encode(query.trim(), "UTF-8");
 			fetchList(BASE_URL + "/v2/search?q=" + encoded + "&limit=10", "fetchSearch", "items", obj ->
 			{
-				SearchResultItem item = new SearchResultItem();
-				item.itemId         = getInt(obj, "item_id", 0);
-				item.name           = getString(obj, "name", "Unknown");
-				item.buyPrice       = getLongOrNull(obj, "buy_price");
-				item.sellPrice      = getLongOrNull(obj, "sell_price");
-				item.margin         = getLongOrNull(obj, "margin");
-				item.profit         = getLongOrNull(obj, "profit");
-				item.roi            = getDoubleOrNull(obj, "roi");
-				item.recBuyPrice    = getLongOrNull(obj, "rec_buy_price");
-				item.recSellPrice   = getLongOrNull(obj, "rec_sell_price");
-				item.recProfit      = getLongOrNull(obj, "rec_profit");
-				item.hourlyVolume   = getIntOrNull(obj, "hourly_volume");
-				item.dailyVolume    = getIntOrNull(obj, "daily_volume");
-				item.buyLimit       = getInt(obj, "buy_limit", 0);
-				item.members        = getBool(obj, "members", false);
-				item.highAlch       = getIntOrNull(obj, "high_alch");
-				item.lastUpdated    = getString(obj, "last_updated", "");
+				SearchResultItem item = PARSER.fromJson(obj, SearchResultItem.class);
+				// String defaults: Gson sets null on an explicit JSON null; the manual
+				// mapper kept the default. Restore the defaults to stay byte-identical.
+				if (item.name == null)        item.name        = "Unknown";
+				if (item.lastUpdated == null) item.lastUpdated = "";
 				return item;
 			}, callback);
 		}
@@ -2299,82 +2287,37 @@ public class O7FlipApiClient
 
 	private FlipItem parseFlipItem(JsonObject obj)
 	{
-		FlipItem item = new FlipItem();
-		item.itemId          = getInt(obj, "item_id", 0);
-		item.name            = getString(obj, "name", "Unknown");
-		item.buyPrice        = getLong(obj, "buy_price", 0);
-		item.sellPrice       = getLong(obj, "sell_price", 0);
-		item.profit          = getLong(obj, "profit", 0);
-		item.roiPct          = getDouble(obj, "roi_pct", 0);
-		item.potentialProfit = getLong(obj, "potential_profit", 0);
-		item.buyLimit        = getInt(obj, "buy_limit", 0);
-		item.members         = getBool(obj, "members", true);
-		item.affordableQty   = getIntOrNull(obj, "affordable_qty");
-		item.flip07Score     = getIntOrNull(obj, "flip07_score");
-		item.recBuyPrice     = getLongOrNull(obj, "rec_buy_price");
-		item.recSellPrice    = getLongOrNull(obj, "rec_sell_price");
-		item.recProfit       = getLongOrNull(obj, "rec_profit");
-		item.hourlyVolume    = getIntOrNull(obj, "hourly_volume");
-		item.dailyVolume     = getIntOrNull(obj, "daily_volume");
-		item.bandProfit         = getLongOrNull(obj, "band_profit");
-		item.bandMargin         = getLongOrNull(obj, "band_margin");
-		item.bandFloor          = getLongOrNull(obj, "band_floor");
-		item.bandCeiling        = getLongOrNull(obj, "band_ceiling");
-		item.bandMarginPct      = getDouble(obj, "band_margin_pct", 0);
-		item.bandVolumeCoverage = getIntOrNull(obj, "band_volume_coverage");
+		FlipItem item = PARSER.fromJson(obj, FlipItem.class);
+		// String defaults: Gson sets null on an explicit JSON null; the manual
+		// parser kept the default. Restore the defaults to stay byte-identical.
+		if (item.name == null) item.name = "Unknown";
 		return item;
 	}
 
 	private DipItem parseDipItem(JsonObject obj)
 	{
-		DipItem item = new DipItem();
-		item.itemId       = getInt(obj, "item_id", 0);
-		item.name         = getString(obj, "name", "Unknown");
-		item.buyPrice     = getLong(obj, "buy_price", 0);
-		item.hourlyVolume = getInt(obj, "hourly_volume", 0);
-		item.dailyVolume  = getInt(obj, "daily_volume", 0);
-		item.buyLimit     = getInt(obj, "buy_limit", 0);
-		item.members      = getBool(obj, "members", true);
-		item.lastUpdated  = getString(obj, "last_updated", "");
-		item.type         = getString(obj, "type", "24h_dip");
-		item.avg24hBuy    = getLongOrNull(obj,   "avg_24h_buy");
-		item.dipPct       = getDoubleOrNull(obj, "dip_pct");
-		item.atlFloor     = getLongOrNull(obj,   "atl_floor");
-		item.buyVsAtlPct  = getDoubleOrNull(obj, "buy_vs_atl_pct");
-		item.dipPct1d     = getDoubleOrNull(obj, "dip_pct_1d");
-		item.dipPct7d     = getDoubleOrNull(obj, "dip_pct_7d");
-		item.dipPct30d    = getDoubleOrNull(obj, "dip_pct_30d");
+		DipItem item = PARSER.fromJson(obj, DipItem.class);
+		if (item.name == null)        item.name        = "Unknown";
+		if (item.lastUpdated == null) item.lastUpdated = "";
+		if (item.type == null)        item.type        = "24h_dip";
 		return item;
 	}
 
 	private DumpItem parseDumpItem(JsonObject obj)
 	{
-		DumpItem item = new DumpItem();
-		String t = getString(obj, "tier", "");
-		item.tier             = t.isEmpty() ? null : t;
-		item.itemId           = getInt(obj, "item_id", 0);
-		item.name             = getString(obj, "name", "Unknown");
-		item.buyPrice         = getLong(obj, "buy_price", 0);
-		item.sellPrice        = getLong(obj, "sell_price", 0);
-		item.profit           = getLong(obj, "profit", 0);
+		DumpItem item = PARSER.fromJson(obj, DumpItem.class);
+		if (item.name == null)       item.name       = "Unknown";
+		if (item.dumpStatus == null) item.dumpStatus = "none";
+		// tier: manual parser collapsed an empty string to null.
+		if (item.tier != null && item.tier.isEmpty())
+		{
+			item.tier = null;
+		}
+		// buyPrice falls back to current_price when absent/zero.
 		if (item.buyPrice == 0)
 		{
 			item.buyPrice = getLong(obj, "current_price", 0);
 		}
-		item.dumpScore        = getInt(obj, "dump_score", 0);
-		item.dumpPct          = getDouble(obj, "dump_pct", 0);
-		item.dumpStatus       = getString(obj, "dump_status", "none");
-		item.lastDumpHoursAgo = getDoubleOrNull(obj, "last_dump_hours_ago");
-		item.hourlyVolume     = getInt(obj, "hourly_volume", 0);
-		item.buyLimit         = getInt(obj, "buy_limit", 0);
-		item.members          = getBool(obj, "members", true);
-
-		item.roiPct              = getDoubleOrNull(obj, "roi_pct");
-		item.patternStale        = getBoolOrNull(obj,   "pattern_stale");
-		item.dailyVolume         = getIntOrNull(obj,    "daily_volume");
-		item.periodHours         = getIntOrNull(obj,    "period_hours");
-		item.dumpPeakHourUtc     = getIntOrNull(obj,    "dump_peak_hour_utc");
-		item.isClockAligned      = getBoolOrNull(obj,   "is_clock_aligned");
 		return item;
 	}
 
