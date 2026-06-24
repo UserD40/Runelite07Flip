@@ -26,7 +26,6 @@ package com.o7flip;
 
 import com.google.gson.FieldNamingPolicy;
 import com.google.gson.Gson;
-import com.google.gson.GsonBuilder;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
@@ -68,15 +67,13 @@ public class O7FlipApiClient
 	private static final int       PAGE_LIMIT      = 10;
 	private static final MediaType MEDIA_TYPE_JSON = MediaType.get("application/json; charset=utf-8");
 
-	private static final Gson PARSER = new GsonBuilder()
-		.setFieldNamingPolicy(FieldNamingPolicy.LOWER_CASE_WITH_UNDERSCORES)
-		.create();
-
 	@Inject
 	private OkHttpClient okHttpClient;
 
 	@Inject
 	private Gson gson;
+
+	private volatile Gson parser;
 
 	@Inject
 	private O7FlipConfig config;
@@ -89,6 +86,17 @@ public class O7FlipApiClient
 	private static final long RATE_LIMIT_RESET_MS = 5L * 60_000L;
 
 	private volatile boolean loggedKeySanitisation = false;
+
+	private Gson parser()
+	{
+		if (parser == null)
+		{
+			parser = gson.newBuilder()
+				.setFieldNamingPolicy(FieldNamingPolicy.LOWER_CASE_WITH_UNDERSCORES)
+				.create();
+		}
+		return parser;
+	}
 
 	boolean isRateLimited()
 	{
@@ -265,7 +273,7 @@ public class O7FlipApiClient
 			String encoded = java.net.URLEncoder.encode(query.trim(), "UTF-8");
 			fetchList(BASE_URL + "/v2/search?q=" + encoded + "&limit=100", "fetchSearch", "items", obj ->
 			{
-				SearchResultItem item = PARSER.fromJson(obj, SearchResultItem.class);
+				SearchResultItem item = parser().fromJson(obj, SearchResultItem.class);
 				if (item.name == null)        item.name        = "Unknown";
 				if (item.lastUpdated == null) item.lastUpdated = "";
 				return item;
@@ -2168,7 +2176,7 @@ public class O7FlipApiClient
 
 	private DecantItem parseDecantItem(JsonObject obj)
 	{
-		return PARSER.fromJson(obj, DecantItem.class);
+		return parser().fromJson(obj, DecantItem.class);
 	}
 
 	public void fetchRecommendedPrices(int itemId, Consumer<RecommendedPrices> callback)
@@ -2238,19 +2246,19 @@ public class O7FlipApiClient
 
 	private RecommendedPrices parseRecommendedPrices(JsonObject obj)
 	{
-		return PARSER.fromJson(obj, RecommendedPrices.class);
+		return parser().fromJson(obj, RecommendedPrices.class);
 	}
 
 	private FlipItem parseFlipItem(JsonObject obj)
 	{
-		FlipItem item = PARSER.fromJson(obj, FlipItem.class);
+		FlipItem item = parser().fromJson(obj, FlipItem.class);
 		if (item.name == null) item.name = "Unknown";
 		return item;
 	}
 
 	private DipItem parseDipItem(JsonObject obj)
 	{
-		DipItem item = PARSER.fromJson(obj, DipItem.class);
+		DipItem item = parser().fromJson(obj, DipItem.class);
 		if (item.name == null)        item.name        = "Unknown";
 		if (item.lastUpdated == null) item.lastUpdated = "";
 		if (item.type == null)        item.type        = "24h_dip";
@@ -2259,7 +2267,7 @@ public class O7FlipApiClient
 
 	private DumpItem parseDumpItem(JsonObject obj)
 	{
-		DumpItem item = PARSER.fromJson(obj, DumpItem.class);
+		DumpItem item = parser().fromJson(obj, DumpItem.class);
 		if (item.name == null)       item.name       = "Unknown";
 		if (item.dumpStatus == null) item.dumpStatus = "none";
 		if (item.tier != null && item.tier.isEmpty())
