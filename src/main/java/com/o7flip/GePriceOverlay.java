@@ -132,11 +132,8 @@ public class GePriceOverlay extends Overlay
 				if (ins.current.recBuy != null && ins.current.recBuy > 0)   buyPrice  = ins.current.recBuy;
 				if (ins.current.recSell != null && ins.current.recSell > 0) sellPrice = ins.current.recSell;
 			}
-			else
-			{
-				if (ins.current.buyPrice > 0)  buyPrice  = ins.current.buyPrice;
-				if (ins.current.sellPrice > 0) sellPrice = ins.current.sellPrice;
-			}
+			if (buyPrice == null && ins.current.buyPrice > 0)   buyPrice  = ins.current.buyPrice;
+			if (sellPrice == null && ins.current.sellPrice > 0) sellPrice = ins.current.sellPrice;
 		}
 		if (buyPrice == null && data != null)
 		{

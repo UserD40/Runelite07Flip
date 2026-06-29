@@ -353,6 +353,19 @@ public interface O7FlipConfig extends Config
 	}
 
 	@ConfigItem(
+		keyName = "showGeQuickLook",
+		name = "Quick Look on offers",
+		description = "Colour-code each active GE slot by whether your price is competitive, with a magnifying-glass "
+			+ "preview comparing your offer to 07Flip prices and what to set it to.",
+		section = geOverlaySection,
+		position = 5
+	)
+	default boolean showGeQuickLook()
+	{
+		return true;
+	}
+
+	@ConfigItem(
 		keyName = "frozenSellStaleAfterHours",
 		name = "Frozen sell expiry",
 		description = "<html>When you buy an item, the recommended sell price at that moment is "

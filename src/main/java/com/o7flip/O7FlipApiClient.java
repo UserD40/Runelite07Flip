@@ -37,6 +37,7 @@ import com.o7flip.model.DipItem;
 import com.o7flip.model.ItemInsights;
 import com.o7flip.model.OptimizeResult;
 import com.o7flip.model.RecommendedPrices;
+import com.o7flip.model.RepriceResult;
 import com.o7flip.model.SearchResultItem;
 import com.o7flip.model.TrackerStats;
 import com.o7flip.model.TradeRecord;
@@ -787,6 +788,78 @@ public class O7FlipApiClient
 				}
 			}
 		});
+	}
+
+	public void fetchReprice(int itemId, boolean isBuy, Long buyPrice, int qty, long currentPrice,
+		int holdMinutes, Consumer<RepriceResult> callback)
+	{
+		StringBuilder url = new StringBuilder(BASE_URL)
+			.append("/v2/item/").append(itemId).append("/reprice")
+			.append("?side=").append(isBuy ? "buy" : "sell")
+			.append("&qty=").append(Math.max(1, qty))
+			.append("&currentPrice=").append(currentPrice)
+			.append("&holdMinutes=").append(Math.max(0, holdMinutes));
+		if (buyPrice != null && buyPrice > 0)
+		{
+			url.append("&buyPrice=").append(buyPrice);
+		}
+		fetch(url.toString(), new Callback()
+		{
+			@Override
+			public void onFailure(Call call, IOException e)
+			{
+				log.warn("[07Flip] fetchReprice({}) failed: {}", itemId, e.getMessage());
+				callback.accept(null);
+			}
+
+			@Override
+			public void onResponse(Call call, Response response) throws IOException
+			{
+				try
+				{
+					if (response.code() == 429)
+					{
+						markRateLimited(response);
+					}
+					if (!response.isSuccessful() || response.body() == null)
+					{
+						callback.accept(null);
+						return;
+					}
+					JsonObject root = gson.fromJson(response.body().string(), JsonObject.class);
+					callback.accept(parseReprice(root));
+				}
+				catch (Exception e)
+				{
+					log.warn("[07Flip] fetchReprice({}) parse error: {}", itemId, e.getMessage());
+					callback.accept(null);
+				}
+				finally
+				{
+					response.close();
+				}
+			}
+		});
+	}
+
+	private RepriceResult parseReprice(JsonObject root)
+	{
+		if (root == null)
+		{
+			return null;
+		}
+		RepriceResult r = new RepriceResult();
+		r.suggestedPrice    = getLong(root, "suggested_price", 0L);
+		r.breakEvenPrice    = getLong(root, "break_even_price", 0L);
+		r.clearingPrice     = getLong(root, "clearing_price", 0L);
+		r.netMarginEach     = getLong(root, "net_margin_each", 0L);
+		r.netMarginPct      = getDouble(root, "net_margin_pct", 0.0);
+		r.cutLossMarginEach = getLong(root, "cut_loss_margin_each", 0L);
+		r.etaMinutes        = getInt(root, "eta_minutes", 0);
+		r.status            = getString(root, "status", "");
+		r.costBasis         = getLongOrNull(root, "cost_basis");
+		r.costBasisSource   = getString(root, "cost_basis_source", "");
+		return r;
 	}
 
 	private ItemInsights parseItemInsights(JsonObject root)

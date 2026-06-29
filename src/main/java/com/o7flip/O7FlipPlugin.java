@@ -122,6 +122,9 @@ public class O7FlipPlugin extends Plugin
 	private InventoryTooltipOverlay inventoryTooltipOverlay;
 
 	@Inject
+	private GeQuickLookOverlay geQuickLookOverlay;
+
+	@Inject
 	private Gson gson;
 
 	@Inject
@@ -190,6 +193,14 @@ public class O7FlipPlugin extends Plugin
 		= new java.util.concurrent.ConcurrentHashMap<>();
 	private final java.util.Set<Integer> overlayInsightsInFlight
 		= java.util.concurrent.ConcurrentHashMap.newKeySet();
+
+	private final java.util.concurrent.ConcurrentHashMap<Integer, com.o7flip.model.RepriceResult> repriceCache
+		= new java.util.concurrent.ConcurrentHashMap<>();
+	private final java.util.concurrent.ConcurrentHashMap<Integer, Long> repriceFetchedAt
+		= new java.util.concurrent.ConcurrentHashMap<>();
+	private final java.util.Set<Integer> repriceInFlight
+		= java.util.concurrent.ConcurrentHashMap.newKeySet();
+	private static final long REPRICE_TTL_MS = 30_000L;
 
 	public volatile Map<Integer, com.o7flip.model.ActiveOfferSnapshot> activeOffers = Collections.emptyMap();
 
@@ -630,6 +641,14 @@ public class O7FlipPlugin extends Plugin
 			if (recSell != null && recSell > 0 && recSell > best) best = recSell;
 			candidate = best;
 		}
+		if (candidate <= 0)
+		{
+			Long insightsSell = lookupInsightsSell(itemId);
+			if (insightsSell != null && insightsSell > 0)
+			{
+				candidate = insightsSell;
+			}
+		}
 		long breakEven = breakEvenSellPrice(itemId);
 		if (candidate > 0 && breakEven > 0)
 		{
@@ -667,6 +686,20 @@ public class O7FlipPlugin extends Plugin
 		return null;
 	}
 
+	private Long lookupInsightsSell(int itemId)
+	{
+		com.o7flip.model.ItemInsights ins = recInsightsFor(itemId);
+		return (ins != null && ins.current != null && ins.current.sellPrice > 0)
+			? ins.current.sellPrice : null;
+	}
+
+	private Long lookupInsightsBuy(int itemId)
+	{
+		com.o7flip.model.ItemInsights ins = recInsightsFor(itemId);
+		return (ins != null && ins.current != null && ins.current.buyPrice > 0)
+			? ins.current.buyPrice : null;
+	}
+
 	private com.o7flip.model.ItemInsights recInsightsFor(int itemId)
 	{
 		com.o7flip.model.ItemInsights cur = currentInsights;
@@ -690,13 +723,23 @@ public class O7FlipPlugin extends Plugin
 	long computeAutoBuyPrice(int itemId)
 	{
 		boolean premium = panel != null && panel.isPremium();
+		long candidate = -1L;
 		if (!premium)
 		{
 			Long liveBuy = lookupLiveBuy(itemId);
-			return (liveBuy != null && liveBuy > 0) ? liveBuy : -1L;
+			if (liveBuy != null && liveBuy > 0) candidate = liveBuy;
 		}
-		Long recBuy = lookupLiveRecBuy(itemId);
-		return (recBuy != null && recBuy > 0) ? recBuy : -1L;
+		else
+		{
+			Long recBuy = lookupLiveRecBuy(itemId);
+			if (recBuy != null && recBuy > 0) candidate = recBuy;
+		}
+		if (candidate <= 0)
+		{
+			Long insightsBuy = lookupInsightsBuy(itemId);
+			if (insightsBuy != null && insightsBuy > 0) candidate = insightsBuy;
+		}
+		return candidate;
 	}
 
 	private Long lookupLiveBuy(int itemId)
@@ -809,6 +852,7 @@ public class O7FlipPlugin extends Plugin
 		overlayManager.add(priceOverlay);
 		overlayManager.add(gpDropOverlay);
 		overlayManager.add(inventoryTooltipOverlay);
+		overlayManager.add(geQuickLookOverlay);
 
 		loadTradeHistory();
 		loadBondLedger();
@@ -866,6 +910,7 @@ public class O7FlipPlugin extends Plugin
 		overlayManager.remove(priceOverlay);
 		overlayManager.remove(gpDropOverlay);
 		overlayManager.remove(inventoryTooltipOverlay);
+		overlayManager.remove(geQuickLookOverlay);
 		clientToolbar.removeNavigation(navButton);
 		log.debug("[07Flip] Stopped");
 	}
@@ -2777,6 +2822,48 @@ public class O7FlipPlugin extends Plugin
 			}));
 		}
 		return overlayInsightsCache.get(itemId);
+	}
+
+	public com.o7flip.model.RepriceResult getReprice(int itemId, boolean isBuy, int qty, long currentPrice, int holdMinutes)
+	{
+		if (itemId <= 0 || panel == null || !panel.isPremium() || !config.shareTradeData())
+		{
+			return null;
+		}
+		Long fetched = repriceFetchedAt.get(itemId);
+		boolean stale = fetched == null || (System.currentTimeMillis() - fetched) > REPRICE_TTL_MS;
+		if (stale && executor != null && !executor.isShutdown() && repriceInFlight.add(itemId))
+		{
+			final Long buyPrice = getFrozenBuy(itemId);
+			executor.execute(() -> apiClient.fetchReprice(itemId, isBuy, buyPrice, qty, currentPrice, holdMinutes, res ->
+			{
+				try
+				{
+					if (res != null)
+					{
+						repriceCache.put(itemId, res);
+					}
+					repriceFetchedAt.put(itemId, System.currentTimeMillis());
+				}
+				finally
+				{
+					repriceInFlight.remove(itemId);
+				}
+			}));
+		}
+		return repriceCache.get(itemId);
+	}
+
+	public int offerHeldMinutes(int slot)
+	{
+		long[] base = slotRecordedFills.get(slot);
+		if (base == null || base.length < 3)
+		{
+			return 0;
+		}
+		long listedMs = base[2] / 10L;
+		long ageMs = System.currentTimeMillis() - listedMs;
+		return ageMs <= 0 ? 0 : (int) (ageMs / 60_000L);
 	}
 
 	public void fetchTrackerStats()
