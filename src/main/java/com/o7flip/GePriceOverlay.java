@@ -312,13 +312,24 @@ public class GePriceOverlay extends Overlay
 		{
 			return;
 		}
-		Long[] buy  = insights.sparkline24hBuy;
-		Long[] sell = insights.sparkline24hSell;
+		String period = plugin.selectedChartPeriod;
+		if (period == null)
+		{
+			period = config.defaultChartPeriod().chartLabel();
+		}
+		Long[] buy  = sparklineBuyFor(insights, period);
+		Long[] sell = sparklineSellFor(insights, period);
+		if ((buy == null || buy.length == 0) && (sell == null || sell.length == 0))
+		{
+			period = "24h";
+			buy  = insights.sparkline24hBuy;
+			sell = insights.sparkline24hSell;
+		}
 		if ((buy == null || buy.length == 0) && (sell == null || sell.length == 0))
 		{
 			return;
 		}
-		int dataHash = java.util.Arrays.deepHashCode(new Object[]{buy, sell});
+		int dataHash = java.util.Arrays.deepHashCode(new Object[]{buy, sell, period});
 		if (cachedChartImage == null || cachedChartItemId != itemId || cachedChartDataHash != dataHash)
 		{
 			cachedChartImage   = com.o7flip.ui.MiniChart.render(CHART_W, CHART_H, buy, sell);
@@ -326,6 +337,30 @@ public class GePriceOverlay extends Overlay
 			cachedChartDataHash = dataHash;
 		}
 		panel.getChildren().add(new ImageComponent(cachedChartImage));
+	}
+
+	private static Long[] sparklineBuyFor(com.o7flip.model.ItemInsights ins, String period)
+	{
+		switch (period)
+		{
+			case "2h":  return ins.sparkline2hBuy;
+			case "4h":  return ins.sparkline4hBuy;
+			case "7d":  return ins.sparkline7dBuy;
+			case "30d": return ins.sparkline30dBuy;
+			default:    return ins.sparkline24hBuy;
+		}
+	}
+
+	private static Long[] sparklineSellFor(com.o7flip.model.ItemInsights ins, String period)
+	{
+		switch (period)
+		{
+			case "2h":  return ins.sparkline2hSell;
+			case "4h":  return ins.sparkline4hSell;
+			case "7d":  return ins.sparkline7dSell;
+			case "30d": return ins.sparkline30dSell;
+			default:    return ins.sparkline24hSell;
+		}
 	}
 
 	private int resolveCurrentItemId(Widget setup)

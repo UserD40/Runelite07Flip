@@ -1647,41 +1647,6 @@ public class O7FlipApiClient
 		});
 	}
 
-	public void deleteActiveSession(Consumer<Boolean> onComplete)
-	{
-		String key = sanitizedApiKey();
-		if (key == null) { if (onComplete != null) onComplete.accept(false); return; }
-		if (isRateLimited()) { if (onComplete != null) onComplete.accept(false); return; }
-
-		Request request = new Request.Builder()
-			.url(BASE_URL + "/optimize/active")
-			.delete()
-			.header("User-Agent", USER_AGENT)
-			.header("Authorization", "Bearer " + key)
-			.build();
-		okHttpClient.newCall(request).enqueue(new Callback()
-		{
-			@Override
-			public void onFailure(Call call, IOException e)
-			{
-				log.warn("[07Flip] /optimize/active DELETE failed: {}", e.getMessage());
-				if (onComplete != null) onComplete.accept(false);
-			}
-			@Override
-			public void onResponse(Call call, Response response) throws IOException
-			{
-				try
-				{
-					if (response.code() == 429) markRateLimited(response);
-					boolean ok = response.isSuccessful();
-					if (!ok) log.warn("[07Flip] /optimize/active DELETE HTTP {}", response.code());
-					if (onComplete != null) onComplete.accept(ok);
-				}
-				finally { response.close(); }
-			}
-		});
-	}
-
 	private com.o7flip.model.OptimizerSession parseSession(String json)
 	{
 		com.o7flip.model.OptimizerSession s = new com.o7flip.model.OptimizerSession();

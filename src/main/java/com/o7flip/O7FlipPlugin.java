@@ -155,6 +155,8 @@ public class O7FlipPlugin extends Plugin
 
 	private boolean geAutoOpenedTab = false;
 
+	private volatile int insightsRequestSeq = 0;
+
 	private static final long OVERLAY_QUEUE_TTL_MS = 10L * 60L * 1000L;
 
 	private volatile int    overlayQueueItemId   = -1;
@@ -193,7 +195,7 @@ public class O7FlipPlugin extends Plugin
 
 	private final Map<Integer, GrandExchangeOfferState> prevSlotStates = new HashMap<>();
 
-	private final Map<Integer, long[]> slotRecordedFills = new HashMap<>();
+	private final Map<Integer, long[]> slotRecordedFills = new java.util.concurrent.ConcurrentHashMap<>();
 
 	private final Set<Long> tradePostsInFlight = new HashSet<>();
 
@@ -204,6 +206,8 @@ public class O7FlipPlugin extends Plugin
 	public volatile com.o7flip.model.TrackerStats trackerStats = null;
 
 	public volatile com.o7flip.model.ItemInsights currentInsights = null;
+
+	public volatile String selectedChartPeriod = null;
 
 	private final java.util.concurrent.ConcurrentHashMap<Integer, FrozenSell> frozenSellByItemId
 		= new java.util.concurrent.ConcurrentHashMap<>();
@@ -321,16 +325,6 @@ public class O7FlipPlugin extends Plugin
 				? "Click an empty buy slot — your offer will pre-fill for " + name
 				: "Open the Grand Exchange, click an empty buy slot, then your offer will pre-fill for " + name);
 		});
-	}
-
-	public void queueGeSell(int itemId, long price, String name)
-	{
-		log.debug("[07Flip] GE sell queued: {} ({}) @ {}", name, itemId, price);
-		setOverlayQueue(itemId, price, false);
-		pendingGeSellItemId = itemId;
-		pendingGeSellPrice  = price;
-		pendingGeSellName   = name;
-		notifier.notify("Open GE \u2192 click a sell slot \u2192 select " + name + " from inventory \u2014 use the 07Flip overlay to set the price");
 	}
 
 	private void setOverlayQueue(int itemId, long price, boolean isBuy)
@@ -797,16 +791,6 @@ public class O7FlipPlugin extends Plugin
 		return overlayQueueIsBuy;
 	}
 
-	public long queuedPriceFor(int itemId, boolean isBuy)
-	{
-		if (!hasOverlayQueue()) return -1L;
-		if (overlayQueueItemId == itemId && overlayQueueIsBuy == isBuy)
-		{
-			return overlayQueuePrice;
-		}
-		return -1L;
-	}
-
 	@Override
 	protected void startUp() throws Exception
 	{
@@ -1147,11 +1131,6 @@ public class O7FlipPlugin extends Plugin
 			return;
 		}
 		autoOpenInsightsItemId = itemId;
-		com.o7flip.model.ItemInsights shown = currentInsights;
-		if (shown != null && shown.itemId == itemId)
-		{
-			return;
-		}
 		log.debug("[07Flip] GE offer screen detected — auto-opening Item tab for {} ({})", name, itemId);
 		if (!geAutoOpenedTab)
 		{
@@ -2643,17 +2622,6 @@ public class O7FlipPlugin extends Plugin
 		return blocklist.contains(itemId);
 	}
 
-	public void addToBlocklist(int itemId)
-	{
-		Set<Integer> next = new HashSet<>(blocklist);
-		if (next.add(itemId))
-		{
-			blocklist = Collections.unmodifiableSet(next);
-			saveBlocklist();
-			SwingUtilities.invokeLater(() -> panel.rebuildTabs());
-		}
-	}
-
 	public void removeFromBlocklist(int itemId)
 	{
 		Set<Integer> next = new HashSet<>(blocklist);
@@ -2811,16 +2779,6 @@ public class O7FlipPlugin extends Plugin
 		return overlayInsightsCache.get(itemId);
 	}
 
-	public void syncTrackerHistory()
-	{
-		if (executor == null || executor.isShutdown())
-		{
-			return;
-		}
-		executor.execute(this::doSyncTrackerHistory);
-		executor.execute(this::doFetchTrackerStats);
-	}
-
 	public void fetchTrackerStats()
 	{
 		if (executor == null || executor.isShutdown())
@@ -2853,28 +2811,28 @@ public class O7FlipPlugin extends Plugin
 		{
 			return;
 		}
+		final int seq = ++insightsRequestSeq;
 		SwingUtilities.invokeLater(() -> panel.showInsightsLoading(itemId, fallbackName));
 		if (executor == null || executor.isShutdown())
 		{
 			return;
 		}
-		executor.execute(() -> doFetchItemInsights(itemId));
+		executor.execute(() -> doFetchItemInsights(itemId, seq));
 	}
 
-	private void doFetchItemInsights(int itemId)
+	private void doFetchItemInsights(int itemId, int seq)
 	{
 		apiClient.fetchItemInsights(itemId, insights ->
 		{
+			if (seq != insightsRequestSeq)
+			{
+				return;
+			}
 			if (insights != null && insights.buyLimit > 0)
 			{
 				rememberBuyLimit(insights.itemId, insights.buyLimit);
 			}
-			com.o7flip.model.ItemInsights existing = currentInsights;
-			if (existing != null && insights != null && existing.itemId == insights.itemId)
-			{
-				currentInsights = insights;
-			}
-			else if (existing == null || (insights != null && existing.itemId == insights.itemId))
+			if (insights != null)
 			{
 				currentInsights = insights;
 			}
@@ -2898,13 +2856,26 @@ public class O7FlipPlugin extends Plugin
 		{
 			return;
 		}
+		Set<Long> liveOfferIds = new HashSet<>();
+		for (long[] v : slotRecordedFills.values())
+		{
+			if (v != null && v.length >= 3)
+			{
+				liveOfferIds.add(v[2]);
+			}
+		}
 		List<TradeRecord> snapshot = new ArrayList<>();
 		for (TradeRecord t : all)
 		{
-			if (t != null && !t.serverSynced && t.tradeId == null)
+			if (t == null || t.serverSynced || t.tradeId != null)
 			{
-				snapshot.add(t);
+				continue;
 			}
+			if (t.partial && t.offerInstanceId != null && liveOfferIds.contains(t.offerInstanceId))
+			{
+				continue;
+			}
+			snapshot.add(t);
 		}
 		if (snapshot.isEmpty())
 		{
@@ -3797,35 +3768,6 @@ public class O7FlipPlugin extends Plugin
 		});
 	}
 
-	public void resyncActivePlan()
-	{
-		if (panel == null || !panel.isPremium()) return;
-		if (executor == null || executor.isShutdown()) return;
-		apiClient.fetchActiveSession(remote ->
-		{
-			if (remote == null) return;
-			clientThread.invoke(() ->
-			{
-				if (activeSession == null)
-				{
-					activeSession = remote;
-				}
-				else
-				{
-					adoptServerStructure(activeSession, remote);
-				}
-				boolean healed = retroAttributeFills(activeSession);
-				healed |= sweepSellListedFromOffers(activeSession);
-				if (healed)
-				{
-					scheduleSessionPost();
-				}
-				final com.o7flip.model.OptimizerSession snap = activeSession;
-				SwingUtilities.invokeLater(() -> panel.hydrateOptimizerSession(snap));
-			});
-		});
-	}
-
 	static boolean mergeRemoteFills(com.o7flip.model.OptimizerSession local,
 	                                 com.o7flip.model.OptimizerSession remote)
 	{
@@ -4139,16 +4081,6 @@ public class O7FlipPlugin extends Plugin
 			com.o7flip.model.OptimizerSession snapshot = live.copy();
 			apiClient.postActiveSession(snapshot, ok -> { });
 		});
-	}
-
-	public void clearActivePlan()
-	{
-		activeSession = null;
-		if (executor == null || executor.isShutdown()) return;
-		executor.execute(() -> apiClient.deleteActiveSession(ok ->
-		{
-			SwingUtilities.invokeLater(() -> panel.onActivePlanCleared());
-		}));
 	}
 
 	private void attributeTradeToActiveSlot(int itemId, int qty, long pricePer, boolean isBuy,

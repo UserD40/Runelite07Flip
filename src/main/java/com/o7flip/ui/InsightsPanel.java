@@ -1230,6 +1230,10 @@ public class InsightsPanel extends JPanel
 	{
 		desiredChartPeriodIdx = idx;
 		ChartPeriod p = periods.get(idx);
+		if (plugin != null)
+		{
+			plugin.selectedChartPeriod = p.label;
+		}
 		chartHolder.removeAll();
 		chartHolder.add(new BuySellSparkline(p.buy, p.sell, 80, p.axisStart, "now", p.startEpochMs, p.intervalMinutes), BorderLayout.CENTER);
 		for (int i = 0; i < chips.size(); i++)

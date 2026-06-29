@@ -45,7 +45,7 @@ import javax.swing.JLabel;
  */
 public final class VectorIcon implements Icon
 {
-	public enum Kind { AUTOFILL, LOCK, UNLOCK, GLOBE, STAR, STAR_OUTLINE, PENCIL }
+	public enum Kind { AUTOFILL, LOCK, UNLOCK, GLOBE, STAR, STAR_OUTLINE, PENCIL, REFRESH }
 
 	private final Kind kind;
 	private final int size;
@@ -154,6 +154,21 @@ public final class VectorIcon implements Icon
 				{
 					g2.draw(star);
 				}
+				break;
+			case REFRESH:
+				float rp = s * 0.18f;
+				float rd = s - 2f * rp;
+				float rr = rd / 2f;
+				g2.draw(new Arc2D.Float(rp, rp, rd, rd, 65, 285, Arc2D.OPEN));
+				double a0 = Math.toRadians(65);
+				float ax = s * 0.5f + rr * (float) Math.cos(a0);
+				float ay = s * 0.5f - rr * (float) Math.sin(a0);
+				Path2D head = new Path2D.Float();
+				head.moveTo(ax, ay);
+				head.lineTo(ax - s * 0.17f, ay - s * 0.01f);
+				head.lineTo(ax - s * 0.02f, ay - s * 0.17f);
+				head.closePath();
+				g2.fill(head);
 				break;
 			case PENCIL:
 				g2.draw(new Line2D.Float(s * 0.30f, s * 0.78f, s * 0.74f, s * 0.34f));

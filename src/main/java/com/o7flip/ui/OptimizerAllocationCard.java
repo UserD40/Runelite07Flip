@@ -75,18 +75,13 @@ public class OptimizerAllocationCard extends JPanel
 		nameLabel.setFont(Fonts.BOLD);
 		nameLabel.setForeground(Color.WHITE);
 
-		JComponent stateChipForName = buildStateChip(a);
-
 		JPanel chipCluster = new JPanel(new FlowLayout(FlowLayout.RIGHT, 4, 0));
 		chipCluster.setBackground(bg);
 		if (a.partial)
 		{
 			chipCluster.add(buildPartialBadge());
 		}
-		if (stateChipForName != null)
-		{
-			chipCluster.add(stateChipForName);
-		}
+		addStateChips(chipCluster, a);
 
 		JPanel nameRow = new JPanel(new BorderLayout(6, 0));
 		nameRow.setBackground(bg);
@@ -141,11 +136,16 @@ public class OptimizerAllocationCard extends JPanel
 		bottomRow.add(allocLine, BorderLayout.CENTER);
 
 		int boughtSoFar = sumQty(a.buys);
-		JLabel progressLabel = buildProgressLabel(a);
-		JComponent progressBar = buildProgressBar(a);
+		int soldSoFar   = sumQty(a.sells);
+		boolean complete    = isSoldComplete(a);
+		boolean buyOngoing  = a.state != null && a.state != SlotState.PENDING
+			&& !complete && !a.partial && boughtSoFar < a.qty;
+		boolean sellStarted = !complete
+			&& (soldSoFar > 0 || a.sellListed || a.state == SlotState.SELLING);
+		boolean dualPhase   = buyOngoing && sellStarted;
 
 		JButton stopBuyingBtn = null;
-		if (a.state == SlotState.BUYING && !a.partial && boughtSoFar > 0 && plugin != null && slotIndex >= 0)
+		if (buyOngoing && boughtSoFar > 0 && plugin != null && slotIndex >= 0)
 		{
 			stopBuyingBtn = buildStopBuyingButton(boughtSoFar);
 			final int idx = slotIndex;
@@ -155,7 +155,7 @@ public class OptimizerAllocationCard extends JPanel
 		JButton regenerateBtn = null;
 		if (onSwapClicked != null && isSoldComplete(a))
 		{
-			regenerateBtn = roundedPill("↻ Regenerate");
+			regenerateBtn = roundedPill(Fonts.iconOr("↻ Regenerate", "Regenerate"));
 			regenerateBtn.setBackground(new Color(0x3E3E3E));
 			regenerateBtn.setForeground(Color.WHITE);
 			regenerateBtn.setToolTipText("Replace this completed slot with a fresh item (updates 07flip.com too)");
@@ -178,12 +178,35 @@ public class OptimizerAllocationCard extends JPanel
 		textPanel.add(profitPerUnit);
 		textPanel.add(Box.createVerticalStrut(2));
 		textPanel.add(bottomRow);
-		progressLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
-		progressBar.setAlignmentX(Component.LEFT_ALIGNMENT);
 		textPanel.add(Box.createVerticalStrut(3));
-		textPanel.add(progressLabel);
-		textPanel.add(Box.createVerticalStrut(3));
-		textPanel.add(progressBar);
+		if (dualPhase)
+		{
+			JLabel buyProgress  = buildPhaseLabel(a, false);
+			JComponent buyBar   = buildBar(a, false);
+			JLabel sellProgress = buildPhaseLabel(a, true);
+			JComponent sellBar  = buildBar(a, true);
+			buyProgress.setAlignmentX(Component.LEFT_ALIGNMENT);
+			buyBar.setAlignmentX(Component.LEFT_ALIGNMENT);
+			sellProgress.setAlignmentX(Component.LEFT_ALIGNMENT);
+			sellBar.setAlignmentX(Component.LEFT_ALIGNMENT);
+			textPanel.add(buyProgress);
+			textPanel.add(Box.createVerticalStrut(2));
+			textPanel.add(buyBar);
+			textPanel.add(Box.createVerticalStrut(4));
+			textPanel.add(sellProgress);
+			textPanel.add(Box.createVerticalStrut(2));
+			textPanel.add(sellBar);
+		}
+		else
+		{
+			JLabel progressLabel = buildProgressLabel(a);
+			JComponent progressBar = buildProgressBar(a);
+			progressLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
+			progressBar.setAlignmentX(Component.LEFT_ALIGNMENT);
+			textPanel.add(progressLabel);
+			textPanel.add(Box.createVerticalStrut(3));
+			textPanel.add(progressBar);
+		}
 		if (stopBuyingBtn != null || regenerateBtn != null)
 		{
 			JPanel actionRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 0));
@@ -201,18 +224,36 @@ public class OptimizerAllocationCard extends JPanel
 		final boolean swappable = a.state == null || a.state == SlotState.PENDING;
 		if (onSwapClicked != null && swappable)
 		{
-			JLabel swap = new JLabel("↻");
-			swap.setFont(swap.getFont().deriveFont(16f));
-			swap.setForeground(new Color(0x666666));
+			final Color swapIdle = new Color(0x666666);
+			JLabel swap = new JLabel();
+			final VectorIcon swapIcon = Fonts.WINDOWS ? null : new VectorIcon(VectorIcon.Kind.REFRESH, 16, swapIdle);
+			if (Fonts.WINDOWS)
+			{
+				swap.setText("↻");
+				swap.setFont(swap.getFont().deriveFont(16f));
+				swap.setForeground(swapIdle);
+			}
+			else
+			{
+				swap.setIcon(swapIcon);
+			}
 			swap.setBorder(new EmptyBorder(0, 4, 0, 4));
 			swap.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
 			swap.setToolTipText("Replace this auto-picked item with the next best one");
 			swap.addMouseListener(new MouseAdapter()
 			{
 				@Override
-				public void mouseEntered(MouseEvent e) { swap.setForeground(Color.WHITE); }
+				public void mouseEntered(MouseEvent e)
+				{
+					if (swapIcon != null) { swapIcon.setColor(Color.WHITE); swap.repaint(); }
+					else { swap.setForeground(Color.WHITE); }
+				}
 				@Override
-				public void mouseExited(MouseEvent e)  { swap.setForeground(new Color(0x666666)); }
+				public void mouseExited(MouseEvent e)
+				{
+					if (swapIcon != null) { swapIcon.setColor(swapIdle); swap.repaint(); }
+					else { swap.setForeground(swapIdle); }
+				}
 				@Override
 				public void mouseClicked(MouseEvent e)
 				{
@@ -293,38 +334,46 @@ public class OptimizerAllocationCard extends JPanel
 		return a.state == SlotState.SELLING && sumQty(a.sells) >= Math.max(1, a.qty);
 	}
 
-	private static JComponent buildStateChip(OptimizeResult.Allocation a)
+	private static void addStateChips(JPanel cluster, OptimizeResult.Allocation a)
 	{
-		if (a.state == null || a.state == SlotState.PENDING) return null;
-		String text;
-		Color bg;
-		if (isSoldComplete(a))
+		if (a.state == null || a.state == SlotState.PENDING)
 		{
-			text = "Sold";
-			bg = new Color(0x3A2A4A);
-		}
-		else if (a.state == SlotState.FILLED && a.sellListed)
-		{
-			text = "Selling";
-			bg = new Color(0x4A3B17);
-		}
-		else
-		{
-			switch (a.state)
-			{
-				case BUYING:  text = "Buying";  bg = new Color(0x1E3556); break;
-				case FILLED:  text = "Filled";  bg = new Color(0x004D2E); break;
-				case SELLING: text = "Selling"; bg = new Color(0x4A3B17); break;
-				case CLOSED:  text = "Sold";    bg = new Color(0x3A2A4A); break;
-				default:      return null;
-			}
+			return;
 		}
 		int bought = sumQty(a.buys);
 		int sold   = sumQty(a.sells);
-		String tooltip = "<html><b>" + text + "</b><br>"
+		String tooltip = "<html><b>Slot progress</b><br>"
 			+ "Bought: " + FlipItemPanel.formatGp(bought) + " / " + FlipItemPanel.formatGp(a.qty) + "<br>"
 			+ "Sold: " + FlipItemPanel.formatGp(sold) + " / " + FlipItemPanel.formatGp(bought) + "</html>";
 
+		if (isSoldComplete(a))
+		{
+			cluster.add(stateChip("Sold", new Color(0x3A2A4A), tooltip));
+			return;
+		}
+
+		boolean buyOngoing  = !a.partial && bought < a.qty;
+		boolean sellStarted = sold > 0 || a.sellListed || a.state == SlotState.SELLING;
+
+		boolean added = false;
+		if (buyOngoing)
+		{
+			cluster.add(stateChip("Buying", new Color(0x1E3556), tooltip));
+			added = true;
+		}
+		if (sellStarted)
+		{
+			cluster.add(stateChip("Selling", new Color(0x4A3B17), tooltip));
+			added = true;
+		}
+		if (!added)
+		{
+			cluster.add(stateChip("Filled", new Color(0x004D2E), tooltip));
+		}
+	}
+
+	private static JLabel stateChip(String text, Color bg, String tooltip)
+	{
 		JLabel chip = makeChip(text, bg, Color.WHITE);
 		chip.setToolTipText(tooltip);
 		return chip;
@@ -438,14 +487,32 @@ public class OptimizerAllocationCard extends JPanel
 			|| (a.state == SlotState.FILLED && a.sellListed);
 	}
 
+	private static JLabel buildPhaseLabel(OptimizeResult.Allocation a, boolean sell)
+	{
+		int target = Math.max(0, a.qty);
+		int bought = Math.min(sumQty(a.buys), target);
+		int sold   = Math.min(sumQty(a.sells), target);
+		String text = sell
+			? FlipItemPanel.formatGp(sold) + " / " + FlipItemPanel.formatGp(target) + " sold"
+			: FlipItemPanel.formatGp(bought) + " / " + FlipItemPanel.formatGp(a.qty) + " bought";
+		JLabel l = new JLabel("<html><font color='#888888'>" + text + "</font></html>");
+		l.setFont(Fonts.SM);
+		l.setToolTipText("Buy/sell progress for this slot.");
+		return l;
+	}
+
 	private static JComponent buildProgressBar(OptimizeResult.Allocation a)
+	{
+		return buildBar(a, isSellPhase(a));
+	}
+
+	private static JComponent buildBar(OptimizeResult.Allocation a, boolean sell)
 	{
 		int bought = sumQty(a.buys);
 		int sold   = sumQty(a.sells);
-		boolean selling = isSellPhase(a);
-		final Color fill = selling ? new Color(0x9B59B6) : new Color(0x00C27A);
+		final Color fill = sell ? new Color(0x9B59B6) : new Color(0x00C27A);
 		int target = Math.max(1, a.qty);
-		double f = selling
+		double f = sell
 			? Math.min(1.0, sold / (double) target)
 			: Math.min(1.0, bought / (double) target);
 		final double fraction = Math.max(0.0, f);

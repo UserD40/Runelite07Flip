@@ -3749,15 +3749,6 @@ public class O7FlipPanel extends PluginPanel
 		}
 	}
 
-	public void onActivePlanCleared()
-	{
-		lastOptimize = null;
-		optFormCollapsed = false;
-		optShowingHistory = false;
-		applyOptimizerFormVisibility();
-		renderOptimizerEmpty();
-	}
-
 	private void renderOptimizerEmpty()
 	{
 		if (optimizerListPanel == null) return;
