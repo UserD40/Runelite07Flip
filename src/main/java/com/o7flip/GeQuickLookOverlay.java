@@ -39,7 +39,10 @@ import net.runelite.client.ui.overlay.OverlayPosition;
 import net.runelite.client.ui.overlay.components.ImageComponent;
 import net.runelite.client.ui.overlay.components.LineComponent;
 import net.runelite.client.ui.overlay.components.PanelComponent;
+import net.runelite.client.ui.overlay.components.ProgressBarComponent;
+import net.runelite.client.ui.overlay.components.TextComponent;
 import net.runelite.client.ui.overlay.components.TitleComponent;
+import net.runelite.client.ui.FontManager;
 import javax.inject.Inject;
 import java.awt.BasicStroke;
 import java.awt.Color;
@@ -48,20 +51,15 @@ import java.awt.Graphics2D;
 import java.awt.Rectangle;
 import java.awt.RenderingHints;
 import java.awt.Stroke;
-import java.awt.geom.Ellipse2D;
-import java.awt.geom.Line2D;
 import java.awt.image.BufferedImage;
 
 public class GeQuickLookOverlay extends Overlay
 {
-	private static final Color GOOD       = new Color(0x00C27A);
-	private static final Color BAD        = new Color(0xE85050);
 	private static final Color NEUTRAL    = new Color(0xC0A050);
+	private static final double GREEN_TOL = 0.015;
+	private static final double MID_TOL   = 0.05;
 	private static final Color HEADER     = new Color(0xFFD700);
 	private static final Color INFO       = new Color(0xC0C0C0);
-	private static final Color TOOLTIP_BG = new Color(15, 15, 15, 235);
-	private static final Color MAG_LENS   = new Color(0xEFB83C);
-	private static final int   GLYPH      = 16;
 	private static final int   ICON_FILL_ALPHA  = 50;
 	private static final int   ICON_FRAME_ALPHA = 210;
 	private static final int   CHART_W    = 172;
@@ -85,7 +83,9 @@ public class GeQuickLookOverlay extends Overlay
 	@Override
 	public Dimension render(Graphics2D graphics)
 	{
-		if (!config.showGeQuickLook())
+		final boolean wantQuickLook = config.showGeQuickLook();
+		final boolean wantTimer = config.showGeSlotTimer();
+		if (!wantQuickLook && !wantTimer)
 		{
 			return null;
 		}
@@ -105,7 +105,8 @@ public class GeQuickLookOverlay extends Overlay
 		final int baseId = InterfaceID.GeOffers.INDEX_0;
 
 		int hoveredIdx = -1;
-		if (mouse != null)
+		Rectangle hoveredSlotBounds = null;
+		if ((wantQuickLook || wantTimer) && mouse != null)
 		{
 			for (int i = 0; i < 8; i++)
 			{
@@ -122,11 +123,13 @@ public class GeQuickLookOverlay extends Overlay
 				if (b != null && b.contains(mouse.getX(), mouse.getY()))
 				{
 					hoveredIdx = i;
+					hoveredSlotBounds = b;
 					break;
 				}
 			}
 		}
-		final boolean tooltipUp = hoveredIdx >= 0;
+		final Rectangle panelRect = (wantQuickLook && config.showGeQuickLookTooltip() && hoveredSlotBounds != null)
+			? quickLookRect(hoveredSlotBounds) : null;
 
 		ActiveOfferSnapshot hoveredSnap = null;
 		Rectangle hoveredBounds = null;
@@ -151,47 +154,27 @@ public class GeQuickLookOverlay extends Overlay
 			{
 				continue;
 			}
-			Verdict v = evaluate(snap);
-			Color c = v == null ? NEUTRAL : (v.competitive ? GOOD : BAD);
 
-			Widget icon = findItemIcon(slot);
-			if (icon != null && !icon.isHidden())
+			if (wantQuickLook)
 			{
-				Rectangle ib = icon.getBounds();
-				if (ib != null)
+				Verdict v = evaluate(snap);
+				Color c = v == null ? NEUTRAL : colorForTier(v.tier);
+				drawSlotHighlight(graphics, slot, b, c);
+				if (i == hoveredIdx && v != null)
 				{
-					int x = ib.x - 1, y = ib.y - 1, w = ib.width + 2, h = ib.height + 2;
-					graphics.setColor(new Color(c.getRed(), c.getGreen(), c.getBlue(), ICON_FILL_ALPHA));
-					graphics.fillRoundRect(x, y, w, h, 7, 7);
-					Stroke prevS = graphics.getStroke();
-					graphics.setStroke(new BasicStroke(2f));
-					graphics.setColor(new Color(c.getRed(), c.getGreen(), c.getBlue(), ICON_FRAME_ALPHA));
-					graphics.drawRoundRect(x, y, w, h, 8, 8);
-					graphics.setStroke(prevS);
+					hoveredSnap = snap;
+					hoveredBounds = b;
+					hoveredVerdict = v;
 				}
 			}
 
-			Stroke old = graphics.getStroke();
-			graphics.setStroke(new BasicStroke(2.5f));
-			graphics.setColor(new Color(c.getRed(), c.getGreen(), c.getBlue(), 90));
-			graphics.drawRoundRect(b.x + 1, b.y + 1, b.width - 3, b.height - 3, 14, 14);
-			graphics.setStroke(old);
-
-			if (!tooltipUp)
+			if (wantTimer)
 			{
-				Rectangle glyph = new Rectangle(b.x + b.width - GLYPH - 3, b.y + b.height - GLYPH - 3, GLYPH, GLYPH);
-				drawMagnifier(graphics, glyph);
-			}
-
-			if (i == hoveredIdx && v != null)
-			{
-				hoveredSnap = snap;
-				hoveredBounds = b;
-				hoveredVerdict = v;
+				drawSlotTimer(graphics, b, snap.slot, panelRect);
 			}
 		}
 
-		if (hoveredSnap != null)
+		if (hoveredSnap != null && config.showGeQuickLookTooltip())
 		{
 			renderQuickLook(graphics, hoveredSnap, hoveredVerdict, hoveredBounds);
 		}
@@ -205,26 +188,63 @@ public class GeQuickLookOverlay extends Overlay
 			&& (snap.state == GrandExchangeOfferState.BUYING || snap.state == GrandExchangeOfferState.SELLING);
 	}
 
-	private void drawMagnifier(Graphics2D g, Rectangle r)
+	private void drawSlotHighlight(Graphics2D graphics, Widget slot, Rectangle b, Color c)
 	{
-		Graphics2D g2 = (Graphics2D) g.create();
-		g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-		g2.setRenderingHint(RenderingHints.KEY_STROKE_CONTROL, RenderingHints.VALUE_STROKE_PURE);
-		float s = r.width;
-		float cx = r.x + s * 0.40f;
-		float cy = r.y + s * 0.40f;
-		float lens = s * 0.30f;
-		Ellipse2D.Float ring = new Ellipse2D.Float(cx - lens, cy - lens, lens * 2f, lens * 2f);
-		Line2D.Float handle = new Line2D.Float(cx + lens * 0.70f, cy + lens * 0.70f, r.x + s - 1.5f, r.y + s - 1.5f);
-		g2.setStroke(new BasicStroke(s / 4.5f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
-		g2.setColor(new Color(0, 0, 0, 180));
-		g2.draw(ring);
-		g2.draw(handle);
-		g2.setStroke(new BasicStroke(s / 9f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
-		g2.setColor(MAG_LENS);
-		g2.draw(ring);
-		g2.draw(handle);
-		g2.dispose();
+		Widget icon = findItemIcon(slot);
+		if (icon != null && !icon.isHidden())
+		{
+			Rectangle ib = icon.getBounds();
+			if (ib != null)
+			{
+				int x = ib.x - 3, y = ib.y - 3, w = ib.width + 2, h = ib.height + 2;
+				graphics.setColor(new Color(c.getRed(), c.getGreen(), c.getBlue(), ICON_FILL_ALPHA));
+				graphics.fillRoundRect(x, y, w, h, 7, 7);
+				Stroke prevS = graphics.getStroke();
+				graphics.setStroke(new BasicStroke(2f));
+				graphics.setColor(new Color(c.getRed(), c.getGreen(), c.getBlue(), ICON_FRAME_ALPHA));
+				graphics.drawRoundRect(x, y, w, h, 8, 8);
+				graphics.setStroke(prevS);
+			}
+		}
+		Stroke old = graphics.getStroke();
+		graphics.setStroke(new BasicStroke(2.5f));
+		graphics.setColor(new Color(c.getRed(), c.getGreen(), c.getBlue(), 90));
+		graphics.drawRoundRect(b.x + 1, b.y + 1, b.width - 3, b.height - 3, 14, 14);
+		graphics.setStroke(old);
+	}
+
+	private void drawSlotTimer(Graphics2D graphics, Rectangle b, int slot, Rectangle panelRect)
+	{
+		long listedAt = plugin.offerListedAtMs(slot);
+		if (listedAt <= 0)
+		{
+			return;
+		}
+		long elapsed = System.currentTimeMillis() - listedAt;
+		if (elapsed < 0)
+		{
+			elapsed = 0;
+		}
+		long totalSec = elapsed / 1000L;
+		String text = config.geTimerCompact()
+			? String.format("%02d:%02d", totalSec / 3600L, (totalSec % 3600L) / 60L)
+			: String.format("%02d:%02d:%02d", totalSec / 3600L, (totalSec % 3600L) / 60L, totalSec % 60L);
+		long mins = totalSec / 60L;
+		Color col = mins < config.geTimerWhiteMins() ? config.geBorderGood()
+			: (mins < config.geTimerRedMins() ? config.geBorderMid() : config.geBorderBad());
+
+		graphics.setFont(FontManager.getRunescapeFont());
+		int width = graphics.getFontMetrics().stringWidth(text);
+		int x = b.x + b.width - width - 8;
+		if (panelRect != null && panelRect.intersects(new Rectangle(x - 2, b.y + 4, width + 6, 18)))
+		{
+			return;
+		}
+		TextComponent tc = new TextComponent();
+		tc.setText(text);
+		tc.setColor(col);
+		tc.setPosition(new java.awt.Point(x, b.y + 18));
+		tc.render(graphics);
 	}
 
 	private void renderQuickLook(Graphics2D graphics, ActiveOfferSnapshot snap, Verdict v, Rectangle slot)
@@ -232,7 +252,7 @@ public class GeQuickLookOverlay extends Overlay
 		ItemInsights.Current c = v.ins.current;
 		panel.getChildren().clear();
 		panel.setPreferredSize(new Dimension(184, 0));
-		panel.setBackgroundColor(TOOLTIP_BG);
+		panel.setBackgroundColor(config.geTooltipBg());
 
 		panel.getChildren().add(TitleComponent.builder()
 			.text(truncate(snap.name, 22) + (snap.isBuy() ? "  (Buy)" : "  (Sell)"))
@@ -247,11 +267,23 @@ public class GeQuickLookOverlay extends Overlay
 			panel.getChildren().add(LineComponent.builder().left(" ").build());
 		}
 
+		if (snap.totalQuantity > 0)
+		{
+			ProgressBarComponent pb = new ProgressBarComponent();
+			pb.setMaximum(snap.totalQuantity);
+			pb.setValue(snap.quantitySold);
+			pb.setForegroundColor(new Color(0x9B59B6));
+			pb.setBackgroundColor(new Color(0x3E3E3E));
+			pb.setCenterLabel((snap.isBuy() ? "Bought " : "Sold ") + snap.quantitySold + " / " + snap.totalQuantity);
+			pb.setLabelDisplayMode(ProgressBarComponent.LabelDisplayMode.TEXT_ONLY);
+			panel.getChildren().add(pb);
+		}
+
 		panel.getChildren().add(line("Buy",  FlipItemPanel.formatGp(c.buyPrice) + " gp",  INFO));
 		panel.getChildren().add(line("Sell", FlipItemPanel.formatGp(c.sellPrice) + " gp", INFO));
 		panel.getChildren().add(line("Your price", FlipItemPanel.formatGp(snap.price) + " gp", Color.WHITE));
 		panel.getChildren().add(line(snap.isBuy() ? "07Flip buy" : "07Flip sell",
-			FlipItemPanel.formatGp(v.benchmark) + " gp", v.competitive ? INFO : HEADER));
+			FlipItemPanel.formatGp(v.benchmark) + " gp", v.tier == 0 ? INFO : HEADER));
 		Integer age = snap.isBuy() ? c.buyAgeMinutes : c.sellAgeMinutes;
 		if (age != null)
 		{
@@ -263,22 +295,37 @@ public class GeQuickLookOverlay extends Overlay
 		boolean repriceShown = rp != null && addRepriceSection(snap, rp);
 		if (!repriceShown)
 		{
-			if (v.competitive)
+			if (v.tier == 0)
 			{
-				panel.getChildren().add(TitleComponent.builder().text("Competitive").color(GOOD).build());
+				panel.getChildren().add(TitleComponent.builder().text("Competitive").color(config.geBorderGood()).build());
+			}
+			else if (v.tier == 1)
+			{
+				panel.getChildren().add(TitleComponent.builder()
+					.text(snap.isBuy() ? "Priced a bit low" : "Priced a bit high")
+					.color(config.geBorderMid())
+					.build());
 			}
 			else
 			{
 				panel.getChildren().add(TitleComponent.builder()
 					.text(snap.isBuy() ? "Raise price to fill" : "Lower price to fill")
-					.color(BAD)
+					.color(config.geBorderBad())
 					.build());
 			}
 		}
 
+		Rectangle r = quickLookRect(slot);
+		Graphics2D g2 = (Graphics2D) graphics.create();
+		g2.translate(r.x, r.y);
+		panel.render(g2);
+		g2.dispose();
+	}
+
+	private Rectangle quickLookRect(Rectangle slot)
+	{
 		final int width = 192;
 		int px = slot.x + slot.width + 4;
-		int py = slot.y;
 		if (px + width > client.getCanvasWidth())
 		{
 			px = slot.x - width - 4;
@@ -287,11 +334,8 @@ public class GeQuickLookOverlay extends Overlay
 		{
 			px = slot.x;
 		}
-		py = Math.min(py, Math.max(0, client.getCanvasHeight() - 210));
-		Graphics2D g2 = (Graphics2D) graphics.create();
-		g2.translate(px, py);
-		panel.render(g2);
-		g2.dispose();
+		int py = Math.min(slot.y, Math.max(0, client.getCanvasHeight() - 210));
+		return new Rectangle(px, py, width, 230);
 	}
 
 	private boolean addRepriceSection(ActiveOfferSnapshot snap, com.o7flip.model.RepriceResult rp)
@@ -307,7 +351,7 @@ public class GeQuickLookOverlay extends Overlay
 					FlipItemPanel.formatGp(rp.suggestedPrice) + " gp", HEADER));
 				panel.getChildren().add(TitleComponent.builder()
 					.text("+" + FlipItemPanel.formatGp(rp.netMarginEach) + "/ea  ~" + rp.etaMinutes + "m")
-					.color(GOOD)
+					.color(config.geBorderGood())
 					.build());
 				return true;
 			case "break_even_only":
@@ -318,10 +362,10 @@ public class GeQuickLookOverlay extends Overlay
 					.build());
 				return true;
 			case "underwater":
-				panel.getChildren().add(line("Cut loss at", FlipItemPanel.formatGp(rp.clearingPrice) + " gp", BAD));
+				panel.getChildren().add(line("Cut loss at", FlipItemPanel.formatGp(rp.clearingPrice) + " gp", config.geBorderBad()));
 				panel.getChildren().add(TitleComponent.builder()
 					.text(FlipItemPanel.formatGp(rp.cutLossMarginEach) + "/ea to exit now")
-					.color(BAD)
+					.color(config.geBorderBad())
 					.build());
 				return true;
 			default:
@@ -394,8 +438,16 @@ public class GeQuickLookOverlay extends Overlay
 		{
 			return null;
 		}
-		boolean competitive = isBuy ? snap.price >= benchmark : snap.price <= benchmark;
-		return new Verdict(benchmark, competitive, ins);
+		double wrongness = isBuy
+			? (benchmark - snap.price) / (double) benchmark
+			: (snap.price - benchmark) / (double) benchmark;
+		int tier = wrongness <= GREEN_TOL ? 0 : (wrongness <= MID_TOL ? 1 : 2);
+		return new Verdict(benchmark, tier, ins);
+	}
+
+	private Color colorForTier(int tier)
+	{
+		return tier == 0 ? config.geBorderGood() : (tier == 1 ? config.geBorderMid() : config.geBorderBad());
 	}
 
 	private static Widget findItemIcon(Widget w)
@@ -470,14 +522,14 @@ public class GeQuickLookOverlay extends Overlay
 	private static final class Verdict
 	{
 		final long benchmark;
-		final boolean competitive;
+		final int tier;
 		final ItemInsights ins;
 
-		Verdict(long benchmark, boolean competitive, ItemInsights ins)
+		Verdict(long benchmark, int tier, ItemInsights ins)
 		{
-			this.benchmark   = benchmark;
-			this.competitive = competitive;
-			this.ins         = ins;
+			this.benchmark = benchmark;
+			this.tier      = tier;
+			this.ins       = ins;
 		}
 	}
 }

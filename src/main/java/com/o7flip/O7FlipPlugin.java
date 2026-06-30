@@ -125,6 +125,12 @@ public class O7FlipPlugin extends Plugin
 	private GeQuickLookOverlay geQuickLookOverlay;
 
 	@Inject
+	private GeChatPriceOverlay geChatPriceOverlay;
+
+	@Inject
+	private net.runelite.client.input.MouseManager mouseManager;
+
+	@Inject
 	private Gson gson;
 
 	@Inject
@@ -208,6 +214,8 @@ public class O7FlipPlugin extends Plugin
 
 	private final Map<Integer, long[]> slotRecordedFills = new java.util.concurrent.ConcurrentHashMap<>();
 
+	private final Map<Integer, long[]> slotListedAt = new java.util.concurrent.ConcurrentHashMap<>();
+
 	private final Set<Long> tradePostsInFlight = new HashSet<>();
 
 	public volatile List<TradeRecord> tradeHistory = Collections.emptyList();
@@ -260,6 +268,7 @@ public class O7FlipPlugin extends Plugin
 	private static final String LAST_TRACKER_SYNC_KEY = "lastTrackerSync";
 	private static final String BLOCKLIST_KEY = "blocklistItemIds";
 	private static final String SLOT_FILLS_KEY = "slotRecordedFills";
+	private static final String SLOT_LISTED_KEY = "slotListedAt";
 	private static final String BOND_LEDGER_SPEND_KEY = "bondLedgerSpend";
 	private static final String BOND_LEDGER_COUNT_KEY = "bondLedgerCount";
 	private static final String BOND_LEDGER_MIGRATED_KEY = "bondLedgerMigrated";
@@ -623,34 +632,40 @@ public class O7FlipPlugin extends Plugin
 		return live;
 	}
 
+	public long ladderPrice(int itemId, boolean sell, O7FlipConfig.GePriceDefault which)
+	{
+		com.o7flip.model.ItemInsights ins = getOverlayInsights(itemId);
+		if (ins == null || ins.current == null)
+		{
+			return -1L;
+		}
+		boolean premium = panel != null && panel.isPremium();
+		long live = sell ? ins.current.sellPrice : ins.current.buyPrice;
+		Long rec = premium ? (sell ? ins.current.recSell : ins.current.recBuy) : null;
+		long base = (rec != null && rec > 0) ? rec : live;
+		if (base <= 0)
+		{
+			return -1L;
+		}
+		long step = Math.max(1, Math.round(base * 0.005));
+		switch (which)
+		{
+			case QUICK:   return sell ? base - step : base + step;
+			case PATIENT: return sell ? base + step : base - step;
+			case MARKET:  return live > 0 ? live : base;
+			default:      return base;
+		}
+	}
+
 	long computeAutoSellPrice(int itemId)
 	{
-		boolean premium = panel != null && panel.isPremium();
-		long candidate;
-		if (!premium)
-		{
-			Long liveSell = lookupLiveSell(itemId);
-			candidate = (liveSell != null && liveSell > 0) ? liveSell : -1L;
-		}
-		else
-		{
-			Long frozen  = getFrozenSell(itemId);
-			Long recSell = lookupLiveRecSell(itemId);
-			long best    = -1L;
-			if (frozen  != null && frozen  > 0)                   best = frozen;
-			if (recSell != null && recSell > 0 && recSell > best) best = recSell;
-			candidate = best;
-		}
+		long candidate = ladderPrice(itemId, true, config.geDefaultPrice());
 		if (candidate <= 0)
 		{
-			Long insightsSell = lookupInsightsSell(itemId);
-			if (insightsSell != null && insightsSell > 0)
-			{
-				candidate = insightsSell;
-			}
+			return -1L;
 		}
 		long breakEven = breakEvenSellPrice(itemId);
-		if (candidate > 0 && breakEven > 0)
+		if (breakEven > 0)
 		{
 			candidate = Math.max(candidate, breakEven);
 		}
@@ -672,32 +687,6 @@ public class O7FlipPlugin extends Plugin
 			return uncapped;
 		}
 		return (long) Math.ceil(avgCost) + 5_000_000L;
-	}
-
-	private Long lookupLiveSell(int itemId)
-	{
-		for (FlipItem f : lastFlips)
-		{
-			if (f.itemId == itemId && f.sellPrice > 0)
-			{
-				return f.sellPrice;
-			}
-		}
-		return null;
-	}
-
-	private Long lookupInsightsSell(int itemId)
-	{
-		com.o7flip.model.ItemInsights ins = recInsightsFor(itemId);
-		return (ins != null && ins.current != null && ins.current.sellPrice > 0)
-			? ins.current.sellPrice : null;
-	}
-
-	private Long lookupInsightsBuy(int itemId)
-	{
-		com.o7flip.model.ItemInsights ins = recInsightsFor(itemId);
-		return (ins != null && ins.current != null && ins.current.buyPrice > 0)
-			? ins.current.buyPrice : null;
 	}
 
 	private com.o7flip.model.ItemInsights recInsightsFor(int itemId)
@@ -722,46 +711,7 @@ public class O7FlipPlugin extends Plugin
 
 	long computeAutoBuyPrice(int itemId)
 	{
-		boolean premium = panel != null && panel.isPremium();
-		long candidate = -1L;
-		if (!premium)
-		{
-			Long liveBuy = lookupLiveBuy(itemId);
-			if (liveBuy != null && liveBuy > 0) candidate = liveBuy;
-		}
-		else
-		{
-			Long recBuy = lookupLiveRecBuy(itemId);
-			if (recBuy != null && recBuy > 0) candidate = recBuy;
-		}
-		if (candidate <= 0)
-		{
-			Long insightsBuy = lookupInsightsBuy(itemId);
-			if (insightsBuy != null && insightsBuy > 0) candidate = insightsBuy;
-		}
-		return candidate;
-	}
-
-	private Long lookupLiveBuy(int itemId)
-	{
-		for (FlipItem f : lastFlips)
-		{
-			if (f.itemId == itemId && f.buyPrice > 0)
-			{
-				return f.buyPrice;
-			}
-		}
-		return null;
-	}
-
-	private Long lookupLiveRecBuy(int itemId)
-	{
-		com.o7flip.model.ItemInsights ins = recInsightsFor(itemId);
-		if (ins != null && ins.current != null && ins.current.recBuy != null && ins.current.recBuy > 0)
-		{
-			return ins.current.recBuy;
-		}
-		return null;
+		return ladderPrice(itemId, false, config.geDefaultPrice());
 	}
 
 	private void armSellPriceIfStillRelevant(int itemId)
@@ -853,11 +803,14 @@ public class O7FlipPlugin extends Plugin
 		overlayManager.add(gpDropOverlay);
 		overlayManager.add(inventoryTooltipOverlay);
 		overlayManager.add(geQuickLookOverlay);
+		overlayManager.add(geChatPriceOverlay);
+		mouseManager.registerMouseListener(geChatPriceOverlay);
 
 		loadTradeHistory();
 		loadBondLedger();
 		loadBlocklist();
 		loadSlotRecordedFills();
+		loadSlotListedAt();
 
 		apiClient.setOnFavouritesUnauthorized(() -> SwingUtilities.invokeLater(() ->
 			notifier.notify("Your 07Flip API key was rejected. Open the plugin config and paste it again.")));
@@ -911,6 +864,8 @@ public class O7FlipPlugin extends Plugin
 		overlayManager.remove(gpDropOverlay);
 		overlayManager.remove(inventoryTooltipOverlay);
 		overlayManager.remove(geQuickLookOverlay);
+		overlayManager.remove(geChatPriceOverlay);
+		mouseManager.unregisterMouseListener(geChatPriceOverlay);
 		clientToolbar.removeNavigation(navButton);
 		log.debug("[07Flip] Stopped");
 	}
@@ -928,6 +883,11 @@ public class O7FlipPlugin extends Plugin
 	public void onGameTick(GameTick event)
 	{
 		syncActiveOffersFromClient();
+
+		if (config.showGeSlotTimer())
+		{
+			leftAlignSlotLabels();
+		}
 
 		checkBuyLimitResets();
 
@@ -1402,6 +1362,11 @@ public class O7FlipPlugin extends Plugin
 		{
 			return;
 		}
+		setPriceInput(price);
+	}
+
+	private void setPriceInput(long price)
+	{
 		Widget input = client.getWidget(ComponentID.CHATBOX_FULL_INPUT);
 		if (input == null)
 		{
@@ -1410,6 +1375,88 @@ public class O7FlipPlugin extends Plugin
 		input.setText(price + "*");
 		client.setVarcStrValue(VarClientID.MESLAYERINPUT, String.valueOf(price));
 		confirmHighlightUntilMs = System.currentTimeMillis() + 3000L;
+	}
+
+	public void fillPriceInputForced(long price)
+	{
+		if (price <= 0)
+		{
+			return;
+		}
+		clientThread.invokeLater(() -> setPriceInput(price));
+	}
+
+	public void clearPriceInput()
+	{
+		clientThread.invokeLater(() ->
+		{
+			Widget input = client.getWidget(ComponentID.CHATBOX_FULL_INPUT);
+			if (input == null || input.isHidden())
+			{
+				return;
+			}
+			input.setText("*");
+			client.setVarcStrValue(VarClientID.MESLAYERINPUT, "");
+		});
+	}
+
+	public int currentGeSetupItemId()
+	{
+		int searched = client.getVarpValue(VarPlayerID.TRADINGPOST_SEARCH);
+		if (searched > 0)
+		{
+			return searched;
+		}
+		return resolveItemIdFromSetupWidget();
+	}
+
+	public boolean isGeSellSetup()
+	{
+		return isSellSetupVisible(client.getWidget(InterfaceID.GeOffers.SETUP));
+	}
+
+	public boolean isGePriceEntryOpen()
+	{
+		Widget input = client.getWidget(ComponentID.CHATBOX_FULL_INPUT);
+		if (input == null || input.isHidden())
+		{
+			return false;
+		}
+		Widget setup = client.getWidget(InterfaceID.GeOffers.SETUP);
+		if (setup == null || setup.isHidden())
+		{
+			return false;
+		}
+		return chatboxPromptHas(input, "price");
+	}
+
+	public boolean isGeQuantityEntryOpen()
+	{
+		Widget input = client.getWidget(ComponentID.CHATBOX_FULL_INPUT);
+		if (input == null || input.isHidden())
+		{
+			return false;
+		}
+		Widget setup = client.getWidget(InterfaceID.GeOffers.SETUP);
+		if (setup == null || setup.isHidden())
+		{
+			return false;
+		}
+		return chatboxPromptHas(input, "how many");
+	}
+
+	private static boolean chatboxPromptHas(Widget input, String needle)
+	{
+		Widget p = input.getParent();
+		for (int i = 0; i < 2 && p != null; i++)
+		{
+			if (widgetTreeHasText(p, needle))
+			{
+				return true;
+			}
+			p = p.getParent();
+		}
+		return false;
 	}
 
 	@Subscribe
@@ -1806,16 +1853,24 @@ public class O7FlipPlugin extends Plugin
 				continue;
 			}
 			next.put(slot, snapshot(slot, o));
+			updateSlotListedAt(slot, o);
 			if (o.getState() == GrandExchangeOfferState.BUYING
 				|| o.getState() == GrandExchangeOfferState.SELLING)
 			{
 				recordIfNewFills(o, slot);
+				getReprice(o.getItemId(), o.getState() == GrandExchangeOfferState.BUYING,
+					Math.max(1, o.getTotalQuantity() - o.getQuantitySold()), o.getPrice(), offerHeldMinutes(slot));
 			}
 			hash = hash * 31 + slot;
 			hash = hash * 31 + o.getItemId();
 			hash = hash * 31 + o.getQuantitySold();
 			hash = hash * 31 + o.getTotalQuantity();
 			hash = hash * 31 + o.getState().ordinal();
+		}
+
+		if (slotListedAt.keySet().retainAll(next.keySet()))
+		{
+			saveSlotListedAt();
 		}
 
 		if (hash == lastActiveOffersHash)
@@ -1836,6 +1891,89 @@ public class O7FlipPlugin extends Plugin
 
 		final List<TradeRecord> snap = tradeHistory;
 		SwingUtilities.invokeLater(() -> panel.updateMyFlips(snap));
+	}
+
+	private void leftAlignSlotLabels()
+	{
+		Widget first = client.getWidget(InterfaceID.GeOffers.INDEX_0);
+		if (first == null || first.isHidden())
+		{
+			return;
+		}
+		for (int i = 0; i < 8; i++)
+		{
+			Widget slot = client.getWidget(InterfaceID.GeOffers.INDEX_0 + i);
+			if (slot == null || slot.isHidden())
+			{
+				continue;
+			}
+			Widget label = findSlotStatusLabel(slot);
+			if (label == null)
+			{
+				continue;
+			}
+			if (label.getXTextAlignment() != net.runelite.api.widgets.WidgetTextAlignment.LEFT
+				|| label.getXPositionMode() != net.runelite.api.widgets.WidgetPositionMode.ABSOLUTE_LEFT
+				|| label.getOriginalX() != 3)
+			{
+				label.setXTextAlignment(net.runelite.api.widgets.WidgetTextAlignment.LEFT);
+				label.setXPositionMode(net.runelite.api.widgets.WidgetPositionMode.ABSOLUTE_LEFT);
+				label.setOriginalX(3);
+				label.revalidate();
+			}
+		}
+	}
+
+	private static Widget findSlotStatusLabel(Widget w)
+	{
+		if (w == null)
+		{
+			return null;
+		}
+		String t = w.getText();
+		if (t != null)
+		{
+			String lt = t.trim().toLowerCase();
+			if (lt.startsWith("sell") || lt.startsWith("buy") || lt.startsWith("empty"))
+			{
+				return w;
+			}
+		}
+		Widget[] dyn = w.getDynamicChildren();
+		if (dyn != null)
+		{
+			for (Widget c : dyn)
+			{
+				Widget f = findSlotStatusLabel(c);
+				if (f != null) return f;
+			}
+		}
+		Widget[] stat = w.getStaticChildren();
+		if (stat != null)
+		{
+			for (Widget c : stat)
+			{
+				Widget f = findSlotStatusLabel(c);
+				if (f != null) return f;
+			}
+		}
+		return null;
+	}
+
+	private void updateSlotListedAt(int slot, GrandExchangeOffer o)
+	{
+		long[] prev = slotListedAt.get(slot);
+		if (prev == null || prev[1] != o.getItemId() || prev[2] != o.getTotalQuantity())
+		{
+			slotListedAt.put(slot, new long[]{System.currentTimeMillis(), o.getItemId(), o.getTotalQuantity()});
+			saveSlotListedAt();
+		}
+	}
+
+	public long offerListedAtMs(int slot)
+	{
+		long[] v = slotListedAt.get(slot);
+		return (v != null && v.length >= 1) ? v[0] : -1L;
 	}
 
 	private com.o7flip.model.ActiveOfferSnapshot snapshot(int slot, GrandExchangeOffer offer)
@@ -2532,6 +2670,8 @@ public class O7FlipPlugin extends Plugin
 		configManager.unsetConfiguration("o7flip", LAST_TRACKER_SYNC_KEY);
 		slotRecordedFills.clear();
 		configManager.unsetConfiguration("o7flip", SLOT_FILLS_KEY);
+		slotListedAt.clear();
+		configManager.unsetConfiguration("o7flip", SLOT_LISTED_KEY);
 		SwingUtilities.invokeLater(() -> panel.updateMyFlips(Collections.emptyList()));
 	}
 
@@ -2655,6 +2795,50 @@ public class O7FlipPlugin extends Plugin
 					? Long.parseLong(parts[3])
 					: System.currentTimeMillis() * 10 + slot;
 				slotRecordedFills.put(slot, new long[]{qty, gp, offerId});
+			}
+			catch (NumberFormatException ignored)
+			{
+			}
+		}
+	}
+
+	private void saveSlotListedAt()
+	{
+		if (slotListedAt.isEmpty())
+		{
+			configManager.unsetConfiguration("o7flip", SLOT_LISTED_KEY);
+			return;
+		}
+		StringBuilder sb = new StringBuilder();
+		boolean first = true;
+		for (Map.Entry<Integer, long[]> entry : slotListedAt.entrySet())
+		{
+			if (!first)
+			{
+				sb.append(',');
+			}
+			long[] v = entry.getValue();
+			sb.append(entry.getKey()).append(':').append(v[0]).append(':').append(v[1]).append(':').append(v[2]);
+			first = false;
+		}
+		configManager.setConfiguration("o7flip", SLOT_LISTED_KEY, sb.toString());
+	}
+
+	private void loadSlotListedAt()
+	{
+		String csv = configManager.getConfiguration("o7flip", SLOT_LISTED_KEY);
+		if (csv == null || csv.trim().isEmpty())
+		{
+			return;
+		}
+		for (String tok : csv.split(","))
+		{
+			String[] parts = tok.split(":");
+			if (parts.length < 4) continue;
+			try
+			{
+				slotListedAt.put(Integer.parseInt(parts[0]), new long[]{
+					Long.parseLong(parts[1]), Long.parseLong(parts[2]), Long.parseLong(parts[3])});
 			}
 			catch (NumberFormatException ignored)
 			{
@@ -2856,12 +3040,11 @@ public class O7FlipPlugin extends Plugin
 
 	public int offerHeldMinutes(int slot)
 	{
-		long[] base = slotRecordedFills.get(slot);
-		if (base == null || base.length < 3)
+		long listedMs = offerListedAtMs(slot);
+		if (listedMs <= 0)
 		{
 			return 0;
 		}
-		long listedMs = base[2] / 10L;
 		long ageMs = System.currentTimeMillis() - listedMs;
 		return ageMs <= 0 ? 0 : (int) (ageMs / 60_000L);
 	}

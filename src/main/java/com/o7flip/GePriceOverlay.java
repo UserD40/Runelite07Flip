@@ -171,6 +171,7 @@ public class GePriceOverlay extends Overlay
 
 		panel.getChildren().clear();
 		panel.setPreferredSize(new Dimension(180, 0));
+		panel.setBackgroundColor(config.geTooltipBg());
 
 		if (displayName != null)
 		{

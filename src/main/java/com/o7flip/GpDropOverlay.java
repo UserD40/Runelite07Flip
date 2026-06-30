@@ -172,7 +172,7 @@ public class GpDropOverlay extends Overlay
 		return cachedFont;
 	}
 
-	private static Font buildFont(O7FlipConfig.GpDropFontType type, int size)
+	static Font buildFont(O7FlipConfig.GpDropFontType type, int size)
 	{
 		switch (type)
 		{
