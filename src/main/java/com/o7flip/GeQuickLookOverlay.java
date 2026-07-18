@@ -56,8 +56,6 @@ import java.awt.image.BufferedImage;
 public class GeQuickLookOverlay extends Overlay
 {
 	private static final Color NEUTRAL    = new Color(0xC0A050);
-	private static final double GREEN_TOL = 0.015;
-	private static final double MID_TOL   = 0.05;
 	private static final Color HEADER     = new Color(0xFFD700);
 	private static final Color INFO       = new Color(0xC0C0C0);
 	private static final int   ICON_FILL_ALPHA  = 50;
@@ -441,7 +439,7 @@ public class GeQuickLookOverlay extends Overlay
 		double wrongness = isBuy
 			? (benchmark - snap.price) / (double) benchmark
 			: (snap.price - benchmark) / (double) benchmark;
-		int tier = wrongness <= GREEN_TOL ? 0 : (wrongness <= MID_TOL ? 1 : 2);
+		int tier = O7FlipPlugin.competitiveTier(wrongness);
 		return new Verdict(benchmark, tier, ins);
 	}
 

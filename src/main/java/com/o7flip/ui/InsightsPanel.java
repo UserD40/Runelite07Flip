@@ -811,7 +811,7 @@ public class InsightsPanel extends JPanel
 		if (locked && frozenBuy != null && frozenBuy > 0 && frozenSell != null && frozenSell > 0)
 		{
 			JPanel panel = sectionPanel("07Flip recommended (locked)");
-			long fProfit = Math.round(frozenSell * 0.98) - frozenBuy;
+			long fProfit = frozenSell - com.o7flip.util.ProfitCalculator.geTaxFor(ins.itemId, frozenSell, 1) - frozenBuy;
 			panel.add(rowGp("Buy",    frozenBuy,  "frozen", FROZEN_COL));
 			panel.add(rowGp("Sell",   frozenSell, "frozen", FROZEN_COL));
 			panel.add(rowGp("Profit", fProfit,    null,     margingColor(fProfit)));

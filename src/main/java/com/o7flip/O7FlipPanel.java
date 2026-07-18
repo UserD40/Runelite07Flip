@@ -244,8 +244,7 @@ public class O7FlipPanel extends PluginPanel
 	private List<DecantItem>  allDecants = new ArrayList<>();
 	private List<FlipItem>    allFavourites = new ArrayList<>();
 	private JButton[] favouritesSortBtns;
-	private int favouritesSortIdx = 0;
-	private javax.swing.Timer favCooldownTimer;
+	private int favouritesSortIdx = 1;
 	private List<TradeRecord> allMyFlips = new ArrayList<>();
 
 	private int flipsSortIdx   = 0;
@@ -282,6 +281,7 @@ public class O7FlipPanel extends PluginPanel
 	private JPanel  optInputsHost;
 	private String lastOtherSubTab;
 	private JPanel myFlipsListPanel;
+	private javax.swing.Timer activeColorTimer;
 	private com.o7flip.ui.MyTradesStatsPanel myFlipsStatsPanel;
 	private com.o7flip.ui.InsightsPanel insightsPanel;
 	private JPanel searchResultsPanel;
@@ -896,20 +896,6 @@ public class O7FlipPanel extends PluginPanel
 			case 1:
 				list.sort((a, b) -> Long.compare(b.profit, a.profit));
 				break;
-			case 2:
-				if (plugin != null)
-				{
-					list.sort((a, b) ->
-					{
-						long ca = plugin.buyLimitCooldownMs(a.itemId);
-						long cb = plugin.buyLimitCooldownMs(b.itemId);
-						if (ca > 0 && cb > 0) return Long.compare(ca, cb);
-						if (ca > 0) return -1;
-						if (cb > 0) return 1;
-						return 0;
-					});
-				}
-				break;
 			default:
 				applyManualOrder(list);
 				break;
@@ -1149,53 +1135,16 @@ public class O7FlipPanel extends PluginPanel
 			}
 			else
 			{
-				boolean available = favouritesSortIdx == 2;
 				for (int i = 0; i < shown.size(); i++)
 				{
 					FlipItem item = shown.get(i);
 					favouritesListPanel.add(new FlipItemPanel(item, itemManager, i % 2 != 0, plugin, true));
-					if (available && plugin != null && plugin.buyLimitCooldownMs(item.itemId) > 0)
-					{
-						favouritesListPanel.add(new com.o7flip.ui.BuyLimitBar(plugin, item.itemId));
-					}
 					favouritesListPanel.add(sep());
 				}
 			}
 		}
 		favouritesListPanel.revalidate();
 		favouritesListPanel.repaint();
-		updateFavCooldownTimer();
-	}
-
-	private void updateFavCooldownTimer()
-	{
-		boolean want = favouritesSortIdx == 2 && favouritesListPanel != null;
-		if (want)
-		{
-			if (favCooldownTimer == null)
-			{
-				favCooldownTimer = new javax.swing.Timer(1000, e ->
-				{
-					if (favouritesSortIdx == 2 && favouritesListPanel != null && favouritesListPanel.isShowing())
-					{
-						favouritesListPanel.repaint();
-					}
-					else if (favCooldownTimer != null)
-					{
-						favCooldownTimer.stop();
-					}
-				});
-				favCooldownTimer.setRepeats(true);
-			}
-			if (!favCooldownTimer.isRunning())
-			{
-				favCooldownTimer.start();
-			}
-		}
-		else if (favCooldownTimer != null && favCooldownTimer.isRunning())
-		{
-			favCooldownTimer.stop();
-		}
 	}
 
 	private JPanel buildTrackerCta()
@@ -1319,6 +1268,38 @@ public class O7FlipPanel extends PluginPanel
 
 		myFlipsListPanel.revalidate();
 		myFlipsListPanel.repaint();
+		updateActiveColorTimer();
+	}
+
+	private void updateActiveColorTimer()
+	{
+		boolean want = myFlipsSortIdx == 0 && myFlipsListPanel != null;
+		if (want)
+		{
+			if (activeColorTimer == null)
+			{
+				activeColorTimer = new javax.swing.Timer(5000, e ->
+				{
+					if (myFlipsSortIdx == 0 && myFlipsListPanel != null && myFlipsListPanel.isShowing())
+					{
+						myFlipsListPanel.repaint();
+					}
+					else if (activeColorTimer != null)
+					{
+						activeColorTimer.stop();
+					}
+				});
+				activeColorTimer.setRepeats(true);
+			}
+			if (!activeColorTimer.isRunning())
+			{
+				activeColorTimer.start();
+			}
+		}
+		else if (activeColorTimer != null && activeColorTimer.isRunning())
+		{
+			activeColorTimer.stop();
+		}
 	}
 
 	private void renderMyFlipsByRecent(com.o7flip.util.ProfitCalculator.Result result)
@@ -3579,9 +3560,9 @@ public class O7FlipPanel extends PluginPanel
 	private JPanel buildFavouritesTab()
 	{
 		favouritesListPanel = listPanel();
-		favouritesSortBtns = new JButton[3];
+		favouritesSortBtns = new JButton[2];
 		JPanel sortBar = buildSortBar(favouritesSortBtns,
-			new String[]{"Default", "Margin", "Available"},
+			new String[]{"Default", "Margin"},
 			() -> favouritesSortIdx,
 			i ->
 			{

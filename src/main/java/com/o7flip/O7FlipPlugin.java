@@ -284,7 +284,7 @@ public class O7FlipPlugin extends Plugin
 		log.debug("[07Flip] GE buy queued: {} ({}) @ {}", name, itemId, price);
 		setOverlayQueue(itemId, price, true);
 
-		freezeFromTrackedOrFetch(itemId);
+		freezeAtPlacement(itemId, price);
 
 		final boolean premiumAtQueue = panel != null && panel.isPremium();
 		apiClient.fetchItemInsights(itemId, ins ->
@@ -405,9 +405,60 @@ public class O7FlipPlugin extends Plugin
 		apiClient.postFreeze(itemId, recBuy, recSell, null);
 	}
 
+	private void freezeAtPlacement(int itemId, long paidEach)
+	{
+		if (executor == null || executor.isShutdown())
+		{
+			return;
+		}
+		if (paidEach > 0)
+		{
+			frozenBuyByItemId.put(itemId, paidEach);
+		}
+		com.o7flip.model.ItemInsights cached = recInsightsFor(itemId);
+		if (cached != null && cached.itemId == itemId && cached.current != null
+			&& cached.current.recSell != null && cached.current.recSell > 0)
+		{
+			commitPlacementFreeze(itemId, paidEach, cached.current.recSell);
+			return;
+		}
+		executor.execute(() -> apiClient.fetchItemInsights(itemId, ins ->
+		{
+			if (ins != null && ins.itemId == itemId && ins.current != null
+				&& ins.current.recSell != null && ins.current.recSell > 0)
+			{
+				commitPlacementFreeze(itemId, paidEach, ins.current.recSell);
+			}
+		}));
+	}
+
+	private void commitPlacementFreeze(int itemId, long paidEach, long recSell)
+	{
+		frozenSellByItemId.put(itemId, new FrozenSell(recSell, System.currentTimeMillis()));
+		long buyForPost = paidEach > 0 ? paidEach : recSell;
+		frozenBuyByItemId.put(itemId, buyForPost);
+		apiClient.postFreeze(itemId, buyForPost, recSell, null);
+	}
+
 	public Long getFrozenBuy(int itemId)
 	{
+		Long paid = openPositionAvgCost(itemId);
+		if (paid != null)
+		{
+			return paid;
+		}
 		return frozenBuyByItemId.get(itemId);
+	}
+
+	private Long openPositionAvgCost(int itemId)
+	{
+		com.o7flip.util.ProfitCalculator.Result r = com.o7flip.util.ProfitCalculator.compute(tradeHistory);
+		com.o7flip.util.ProfitCalculator.OpenPosition pos = r.openPositions.get(itemId);
+		if (pos == null || pos.remainingQty <= 0 || pos.remainingCostBasis <= 0)
+		{
+			return null;
+		}
+		return Math.round(pos.remainingCostBasis / (double) pos.remainingQty);
 	}
 
 	public boolean isPriceLocked(int itemId)
@@ -2028,6 +2079,14 @@ public class O7FlipPlugin extends Plugin
 		}
 
 		if (state == GrandExchangeOfferState.BUYING
+			&& prevSlotStates.get(slot) != GrandExchangeOfferState.BUYING
+			&& panel != null && panel.isPremium()
+			&& !frozenSellByItemId.containsKey(offer.getItemId()))
+		{
+			freezeAtPlacement(offer.getItemId(), offer.getPrice());
+		}
+
+		if (state == GrandExchangeOfferState.BUYING
 			|| state == GrandExchangeOfferState.SELLING
 			|| state == GrandExchangeOfferState.BOUGHT
 			|| state == GrandExchangeOfferState.SOLD
@@ -2234,7 +2293,8 @@ public class O7FlipPlugin extends Plugin
 			recordBuyForLimit(offer.getItemId(), deltaQty, timestamp);
 			if (!frozenSellByItemId.containsKey(offer.getItemId()))
 			{
-				freezeFromTrackedOrFetch(offer.getItemId());
+				long paidEach = deltaQty > 0 ? deltaGp / deltaQty : offer.getPrice();
+				freezeAtPlacement(offer.getItemId(), paidEach);
 			}
 		}
 
@@ -3006,6 +3066,48 @@ public class O7FlipPlugin extends Plugin
 			}));
 		}
 		return overlayInsightsCache.get(itemId);
+	}
+
+	private static final double OFFER_GREEN_TOL = 0.015;
+	private static final double OFFER_MID_TOL   = 0.05;
+
+	public static int competitiveTier(double wrongness)
+	{
+		return wrongness <= OFFER_GREEN_TOL ? 0 : (wrongness <= OFFER_MID_TOL ? 1 : 2);
+	}
+
+	public int offerCompetitiveTier(int itemId, boolean isBuy, long yourPrice)
+	{
+		if (itemId <= 0 || yourPrice <= 0)
+		{
+			return -1;
+		}
+		com.o7flip.model.ItemInsights ins = getOverlayInsights(itemId);
+		if (ins == null || ins.current == null)
+		{
+			return -1;
+		}
+		com.o7flip.model.ItemInsights.Current c = ins.current;
+		Long rec = isBuy ? c.recBuy : c.recSell;
+		long live = isBuy ? c.buyPrice : c.sellPrice;
+		long benchmark = (rec != null && rec > 0) ? rec : live;
+		if (benchmark <= 0)
+		{
+			return -1;
+		}
+		double wrongness = isBuy
+			? (benchmark - yourPrice) / (double) benchmark
+			: (yourPrice - benchmark) / (double) benchmark;
+		return competitiveTier(wrongness);
+	}
+
+	public java.awt.Color offerTierColor(int tier)
+	{
+		if (tier < 0)
+		{
+			return null;
+		}
+		return tier == 0 ? config.geBorderGood() : (tier == 1 ? config.geBorderMid() : config.geBorderBad());
 	}
 
 	public com.o7flip.model.RepriceResult getReprice(int itemId, boolean isBuy, int qty, long currentPrice, int holdMinutes)
@@ -3877,7 +3979,12 @@ public class O7FlipPlugin extends Plugin
 			clientThread.invoke(() ->
 			{
 				activeSession = session;
-				boolean changed = retroAttributeFills(session);
+				boolean changed = dedupeSlotsByLeg(session);
+				if (changed)
+				{
+					session.generatedAt = nextGeneratedAt(session.generatedAt, session.updatedAt);
+				}
+				changed |= retroAttributeFills(session);
 				changed |= sweepSellListedFromOffers(session);
 				if (changed)
 				{
@@ -4013,7 +4120,12 @@ public class O7FlipPlugin extends Plugin
 				if (local == null)
 				{
 					activeSession = remote;
-					boolean seeded = retroAttributeFills(remote);
+					boolean seeded = dedupeSlotsByLeg(remote);
+					if (seeded)
+					{
+						remote.generatedAt = nextGeneratedAt(remote.generatedAt, remote.updatedAt);
+					}
+					seeded |= retroAttributeFills(remote);
 					seeded |= sweepSellListedFromOffers(remote);
 					if (seeded)
 					{
@@ -4023,6 +4135,12 @@ public class O7FlipPlugin extends Plugin
 					return;
 				}
 				boolean changed = mergeRemoteFills(local, remote);
+				if (dedupeSlotsByLeg(local))
+				{
+					local.generatedAt = nextGeneratedAt(local.generatedAt, local.updatedAt);
+					changed = true;
+					scheduleSessionPost();
+				}
 				boolean healed = retroAttributeFills(local);
 				healed |= sweepSellListedFromOffers(local);
 				if (healed)
@@ -4160,15 +4278,17 @@ public class O7FlipPlugin extends Plugin
 					else
 					{
 						boolean localHasFills = !l.buys.isEmpty() || !l.sells.isEmpty();
-						if (localHasFills)
+						boolean localClosed = localHasFills
+							&& com.o7flip.model.SlotState.derive(l.qty, l.buys, l.sells) == com.o7flip.model.SlotState.CLOSED;
+						if (localHasFills && !localClosed)
 						{
 							r.buys  = l.buys;
 							r.sells = l.sells;
+							if (l.offerInstanceId != null) r.offerInstanceId = l.offerInstanceId;
+							r.sellListed              = l.sellListed || r.sellListed;
+							r.pendingOfflineReconcile = l.pendingOfflineReconcile;
 						}
-						if (l.offerInstanceId != null) r.offerInstanceId = l.offerInstanceId;
-						r.sellListed              = l.sellListed || r.sellListed;
 						r.appliedOverrideRev      = Math.max(l.appliedOverrideRev, r.overrideRev);
-						r.pendingOfflineReconcile = l.pendingOfflineReconcile;
 						r.state = com.o7flip.model.SlotState.derive(r.qty, r.buys, r.sells);
 					}
 				}
@@ -4180,6 +4300,44 @@ public class O7FlipPlugin extends Plugin
 		local.updatedAt   = remote.updatedAt;
 		local.summary     = remote.summary;
 		local.lastPollAt  = remote.lastPollAt;
+	}
+
+	static boolean dedupeSlotsByLeg(com.o7flip.model.OptimizerSession s)
+	{
+		if (s == null || s.slots == null || s.slots.size() < 2) return false;
+		java.util.List<com.o7flip.model.OptimizeResult.Allocation> out = new java.util.ArrayList<>();
+		java.util.Map<String, Integer> posByLeg = new java.util.HashMap<>();
+		for (com.o7flip.model.OptimizeResult.Allocation a : s.slots)
+		{
+			if (a == null) continue;
+			if (a.itemId <= 0) { out.add(a); continue; }
+			String key = slotLegKey(a);
+			Integer pos = posByLeg.get(key);
+			if (pos == null)
+			{
+				posByLeg.put(key, out.size());
+				out.add(a);
+			}
+			else if (slotFillProgress(a) > slotFillProgress(out.get(pos)))
+			{
+				out.set(pos, a);
+			}
+		}
+		if (out.size() == s.slots.size()) return false;
+		s.slots = out;
+		return true;
+	}
+
+	private static String slotLegKey(com.o7flip.model.OptimizeResult.Allocation a)
+	{
+		return a.offerInstanceId != null
+			? a.itemId + ":" + a.offerInstanceId
+			: Integer.toString(a.itemId);
+	}
+
+	private static int slotFillProgress(com.o7flip.model.OptimizeResult.Allocation a)
+	{
+		return a == null ? -1 : sumQty(a.buys) + sumQty(a.sells);
 	}
 
 	private static boolean mergeFillList(java.util.List<com.o7flip.model.SlotFill> local,
@@ -4299,6 +4457,7 @@ public class O7FlipPlugin extends Plugin
 				if (next == null) continue;
 				com.o7flip.model.OptimizeResult.Allocation old = prevByItem.get(next.itemId);
 				if (old == null || (old.buys.isEmpty() && old.sells.isEmpty())) continue;
+				if (com.o7flip.model.SlotState.derive(old.qty, old.buys, old.sells) == com.o7flip.model.SlotState.CLOSED) continue;
 				next.buys  = old.buys;
 				next.sells = old.sells;
 				if (old.offerInstanceId != null) next.offerInstanceId = old.offerInstanceId;
@@ -4319,6 +4478,7 @@ public class O7FlipPlugin extends Plugin
 		s.slots               = new java.util.ArrayList<>(result.allocations);
 		String prevGen = prev != null ? prev.generatedAt : null;
 		s.generatedAt         = nextGeneratedAt(prevGen, result.updatedAt);
+		dedupeSlotsByLeg(s);
 		activeSession         = s;
 	}
 

@@ -49,12 +49,19 @@ public class ActiveOfferRow extends JPanel
 	private static final Color SELL_COL  = new Color(0x00C27A);
 	private static final Color BAR_TRACK = new Color(0x3A3A3A);
 
+	private final ActiveOfferSnapshot offer;
+	private final O7FlipPlugin plugin;
+	private final Color baseBg;
+	private int lastTier = -1;
+
 	public ActiveOfferRow(ActiveOfferSnapshot offer, ItemManager itemManager, boolean odd, O7FlipPlugin plugin)
 	{
-		Color bg = odd ? ODD_BG : ColorScheme.DARK_GRAY_COLOR;
+		this.offer  = offer;
+		this.plugin = plugin;
+		this.baseBg = odd ? ODD_BG : ColorScheme.DARK_GRAY_COLOR;
 
 		setLayout(new BorderLayout(8, 0));
-		setBackground(bg);
+		setOpaque(false);
 		setBorder(new EmptyBorder(8, 10, 8, 10));
 		setAlignmentX(Component.LEFT_ALIGNMENT);
 
@@ -89,7 +96,7 @@ public class ActiveOfferRow extends JPanel
 
 		JPanel textCol = new JPanel();
 		textCol.setLayout(new BoxLayout(textCol, BoxLayout.Y_AXIS));
-		textCol.setBackground(bg);
+		textCol.setOpaque(false);
 		textCol.setAlignmentX(Component.LEFT_ALIGNMENT);
 		textCol.add(nameLabel);
 		textCol.add(javax.swing.Box.createVerticalStrut(2));
@@ -104,6 +111,76 @@ public class ActiveOfferRow extends JPanel
 		ClickRouter.attachInsightsOnly(this, plugin, offer.itemId, offer.name);
 
 		setMaximumSize(new Dimension(Integer.MAX_VALUE, getPreferredSize().height));
+	}
+
+	@Override
+	protected void paintComponent(Graphics g)
+	{
+		super.paintComponent(g);
+		int tier = plugin != null ? plugin.offerCompetitiveTier(offer.itemId, offer.isBuy(), offer.price) : -1;
+		lastTier = tier;
+		Color fill = baseBg;
+		Color tc = plugin != null ? plugin.offerTierColor(tier) : null;
+		if (tc != null)
+		{
+			fill = tintBg(baseBg, tc);
+		}
+		g.setColor(fill);
+		g.fillRect(0, 0, getWidth(), getHeight());
+	}
+
+	@Override
+	public String getToolTipText(java.awt.event.MouseEvent event)
+	{
+		if (lastTier < 0 || plugin == null)
+		{
+			return ClickRouter.CLICK_HINT;
+		}
+		boolean isBuy = offer.isBuy();
+		StringBuilder sb = new StringBuilder("<html><b>");
+		sb.append(verdictText(lastTier, isBuy)).append("</b><br>");
+		sb.append("Your ").append(isBuy ? "buy" : "sell").append(": ")
+			.append(FlipItemPanel.formatGp(offer.price)).append(" gp");
+		com.o7flip.model.ItemInsights ins = plugin.getOverlayInsights(offer.itemId);
+		if (ins != null && ins.current != null)
+		{
+			com.o7flip.model.ItemInsights.Current c = ins.current;
+			if (c.buyPrice > 0)  sb.append("<br>Live buy: ").append(FlipItemPanel.formatGp(c.buyPrice)).append(" gp");
+			if (c.sellPrice > 0) sb.append("<br>Live sell: ").append(FlipItemPanel.formatGp(c.sellPrice)).append(" gp");
+		}
+		sb.append("<br><br>Colour matches the Grand Exchange border:<br>")
+			.append("<font color='#3FC77F'>Green</font> competitive &nbsp;")
+			.append("<font color='#E8C34A'>Amber</font> borderline &nbsp;")
+			.append("<font color='#E05B5B'>Red</font> won't fill<br>")
+			.append(ClickRouter.CLICK_HINT).append("</html>");
+		return sb.toString();
+	}
+
+	private static Color tintBg(Color base, Color accent)
+	{
+		double w = 0.25;
+		int r = (int) Math.round(base.getRed()   * (1 - w) + accent.getRed()   * w);
+		int g = (int) Math.round(base.getGreen() * (1 - w) + accent.getGreen() * w);
+		int b = (int) Math.round(base.getBlue()  * (1 - w) + accent.getBlue()  * w);
+		return new Color(clampByte(r), clampByte(g), clampByte(b));
+	}
+
+	private static int clampByte(int v)
+	{
+		return v < 0 ? 0 : Math.min(v, 255);
+	}
+
+	private static String verdictText(int tier, boolean isBuy)
+	{
+		if (tier == 0)
+		{
+			return "Competitive - should fill at this price";
+		}
+		if (tier == 1)
+		{
+			return isBuy ? "A bit low - may fill slowly" : "A bit high - may fill slowly";
+		}
+		return isBuy ? "Underpriced - raise your buy to fill" : "Overpriced - lower your sell to fill";
 	}
 
 	private static class ProgressBar extends JPanel
