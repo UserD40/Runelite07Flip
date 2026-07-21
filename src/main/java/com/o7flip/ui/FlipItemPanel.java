@@ -358,7 +358,7 @@ public class FlipItemPanel extends JPanel
 		return s.substring(0, end);
 	}
 
-	private static String escapeHtml(String s)
+	public static String escapeHtml(String s)
 	{
 		if (s == null)
 		{

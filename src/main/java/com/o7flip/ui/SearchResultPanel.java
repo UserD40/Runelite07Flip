@@ -83,7 +83,7 @@ public class SearchResultPanel extends JPanel
 			buyLabel.setFont(Fonts.SM);
 			buyLabel.setForeground(new Color(0xFF7070));
 
-			StringBuilder buyTip = new StringBuilder("<html><b>").append(escapeHtml(item.name)).append("</b><br>");
+			StringBuilder buyTip = new StringBuilder("<html><b>").append(FlipItemPanel.escapeHtml(item.name)).append("</b><br>");
 			buyTip.append("Market buy: <font color='#FF7070'>").append(FlipItemPanel.formatGp(item.buyPrice)).append("</font><br>");
 			buyTip.append("<font color='#666666'>Right-click anywhere to queue a Buy on the GE · Click for insights · Shift+click or double-click to open on 07flip.com</font></html>");
 			buyLabel.setToolTipText(buyTip.toString());
@@ -103,7 +103,7 @@ public class SearchResultPanel extends JPanel
 			sellLabel.setFont(Fonts.SM);
 			sellLabel.setForeground(GREEN);
 
-			StringBuilder sellTip = new StringBuilder("<html><b>").append(escapeHtml(item.name)).append("</b><br>");
+			StringBuilder sellTip = new StringBuilder("<html><b>").append(FlipItemPanel.escapeHtml(item.name)).append("</b><br>");
 			sellTip.append("Market sell: <font color='#00C27A'>").append(FlipItemPanel.formatGp(item.sellPrice)).append("</font><br>");
 			sellTip.append("<font color='#666666'>Right-click anywhere to queue a Buy on the GE · Click for insights · Shift+click or double-click to open on 07flip.com</font></html>");
 			sellLabel.setToolTipText(sellTip.toString());
@@ -125,7 +125,7 @@ public class SearchResultPanel extends JPanel
 			profitLabel.setFont(Fonts.SM);
 			profitLabel.setForeground(fg);
 
-			StringBuilder tip = new StringBuilder("<html><b>").append(escapeHtml(item.name)).append("</b><br>");
+			StringBuilder tip = new StringBuilder("<html><b>").append(FlipItemPanel.escapeHtml(item.name)).append("</b><br>");
 			tip.append("Market margin: <font color='").append(item.profit >= 0 ? "#00C27A" : "#E85050").append("'>")
 				.append(sign).append(FlipItemPanel.formatGp(item.profit)).append("</font>");
 			if (item.roi != null)
@@ -210,11 +210,5 @@ public class SearchResultPanel extends JPanel
 		});
 
 		setMaximumSize(new Dimension(Integer.MAX_VALUE, getPreferredSize().height));
-	}
-
-	private static String escapeHtml(String s)
-	{
-		if (s == null) return "";
-		return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
 	}
 }

@@ -118,6 +118,7 @@ public class MyTradesStatsPanel extends JPanel
 	private final JPanel body = new JPanel();
 	private final JLabel collapseToggle = toggleLabel("▾");
 	private boolean collapsed = false;
+	private Period currentPeriod = Period.ALL_TIME;
 
 	private Runnable onMembershipToggle = () -> {};
 
@@ -183,8 +184,14 @@ public class MyTradesStatsPanel extends JPanel
 		body.setVisible(!c);
 		collapseToggle.setText(c ? "▴" : "▾");
 		collapseToggle.setToolTipText(c ? "Show stats" : "Hide stats");
+		applyProfitHeaderText();
 		revalidate();
 		repaint();
+	}
+
+	private void applyProfitHeaderText()
+	{
+		profitHeader.setText(collapsed ? "" : "Profit · " + currentPeriod.label);
 	}
 
 	public void setOnMembershipToggle(Runnable r)
@@ -215,7 +222,8 @@ public class MyTradesStatsPanel extends JPanel
 		}
 		setVisible(true);
 
-		profitHeader.setText("Profit · " + period.label);
+		currentPeriod = period;
+		applyProfitHeaderText();
 
 		long totalProfit = preferServer ? server.totalRealisedProfit : stats.totalProfit;
 		setProfit(totalProfitValue, totalProfit);

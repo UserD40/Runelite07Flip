@@ -157,6 +157,19 @@ public interface O7FlipConfig extends Config
 	}
 
 	@ConfigItem(
+		keyName = "narrowByPendingOffers",
+		name = "",
+		description = "",
+		hidden = true,
+		section = generalSection,
+		position = 7
+	)
+	default boolean narrowByPendingOffers()
+	{
+		return false;
+	}
+
+	@ConfigItem(
 		keyName = "showFlips",
 		name = "",
 		description = "",		position = 0,

@@ -46,6 +46,7 @@ import javax.inject.Singleton;
 import javax.swing.BorderFactory;
 import javax.swing.BoxLayout;
 import javax.swing.JButton;
+import javax.swing.JCheckBox;
 import javax.swing.JComboBox;
 import javax.swing.JComponent;
 import javax.swing.JLabel;
@@ -1982,6 +1983,25 @@ public class O7FlipPanel extends PluginPanel
 		capitalReadout.setAlignmentX(Component.LEFT_ALIGNMENT);
 		updateCapitalReadout();
 
+		JCheckBox pendingToggle = new JCheckBox("Subtract pending buys");
+		pendingToggle.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+		pendingToggle.setForeground(new Color(0xAAAAAA));
+		pendingToggle.setFont(Fonts.SM);
+		pendingToggle.setFocusable(false);
+		pendingToggle.setEnabled(filterOn);
+		pendingToggle.setSelected(config != null && config.narrowByPendingOffers());
+		pendingToggle.setAlignmentX(Component.LEFT_ALIGNMENT);
+		pendingToggle.setBorder(new EmptyBorder(4, 0, 0, 0));
+		pendingToggle.setToolTipText("<html>Filter the list by your <b>free</b> capital (total minus gp in "
+			+ "pending buy offers) instead of your full total.<br>Place a buy and the list narrows to what's left.</html>");
+		pendingToggle.addActionListener(e ->
+		{
+			if (plugin != null)
+			{
+				plugin.persistNarrowByPendingOffers(pendingToggle.isSelected());
+			}
+		});
+
 		JPanel top = new JPanel(new BorderLayout());
 		top.setBackground(ColorScheme.DARKER_GRAY_COLOR);
 		top.add(label, BorderLayout.WEST);
@@ -1999,6 +2019,7 @@ public class O7FlipPanel extends PluginPanel
 		outer.add(top);
 		outer.add(fieldRow);
 		outer.add(capitalReadout);
+		outer.add(pendingToggle);
 		return outer;
 	}
 
@@ -2075,10 +2096,6 @@ public class O7FlipPanel extends PluginPanel
 		renderDumps(q);
 		renderDips(q);
 		renderFavourites(q);
-	}
-
-	public void onInventoryCoinsChanged()
-	{
 	}
 
 	private long displayedCapital()
@@ -2158,12 +2175,6 @@ public class O7FlipPanel extends PluginPanel
 		while (end > dot && s.charAt(end - 1) == '0') end--;
 		if (end > dot && s.charAt(end - 1) == '.') end--;
 		return s.substring(0, end);
-	}
-
-	private static String escapeHtml(String s)
-	{
-		if (s == null) return "";
-		return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
 	}
 
 	private boolean shouldShowTab(String name)
@@ -4088,7 +4099,7 @@ public class O7FlipPanel extends PluginPanel
 		text.setOpaque(false);
 
 		StringBuilder name = new StringBuilder("<html><font color='#FFFFFF'><b>")
-			.append(escapeHtml(cp.name)).append("</b></font>");
+			.append(FlipItemPanel.escapeHtml(cp.name)).append("</b></font>");
 		if (cp.partial)
 		{
 			name.append(" <font color='#FFC077'>· partial</font>");

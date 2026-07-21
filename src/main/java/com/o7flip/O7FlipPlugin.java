@@ -35,11 +35,8 @@ import net.runelite.api.Client;
 import net.runelite.api.GameState;
 import net.runelite.api.GrandExchangeOffer;
 import net.runelite.api.GrandExchangeOfferState;
-import net.runelite.api.InventoryID;
-import net.runelite.api.Item;
 import net.runelite.api.events.GameStateChanged;
 import net.runelite.api.events.GrandExchangeOfferChanged;
-import net.runelite.api.events.ItemContainerChanged;
 import net.runelite.api.ScriptID;
 import net.runelite.api.events.GameTick;
 import net.runelite.api.events.ScriptPostFired;
@@ -178,10 +175,6 @@ public class O7FlipPlugin extends Plugin
 
 	public volatile Map<Integer, TrackedItemData> trackedItems = Collections.emptyMap();
 
-	public volatile Set<Integer> inventoryItemIds = Collections.emptySet();
-
-	public volatile long inventoryCoins = 0L;
-	private static final int COINS_ITEM_ID = 995;
 	private static final long CASH_BUCKET = 100_000L;
 
 	private final java.util.concurrent.ConcurrentHashMap<Integer, com.o7flip.model.RecommendedPrices> recPriceCache
@@ -1572,6 +1565,13 @@ public class O7FlipPlugin extends Plugin
 			SwingUtilities.invokeLater(() -> panel.refreshInsightsSections());
 			return;
 		}
+		if ("narrowByPendingOffers".equals(key))
+		{
+			lastPendingFilterCeiling = Long.MIN_VALUE;
+			onCapitalChanged();
+			SwingUtilities.invokeLater(panel::onCapitalAutoAdjusted);
+			return;
+		}
 		if (isTabStructureKey(key))
 		{
 			SwingUtilities.invokeLater(() -> panel.rebuildTabs());
@@ -1853,37 +1853,6 @@ public class O7FlipPlugin extends Plugin
 		trackedItems = Collections.unmodifiableMap(map);
 	}
 
-	@Subscribe
-	public void onItemContainerChanged(ItemContainerChanged event)
-	{
-		if (event.getContainerId() != InventoryID.INVENTORY.getId())
-		{
-			return;
-		}
-		Set<Integer> next = new HashSet<>();
-		long coins = 0L;
-		for (Item item : event.getItemContainer().getItems())
-		{
-			if (item.getId() < 0)
-			{
-				continue;
-			}
-			next.add(item.getId());
-			if (item.getId() == COINS_ITEM_ID)
-			{
-				coins = item.getQuantity();
-			}
-		}
-		inventoryItemIds = Collections.unmodifiableSet(next);
-		long previousCoins = inventoryCoins;
-		inventoryCoins     = coins;
-
-		if (panel != null && previousCoins != coins)
-		{
-			SwingUtilities.invokeLater(panel::onInventoryCoinsChanged);
-		}
-	}
-
 	private long lastActiveOffersHash = 0L;
 
 	private void syncActiveOffersFromClient()
@@ -2059,6 +2028,8 @@ public class O7FlipPlugin extends Plugin
 			next.put(slot, snapshot(slot, offer));
 		}
 		activeOffers = Collections.unmodifiableMap(next);
+
+		refreshForPendingCapitalChange();
 
 		final List<TradeRecord> snap = tradeHistory;
 		SwingUtilities.invokeLater(() -> panel.updateMyFlips(snap));
@@ -3439,14 +3410,22 @@ public class O7FlipPlugin extends Plugin
 		return (free / CASH_BUCKET) * CASH_BUCKET;
 	}
 
+	private long lastPendingFilterCeiling = Long.MIN_VALUE;
+
 	public long capitalFilterCeiling()
 	{
-		long total = totalCapital();
-		if (total <= 0)
+		if (totalCapital() <= 0)
 		{
 			return 0L;
 		}
-		return (total / CASH_BUCKET) * CASH_BUCKET;
+		boolean useFree = config.narrowByPendingOffers();
+		long basis = useFree ? freeCapital() : totalCapital();
+		long bucketed = (basis / CASH_BUCKET) * CASH_BUCKET;
+		if (bucketed <= 0)
+		{
+			return useFree ? 1L : 0L;
+		}
+		return bucketed;
 	}
 
 	public long freeCapital()
@@ -3505,6 +3484,25 @@ public class O7FlipPlugin extends Plugin
 		SwingUtilities.invokeLater(() -> panel.rerenderCapitalAffectedTabs());
 	}
 
+	private void refreshForPendingCapitalChange()
+	{
+		if (!config.narrowByPendingOffers() || config.capitalMode() != O7FlipConfig.CapitalMode.MANUAL)
+		{
+			return;
+		}
+		long ceiling = capitalFilterCeiling();
+		if (ceiling == lastPendingFilterCeiling)
+		{
+			return;
+		}
+		lastPendingFilterCeiling = ceiling;
+		onCapitalChanged();
+		if (panel != null)
+		{
+			SwingUtilities.invokeLater(panel::onCapitalAutoAdjusted);
+		}
+	}
+
 	public void persistCapitalMode(O7FlipConfig.CapitalMode mode)
 	{
 		configManager.setConfiguration("o7flip", "capitalMode", mode);
@@ -3526,6 +3524,11 @@ public class O7FlipPlugin extends Plugin
 	public void persistCapitalManual(long gp)
 	{
 		configManager.setConfiguration("o7flip", "capitalManual", gp);
+	}
+
+	public void persistNarrowByPendingOffers(boolean enabled)
+	{
+		configManager.setConfiguration("o7flip", "narrowByPendingOffers", enabled);
 	}
 
 	private void adjustCapitalForTrade(int itemId, boolean isBuy, int deltaQty, long deltaGp)

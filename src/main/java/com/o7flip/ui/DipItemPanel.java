@@ -102,7 +102,7 @@ public class DipItemPanel extends JPanel
 			+ "  " + refLabelText
 			+ "</html>");
 		priceRow.setFont(Fonts.SM);
-		priceRow.setToolTipText("<html><b>" + escapeHtml(item.name) + "</b><br>"
+		priceRow.setToolTipText("<html><b>" + FlipItemPanel.escapeHtml(item.name) + "</b><br>"
 			+ "Current buy: <font color='#FF7070'>" + FlipItemPanel.formatGp(item.buyPrice) + "</font>"
 			+ refTip
 			+ "<br><font color='#666666'>Right-click anywhere to queue a Buy on the GE · Click for insights</font></html>");
@@ -232,11 +232,5 @@ public class DipItemPanel extends JPanel
 		});
 
 		setMaximumSize(new Dimension(Integer.MAX_VALUE, getPreferredSize().height));
-	}
-
-	private static String escapeHtml(String s)
-	{
-		if (s == null) return "";
-		return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
 	}
 }
