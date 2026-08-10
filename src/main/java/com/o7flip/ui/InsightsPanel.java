@@ -342,6 +342,12 @@ public class InsightsPanel extends JPanel
 				add(build07FlipPrices(ins));
 				add(sectionDivider());
 			}
+			JPanel plan = sectionVisible(O7FlipConfig::itemTabPlan) ? buildPlan(ins.itemId) : null;
+			if (plan != null)
+			{
+				add(plan);
+				add(sectionDivider());
+			}
 			if (sectionVisible(O7FlipConfig::itemTabScore))
 			{
 				add(buildScore(ins));
@@ -831,6 +837,47 @@ public class InsightsPanel extends JPanel
 		panel.add(rowGp("Sell",   c.recSell,   null, Color.WHITE));
 		panel.add(rowGp("Profit", c.recProfit, null, margingColor(c.recProfit)));
 		return panel;
+	}
+
+	private JPanel buildPlan(int itemId)
+	{
+		com.o7flip.model.Models.OptimizeResult.Allocation a =
+			plugin != null ? plugin.planAllocationFor(itemId) : null;
+		if (a == null || a.qty <= 0)
+		{
+			return null;
+		}
+		int bought = sumFills(a.buys);
+		int sold   = sumFills(a.sells);
+
+		JPanel panel = sectionPanel("Your plan");
+		panel.add(rowGp("Buy",  a.buyPrice,  null, Color.WHITE));
+		panel.add(rowGp("Sell", a.sellPrice, null, Color.WHITE));
+		panel.add(rowText("Quantity", FlipItemPanel.formatGp(a.qty), Color.WHITE));
+		panel.add(rowGp("Allocated", a.gpAllocated, null, ColorScheme.LIGHT_GRAY_COLOR));
+		panel.add(rowGp("Expected profit", a.expectedProfit, null, margingColor(a.expectedProfit)));
+		panel.add(rowText("Bought", FlipItemPanel.formatGp(bought) + " / " + FlipItemPanel.formatGp(a.qty),
+			bought >= a.qty ? PROFIT_COL : ColorScheme.LIGHT_GRAY_COLOR));
+		if (sold > 0 || bought > 0)
+		{
+			panel.add(rowText("Sold", FlipItemPanel.formatGp(sold) + " / " + FlipItemPanel.formatGp(bought),
+				sold > 0 && sold >= bought ? PROFIT_COL : ColorScheme.LIGHT_GRAY_COLOR));
+		}
+		return panel;
+	}
+
+	private static int sumFills(java.util.List<com.o7flip.model.Models.SlotFill> fills)
+	{
+		if (fills == null)
+		{
+			return 0;
+		}
+		int total = 0;
+		for (com.o7flip.model.Models.SlotFill f : fills)
+		{
+			if (f != null) total += f.qty;
+		}
+		return total;
 	}
 
 	private JPanel buildRanges(ItemInsights ins)

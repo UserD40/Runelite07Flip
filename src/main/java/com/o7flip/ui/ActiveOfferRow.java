@@ -52,7 +52,7 @@ public class ActiveOfferRow extends JPanel
 	private final ActiveOfferSnapshot offer;
 	private final O7FlipPlugin plugin;
 	private final Color baseBg;
-	private final JLabel captionLabel;
+	private final ProgressBar bar;
 	private int lastTier = -1;
 
 	public ActiveOfferRow(ActiveOfferSnapshot offer, ItemManager itemManager, boolean odd, O7FlipPlugin plugin)
@@ -85,14 +85,9 @@ public class ActiveOfferRow extends JPanel
 		boolean fullyFilled = offer.totalQuantity > 0 && offer.quantitySold >= offer.totalQuantity;
 		Color barCol = fullyFilled ? SELL_COL : sideCol;
 
-		ProgressBar bar = new ProgressBar(offer.quantitySold, offer.totalQuantity, barCol);
+		bar = new ProgressBar(offer.quantitySold, offer.totalQuantity, barCol,
+			fullyFilled ? SELL_COL : Color.LIGHT_GRAY);
 		bar.setAlignmentX(Component.LEFT_ALIGNMENT);
-
-		captionLabel = new JLabel();
-		captionLabel.setFont(Fonts.SM_BOLD);
-		captionLabel.setForeground(fullyFilled ? SELL_COL : Color.LIGHT_GRAY);
-		captionLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
-		captionLabel.setBorder(new EmptyBorder(4, 0, 0, 0));
 
 		JPanel textCol = new JPanel();
 		textCol.setLayout(new BoxLayout(textCol, BoxLayout.Y_AXIS));
@@ -103,7 +98,6 @@ public class ActiveOfferRow extends JPanel
 		textCol.add(typeLabel);
 		textCol.add(javax.swing.Box.createVerticalStrut(4));
 		textCol.add(bar);
-		textCol.add(captionLabel);
 
 		add(iconLabel, BorderLayout.WEST);
 		add(textCol,   BorderLayout.CENTER);
@@ -111,38 +105,28 @@ public class ActiveOfferRow extends JPanel
 		ClickRouter.attachInsightsOnly(this, plugin, offer.itemId, offer.name);
 
 		refreshCaption();
+
+		setMaximumSize(new Dimension(Integer.MAX_VALUE, getPreferredSize().height));
 	}
 
 	public void refreshCaption()
 	{
 		O7FlipConfig cfg = plugin != null ? plugin.getConfig() : null;
-		StringBuilder sb = new StringBuilder();
-		if (cfg == null || cfg.activeFillCounter())
-		{
-			sb.append(offer.quantitySold).append('/').append(offer.totalQuantity);
-		}
-		String age = (cfg == null || cfg.activeLastFillAge()) ? lastFillText() : null;
-		if (age != null)
-		{
-			if (sb.length() > 0)
-			{
-				sb.append(" · ");
-			}
-			sb.append(age);
-		}
-		captionLabel.setText(sb.toString());
-		captionLabel.setVisible(sb.length() > 0);
-		setMaximumSize(new Dimension(Integer.MAX_VALUE, getPreferredSize().height));
+		String counter = (cfg == null || cfg.activeFillCounter())
+			? offer.quantitySold + "/" + offer.totalQuantity
+			: "";
+		String age = (cfg == null || cfg.activeLastFillAge()) ? lastFillText() : "";
+		bar.setLabels(counter, age);
 	}
 
 	private String lastFillText()
 	{
 		if (plugin == null || offer.quantitySold <= 0)
 		{
-			return null;
+			return "";
 		}
 		String age = plugin.offerLastFillText(offer.slot);
-		return age == null ? null : (offer.isBuy() ? "Last buy: " : "Last sale: ") + age;
+		return age == null ? "" : (offer.isBuy() ? "Last buy: " : "Last sale: ") + age;
 	}
 
 	@Override
@@ -217,21 +201,33 @@ public class ActiveOfferRow extends JPanel
 
 	private static class ProgressBar extends JPanel
 	{
-		private static final int HEIGHT = 6;
+		private static final int HEIGHT = 15;
+		private static final int PAD = 5;
 
 		private final int filled;
 		private final int total;
 		private final Color colour;
+		private final Color textColour;
+		private String left = "";
+		private String right = "";
 
-		ProgressBar(int filled, int total, Color colour)
+		ProgressBar(int filled, int total, Color colour, Color textColour)
 		{
-			this.filled = filled;
-			this.total  = total;
-			this.colour = colour;
+			this.filled     = filled;
+			this.total      = total;
+			this.colour     = colour;
+			this.textColour = textColour;
 			setOpaque(false);
 			setPreferredSize(new Dimension(0, HEIGHT));
 			setMaximumSize(new Dimension(Integer.MAX_VALUE, HEIGHT));
 			setMinimumSize(new Dimension(50, HEIGHT));
+		}
+
+		void setLabels(String left, String right)
+		{
+			this.left  = left  != null ? left  : "";
+			this.right = right != null ? right : "";
+			repaint();
 		}
 
 		@Override
@@ -258,6 +254,26 @@ public class ActiveOfferRow extends JPanel
 						g2.setColor(colour);
 						g2.fillRoundRect(0, 0, fillW, h, radius, radius);
 					}
+				}
+
+				g2.setFont(Fonts.SM_BOLD);
+				java.awt.FontMetrics fm = g2.getFontMetrics();
+				String tail = right;
+				if (!left.isEmpty() && !tail.isEmpty()
+					&& fm.stringWidth(left) + fm.stringWidth(tail) + PAD * 3 > w)
+				{
+					int colon = tail.indexOf(": ");
+					tail = colon >= 0 ? tail.substring(colon + 2) : tail;
+				}
+				int baseline = (h + fm.getAscent() - fm.getDescent()) / 2;
+				g2.setColor(textColour);
+				if (!left.isEmpty())
+				{
+					g2.drawString(left, PAD, baseline);
+				}
+				if (!tail.isEmpty() && fm.stringWidth(left) + fm.stringWidth(tail) + PAD * 3 <= w)
+				{
+					g2.drawString(tail, w - PAD - fm.stringWidth(tail), baseline);
 				}
 			}
 			finally

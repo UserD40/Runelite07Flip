@@ -798,6 +798,19 @@ public interface O7FlipConfig extends Config
 	}
 
 	@ConfigItem(
+		keyName = "itemTabPlan",
+		name = "Your plan",
+		description = "Show the Plan tab's target buy/sell, quantity and fill progress on the Item tab, "
+			+ "for items the optimiser has allocated. Hidden for items that are not in your plan.",
+		section = itemTabSection,
+		position = 6
+	)
+	default boolean itemTabPlan()
+	{
+		return true;
+	}
+
+	@ConfigItem(
 		keyName = "itemTabScore",
 		name = "07Flip score",
 		description = "Show the 07Flip confidence / tier / signal section on the Item tab.",

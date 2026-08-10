@@ -4168,6 +4168,23 @@ public class O7FlipPlugin extends Plugin
 	}
 
 	private volatile com.o7flip.model.Models.OptimizerSession activeSession;
+
+	public com.o7flip.model.Models.OptimizeResult.Allocation planAllocationFor(int itemId)
+	{
+		com.o7flip.model.Models.OptimizerSession s = activeSession;
+		if (s == null || s.slots == null)
+		{
+			return null;
+		}
+		for (com.o7flip.model.Models.OptimizeResult.Allocation a : s.slots)
+		{
+			if (a != null && a.itemId == itemId)
+			{
+				return a;
+			}
+		}
+		return null;
+	}
 	private volatile boolean offlineReconcileArmed = false;
 	private ScheduledFuture<?> pendingSessionPost;
 	private ScheduledFuture<?> sessionPollTask;
