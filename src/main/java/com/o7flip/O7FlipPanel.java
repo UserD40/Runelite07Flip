@@ -24,11 +24,11 @@
  */
 package com.o7flip;
 
-import com.o7flip.model.DecantItem;
-import com.o7flip.model.DumpItem;
-import com.o7flip.model.FlipItem;
-import com.o7flip.model.SearchResultItem;
-import com.o7flip.model.TradeRecord;
+import com.o7flip.model.Models.DecantItem;
+import com.o7flip.model.Models.DumpItem;
+import com.o7flip.model.Models.FlipItem;
+import com.o7flip.model.Models.SearchResultItem;
+import com.o7flip.model.Models.TradeRecord;
 import com.o7flip.ui.DecantItemPanel;
 import com.o7flip.ui.DipItemPanel;
 import com.o7flip.ui.DumpItemPanel;
@@ -241,7 +241,7 @@ public class O7FlipPanel extends PluginPanel
 
 	private List<FlipItem>    allFlips   = new ArrayList<>();
 	private List<DumpItem>    allDumps   = new ArrayList<>();
-	private List<com.o7flip.model.DipItem> allDips = new ArrayList<>();
+	private List<com.o7flip.model.Models.DipItem> allDips = new ArrayList<>();
 	private List<DecantItem>  allDecants = new ArrayList<>();
 	private List<FlipItem>    allFavourites = new ArrayList<>();
 	private JButton[] favouritesSortBtns;
@@ -269,7 +269,7 @@ public class O7FlipPanel extends PluginPanel
 	private JPanel decantListPanel;
 	private JPanel favouritesListPanel;
 	private JPanel optimizerListPanel;
-	private com.o7flip.model.OptimizeResult lastOptimize;
+	private com.o7flip.model.Models.OptimizeResult lastOptimize;
 	private int     optSlots         = 8;
 	private String  optRisk          = "medium";
 	private int     optMaxFillHours  = 4;
@@ -650,7 +650,7 @@ public class O7FlipPanel extends PluginPanel
 		setLoading(false);
 	}
 
-	public void updateDumps(com.o7flip.model.DumpItem.Response resp, int page)
+	public void updateDumps(com.o7flip.model.Models.DumpItem.Response resp, int page)
 	{
 		allDumps = resp.items;
 		dumpsTotal = resp.total;
@@ -667,7 +667,7 @@ public class O7FlipPanel extends PluginPanel
 		renderMyFlips();
 	}
 
-	public void updateDips(List<com.o7flip.model.DipItem> items, int total, int page)
+	public void updateDips(List<com.o7flip.model.Models.DipItem> items, int total, int page)
 	{
 		allDips = items;
 		dipsTotal = total;
@@ -859,7 +859,7 @@ public class O7FlipPanel extends PluginPanel
 			.collect(Collectors.toList());
 	}
 
-	private List<com.o7flip.model.DipItem> fDips(String q)
+	private List<com.o7flip.model.Models.DipItem> fDips(String q)
 	{
 		return allDips.stream()
 			.filter(i -> notBlocked(i.itemId))
@@ -1204,7 +1204,7 @@ public class O7FlipPanel extends PluginPanel
 			java.util.Map<Integer, Integer> qtyInActiveSells = new java.util.HashMap<>();
 			if (plugin != null && plugin.activeOffers != null)
 			{
-				for (com.o7flip.model.ActiveOfferSnapshot s : plugin.activeOffers.values())
+				for (com.o7flip.model.Models.ActiveOfferSnapshot s : plugin.activeOffers.values())
 				{
 					if (s == null) continue;
 					int remaining = Math.max(0, s.totalQuantity - s.quantitySold);
@@ -1283,6 +1283,13 @@ public class O7FlipPanel extends PluginPanel
 				{
 					if (myFlipsSortIdx == 0 && myFlipsListPanel != null && myFlipsListPanel.isShowing())
 					{
+						for (java.awt.Component c : myFlipsListPanel.getComponents())
+						{
+							if (c instanceof com.o7flip.ui.ActiveOfferRow)
+							{
+								((com.o7flip.ui.ActiveOfferRow) c).refreshCaption();
+							}
+						}
 						myFlipsListPanel.repaint();
 					}
 					else if (activeColorTimer != null)
@@ -1475,7 +1482,7 @@ public class O7FlipPanel extends PluginPanel
 
 	private void renderMyFlipsActive()
 	{
-		java.util.Map<Integer, com.o7flip.model.ActiveOfferSnapshot> offers =
+		java.util.Map<Integer, com.o7flip.model.Models.ActiveOfferSnapshot> offers =
 			plugin != null ? plugin.activeOffers : java.util.Collections.emptyMap();
 
 		if (offers == null || offers.isEmpty())
@@ -1491,7 +1498,7 @@ public class O7FlipPanel extends PluginPanel
 		int rendered = 0;
 		for (int slot : slots)
 		{
-			com.o7flip.model.ActiveOfferSnapshot offer = offers.get(slot);
+			com.o7flip.model.Models.ActiveOfferSnapshot offer = offers.get(slot);
 			if (offer == null || offer.itemId <= 0)
 			{
 				continue;
@@ -2475,7 +2482,7 @@ public class O7FlipPanel extends PluginPanel
 		{
 			insightsPanel = new com.o7flip.ui.InsightsPanel(itemManager, plugin, config);
 			insightsHost.add(insightsPanel);
-			com.o7flip.model.ItemInsights loaded = plugin != null ? plugin.currentInsights : null;
+			com.o7flip.model.Models.ItemInsights loaded = plugin != null ? plugin.currentInsights : null;
 			if (loaded != null)
 			{
 				insightsPanel.show(loaded);
@@ -2494,8 +2501,8 @@ public class O7FlipPanel extends PluginPanel
 		{
 			return;
 		}
-		List<com.o7flip.model.FlipItem> top = new ArrayList<>();
-		for (com.o7flip.model.FlipItem f : allFlips)
+		List<com.o7flip.model.Models.FlipItem> top = new ArrayList<>();
+		for (com.o7flip.model.Models.FlipItem f : allFlips)
 		{
 			if (f.flip07Score == null) continue;
 			top.add(f);
@@ -2524,7 +2531,7 @@ public class O7FlipPanel extends PluginPanel
 		selectTab("Item");
 	}
 
-	public void showInsights(int itemId, com.o7flip.model.ItemInsights insights)
+	public void showInsights(int itemId, com.o7flip.model.Models.ItemInsights insights)
 	{
 		com.o7flip.ui.InsightsPanel p = ensureInsightsPanel();
 		if (p != null)
@@ -3662,7 +3669,7 @@ public class O7FlipPanel extends PluginPanel
 		optInputsHost.repaint();
 	}
 
-	public void onOptimizeResult(com.o7flip.model.OptimizeResult result)
+	public void onOptimizeResult(com.o7flip.model.Models.OptimizeResult result)
 	{
 		optInFlight = false;
 		lastOptimize = result;
@@ -3677,7 +3684,7 @@ public class O7FlipPanel extends PluginPanel
 		renderOptimizerPremium(upgradeUrl);
 	}
 
-	public void onOptimizeSlotSwapped(int index, com.o7flip.model.OptimizeResult.Allocation next)
+	public void onOptimizeSlotSwapped(int index, com.o7flip.model.Models.OptimizeResult.Allocation next)
 	{
 		if (lastOptimize == null || lastOptimize.allocations == null
 			|| index < 0 || index >= lastOptimize.allocations.size() || next == null)
@@ -3695,7 +3702,7 @@ public class O7FlipPanel extends PluginPanel
 			"Server returned: " + reason + ". Try again, or adjust your inputs.");
 	}
 
-	public void hydrateOptimizerSession(com.o7flip.model.OptimizerSession session)
+	public void hydrateOptimizerSession(com.o7flip.model.Models.OptimizerSession session)
 	{
 		if (session == null || session.slots == null || session.slots.isEmpty()) return;
 		optSlots        = session.inputs.slots > 0 ? Math.min(8, session.inputs.slots) : optSlots;
@@ -3705,7 +3712,7 @@ public class O7FlipPanel extends PluginPanel
 		optMinProfitPct = session.inputs.minProfitPct != null
 			? (int) Math.round(Math.max(0, Math.min(10, session.inputs.minProfitPct))) : optMinProfitPct;
 
-		com.o7flip.model.OptimizeResult result = new com.o7flip.model.OptimizeResult();
+		com.o7flip.model.Models.OptimizeResult result = new com.o7flip.model.Models.OptimizeResult();
 		result.updatedAt   = session.generatedAt;
 		result.allocations = new java.util.ArrayList<>(session.slots);
 		if (session.summary != null)
@@ -3715,7 +3722,7 @@ public class O7FlipPanel extends PluginPanel
 		else
 		{
 			long deployed = 0, cycleProfit = 0;
-			for (com.o7flip.model.OptimizeResult.Allocation a : session.slots)
+			for (com.o7flip.model.Models.OptimizeResult.Allocation a : session.slots)
 			{
 				if (a == null) continue;
 				deployed    += a.gpAllocated;
@@ -3821,7 +3828,7 @@ public class O7FlipPanel extends PluginPanel
 		optimizerListPanel.repaint();
 	}
 
-	private void renderOptimizerResult(com.o7flip.model.OptimizeResult r)
+	private void renderOptimizerResult(com.o7flip.model.Models.OptimizeResult r)
 	{
 		if (optimizerListPanel == null) return;
 		optimizerListPanel.removeAll();
@@ -3865,7 +3872,7 @@ public class O7FlipPanel extends PluginPanel
 		optimizerListPanel.repaint();
 	}
 
-	private void renderOptimizerEmptyFromSummary(com.o7flip.model.OptimizeResult.Summary s)
+	private void renderOptimizerEmptyFromSummary(com.o7flip.model.Models.OptimizeResult.Summary s)
 	{
 		String title = "No allocations possible";
 		String sub;
@@ -3886,7 +3893,7 @@ public class O7FlipPanel extends PluginPanel
 		optimizerListPanel.repaint();
 	}
 
-	private JComponent buildSlotSuggestionBanner(com.o7flip.model.OptimizeResult.Summary s)
+	private JComponent buildSlotSuggestionBanner(com.o7flip.model.Models.OptimizeResult.Summary s)
 	{
 		if (s == null || s.slotSuggestion == null) return null;
 		final int suggested = s.slotSuggestion.suggestedSlots;
@@ -3930,11 +3937,11 @@ public class O7FlipPanel extends PluginPanel
 		return p;
 	}
 
-	private JComponent buildOfflineReconcileBanner(com.o7flip.model.OptimizeResult r)
+	private JComponent buildOfflineReconcileBanner(com.o7flip.model.Models.OptimizeResult r)
 	{
 		if (r == null || r.allocations == null) return null;
-		java.util.List<com.o7flip.model.OptimizeResult.Allocation> flagged = new java.util.ArrayList<>();
-		for (com.o7flip.model.OptimizeResult.Allocation a : r.allocations)
+		java.util.List<com.o7flip.model.Models.OptimizeResult.Allocation> flagged = new java.util.ArrayList<>();
+		for (com.o7flip.model.Models.OptimizeResult.Allocation a : r.allocations)
 		{
 			if (a != null && a.pendingOfflineReconcile) flagged.add(a);
 		}
@@ -3962,7 +3969,7 @@ public class O7FlipPanel extends PluginPanel
 		{
 			if (plugin != null)
 			{
-				for (com.o7flip.model.OptimizeResult.Allocation a : flagged)
+				for (com.o7flip.model.Models.OptimizeResult.Allocation a : flagged)
 				{
 					plugin.dismissOfflineReconcile(a.itemId);
 				}
@@ -3994,7 +4001,7 @@ public class O7FlipPanel extends PluginPanel
 		if (optimizerListPanel == null) return;
 		optimizerListPanel.removeAll();
 
-		java.util.List<com.o7flip.model.CompletedPosition> positions =
+		java.util.List<com.o7flip.model.Models.CompletedPosition> positions =
 			plugin != null ? plugin.getCompletedPositions() : new java.util.ArrayList<>();
 		sortHistory(positions);
 
@@ -4040,7 +4047,7 @@ public class O7FlipPanel extends PluginPanel
 		else
 		{
 			boolean odd = false;
-			for (com.o7flip.model.CompletedPosition cp : positions)
+			for (com.o7flip.model.Models.CompletedPosition cp : positions)
 			{
 				optimizerListPanel.add(buildCompletedPositionRow(cp, odd));
 				optimizerListPanel.add(sep());
@@ -4064,7 +4071,7 @@ public class O7FlipPanel extends PluginPanel
 		return b;
 	}
 
-	private void sortHistory(java.util.List<com.o7flip.model.CompletedPosition> list)
+	private void sortHistory(java.util.List<com.o7flip.model.Models.CompletedPosition> list)
 	{
 		switch (optHistorySort)
 		{
@@ -4085,7 +4092,7 @@ public class O7FlipPanel extends PluginPanel
 		}
 	}
 
-	private JComponent buildCompletedPositionRow(com.o7flip.model.CompletedPosition cp, boolean odd)
+	private JComponent buildCompletedPositionRow(com.o7flip.model.Models.CompletedPosition cp, boolean odd)
 	{
 		JPanel row = new JPanel(new BorderLayout(8, 0));
 		row.setBackground(odd ? new Color(0x272727) : ColorScheme.DARK_GRAY_COLOR);

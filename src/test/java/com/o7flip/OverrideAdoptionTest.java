@@ -24,10 +24,10 @@
  */
 package com.o7flip;
 
-import com.o7flip.model.OptimizeResult.Allocation;
-import com.o7flip.model.OptimizerSession;
-import com.o7flip.model.SlotFill;
-import com.o7flip.model.SlotState;
+import com.o7flip.model.Models.OptimizeResult.Allocation;
+import com.o7flip.model.Models.OptimizerSession;
+import com.o7flip.model.Models.SlotFill;
+import com.o7flip.model.Models.SlotState;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;

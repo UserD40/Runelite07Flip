@@ -24,7 +24,7 @@
  */
 package com.o7flip;
 
-import com.o7flip.model.TrackedItemData;
+import com.o7flip.model.Models.TrackedItemData;
 import com.o7flip.ui.FlipItemPanel;
 import com.o7flip.util.ProfitCalculator;
 import java.awt.Color;

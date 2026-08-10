@@ -24,7 +24,7 @@
  */
 package com.o7flip;
 
-import com.o7flip.model.TrackedItemData;
+import com.o7flip.model.Models.TrackedItemData;
 import com.o7flip.ui.FlipItemPanel;
 import net.runelite.api.Client;
 import net.runelite.api.MenuAction;
@@ -120,7 +120,7 @@ public class GePriceOverlay extends Overlay
 
 		Long buyPrice  = null;
 		Long sellPrice = null;
-		com.o7flip.model.ItemInsights ins = plugin.getOverlayInsights(currentItemId);
+		com.o7flip.model.Models.ItemInsights ins = plugin.getOverlayInsights(currentItemId);
 		if (ins != null && ins.current != null)
 		{
 			if (displayName == null)
@@ -239,14 +239,14 @@ public class GePriceOverlay extends Overlay
 			}
 		}
 
-		com.o7flip.model.ItemInsights insights = plugin.getOverlayInsights(currentItemId);
+		com.o7flip.model.Models.ItemInsights insights = plugin.getOverlayInsights(currentItemId);
 		appendInsightsRows(insights, currentItemId);
 		appendInsightsChart(insights, currentItemId);
 
 		return panel.render(graphics);
 	}
 
-	private void appendInsightsRows(com.o7flip.model.ItemInsights insights, int itemId)
+	private void appendInsightsRows(com.o7flip.model.Models.ItemInsights insights, int itemId)
 	{
 		Integer score = lookupFlip07Score(itemId);
 
@@ -294,7 +294,7 @@ public class GePriceOverlay extends Overlay
 
 	private Integer lookupFlip07Score(int itemId)
 	{
-		for (com.o7flip.model.FlipItem f : plugin.lastFlips)
+		for (com.o7flip.model.Models.FlipItem f : plugin.lastFlips)
 		{
 			if (f.itemId == itemId)
 			{
@@ -304,7 +304,7 @@ public class GePriceOverlay extends Overlay
 		return null;
 	}
 
-	private void appendInsightsChart(com.o7flip.model.ItemInsights insights, int itemId)
+	private void appendInsightsChart(com.o7flip.model.Models.ItemInsights insights, int itemId)
 	{
 		if (insights == null || !config.showGeOverlayChart())
 		{
@@ -337,7 +337,7 @@ public class GePriceOverlay extends Overlay
 		panel.getChildren().add(new ImageComponent(cachedChartImage));
 	}
 
-	private static Long[] sparklineBuyFor(com.o7flip.model.ItemInsights ins, String period)
+	private static Long[] sparklineBuyFor(com.o7flip.model.Models.ItemInsights ins, String period)
 	{
 		switch (period)
 		{
@@ -349,7 +349,7 @@ public class GePriceOverlay extends Overlay
 		}
 	}
 
-	private static Long[] sparklineSellFor(com.o7flip.model.ItemInsights ins, String period)
+	private static Long[] sparklineSellFor(com.o7flip.model.Models.ItemInsights ins, String period)
 	{
 		switch (period)
 		{

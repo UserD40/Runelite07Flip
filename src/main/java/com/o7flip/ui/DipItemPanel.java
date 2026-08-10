@@ -25,7 +25,7 @@
 package com.o7flip.ui;
 
 import com.o7flip.O7FlipPlugin;
-import com.o7flip.model.DipItem;
+import com.o7flip.model.Models.DipItem;
 import com.o7flip.util.Fonts;
 import net.runelite.client.game.ItemManager;
 import net.runelite.client.ui.ColorScheme;

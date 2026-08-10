@@ -236,7 +236,7 @@ public class O7FlipOverlay extends Overlay
 
 		boolean wantBuy = plugin.overlayQueueIsBuy();
 
-		Map<Integer, com.o7flip.model.ActiveOfferSnapshot> offers = plugin.activeOffers;
+		Map<Integer, com.o7flip.model.Models.ActiveOfferSnapshot> offers = plugin.activeOffers;
 		int baseId = InterfaceID.GeOffers.INDEX_0;
 		for (int i = 0; i < 8; i++)
 		{

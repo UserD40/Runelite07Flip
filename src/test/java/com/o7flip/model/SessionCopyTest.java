@@ -24,6 +24,10 @@
  */
 package com.o7flip.model;
 
+import com.o7flip.model.Models.OptimizeResult;
+import com.o7flip.model.Models.OptimizerSession;
+import com.o7flip.model.Models.SlotFill;
+import com.o7flip.model.Models.SlotState;
 import java.util.ArrayList;
 import java.util.Arrays;
 import org.junit.Test;

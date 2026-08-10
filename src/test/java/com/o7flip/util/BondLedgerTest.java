@@ -24,7 +24,7 @@
  */
 package com.o7flip.util;
 
-import com.o7flip.model.TradeRecord;
+import com.o7flip.model.Models.TradeRecord;
 import java.util.Arrays;
 import java.util.Collections;
 import org.junit.Test;

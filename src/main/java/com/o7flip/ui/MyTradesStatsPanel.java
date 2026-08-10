@@ -24,7 +24,7 @@
  */
 package com.o7flip.ui;
 
-import com.o7flip.model.TrackerStats;
+import com.o7flip.model.Models.TrackerStats;
 import com.o7flip.util.BondLedger;
 import com.o7flip.util.Fonts;
 import com.o7flip.util.ProfitCalculator;

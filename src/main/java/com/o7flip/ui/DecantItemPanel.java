@@ -25,7 +25,7 @@
 package com.o7flip.ui;
 
 import com.o7flip.O7FlipPlugin;
-import com.o7flip.model.DecantItem;
+import com.o7flip.model.Models.DecantItem;
 import com.o7flip.util.Fonts;
 import com.o7flip.util.ItemIds;
 import net.runelite.client.game.ItemManager;

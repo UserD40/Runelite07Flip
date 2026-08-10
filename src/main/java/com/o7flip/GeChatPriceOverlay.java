@@ -24,7 +24,7 @@
  */
 package com.o7flip;
 
-import com.o7flip.model.ItemInsights;
+import com.o7flip.model.Models.ItemInsights;
 import com.o7flip.ui.FlipItemPanel;
 import net.runelite.api.Client;
 import net.runelite.api.widgets.ComponentID;

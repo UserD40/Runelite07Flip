@@ -24,8 +24,8 @@
  */
 package com.o7flip;
 
-import com.o7flip.model.ActiveOfferSnapshot;
-import com.o7flip.model.ItemInsights;
+import com.o7flip.model.Models.ActiveOfferSnapshot;
+import com.o7flip.model.Models.ItemInsights;
 import com.o7flip.ui.FlipItemPanel;
 import com.o7flip.ui.MiniChart;
 import net.runelite.api.Client;
@@ -47,6 +47,7 @@ import javax.inject.Inject;
 import java.awt.BasicStroke;
 import java.awt.Color;
 import java.awt.Dimension;
+import java.awt.FontMetrics;
 import java.awt.Graphics2D;
 import java.awt.Rectangle;
 import java.awt.RenderingHints;
@@ -83,7 +84,8 @@ public class GeQuickLookOverlay extends Overlay
 	{
 		final boolean wantQuickLook = config.showGeQuickLook();
 		final boolean wantTimer = config.showGeSlotTimer();
-		if (!wantQuickLook && !wantTimer)
+		final boolean wantFill = config.activeFillCounter() || config.activeLastFillAge();
+		if (!wantQuickLook && !wantTimer && !wantFill)
 		{
 			return null;
 		}
@@ -104,7 +106,7 @@ public class GeQuickLookOverlay extends Overlay
 
 		int hoveredIdx = -1;
 		Rectangle hoveredSlotBounds = null;
-		if ((wantQuickLook || wantTimer) && mouse != null)
+		if ((wantQuickLook || wantTimer || wantFill) && mouse != null)
 		{
 			for (int i = 0; i < 8; i++)
 			{
@@ -169,6 +171,11 @@ public class GeQuickLookOverlay extends Overlay
 			if (wantTimer)
 			{
 				drawSlotTimer(graphics, b, snap.slot, panelRect);
+			}
+
+			if (wantFill)
+			{
+				drawSlotFillInfo(graphics, slot, b, snap, panelRect);
 			}
 		}
 
@@ -245,6 +252,138 @@ public class GeQuickLookOverlay extends Overlay
 		tc.render(graphics);
 	}
 
+	private void drawSlotFillInfo(Graphics2D graphics, Widget slot, Rectangle b,
+		ActiveOfferSnapshot snap, Rectangle panelRect)
+	{
+		if (snap.totalQuantity <= 0)
+		{
+			return;
+		}
+		Rectangle bar = progressBarBounds(slot, b);
+		if (bar == null)
+		{
+			return;
+		}
+
+		String counter = config.activeFillCounter()
+			? snap.quantitySold + "/" + snap.totalQuantity
+			: "";
+
+		String age = "";
+		if (config.activeLastFillAge())
+		{
+			ItemInsights ins = plugin.getOverlayInsights(snap.itemId);
+			if (ins != null && ins.current != null)
+			{
+				Integer minutes = snap.isBuy() ? ins.current.buyAgeMinutes : ins.current.sellAgeMinutes;
+				if (minutes != null && minutes >= 0)
+				{
+					age = ageCompact(minutes);
+				}
+			}
+		}
+
+		graphics.setFont(FontManager.getRunescapeSmallFont());
+		FontMetrics fm = graphics.getFontMetrics();
+
+		final int pad = 4;
+		int counterW = counter.isEmpty() ? 0 : fm.stringWidth(counter);
+		int ageW = age.isEmpty() ? 0 : fm.stringWidth(age);
+		if (counterW > 0 && ageW > 0 && counterW + ageW + pad * 3 > bar.width)
+		{
+			age = "";
+			ageW = 0;
+		}
+		if (counterW + ageW == 0 || counterW + ageW + pad * 2 > bar.width)
+		{
+			return;
+		}
+
+		int y = bar.y + (bar.height + fm.getAscent()) / 2 - 1;
+		if (panelRect != null && panelRect.intersects(bar))
+		{
+			return;
+		}
+
+		graphics.setColor(config.lastFillColour());
+		if (counterW > 0 && ageW > 0)
+		{
+			graphics.drawString(counter, bar.x + pad, y);
+			graphics.drawString(age, bar.x + bar.width - pad - ageW, y);
+		}
+		else
+		{
+			String only = counterW > 0 ? counter : age;
+			graphics.drawString(only, bar.x + (bar.width - counterW - ageW) / 2, y);
+		}
+	}
+
+	private static String ageCompact(int minutes)
+	{
+		if (minutes < 60)
+		{
+			return minutes + "m";
+		}
+		int hours = minutes / 60;
+		return hours < 24 ? hours + "h" : (hours / 24) + "d";
+	}
+
+	private static Rectangle progressBarBounds(Widget slot, Rectangle slotBounds)
+	{
+		Rectangle best = null;
+		java.util.Deque<Widget> pending = new java.util.ArrayDeque<>();
+		pending.push(slot);
+		while (!pending.isEmpty())
+		{
+			Widget w = pending.pop();
+			if (w == null || w.isHidden())
+			{
+				continue;
+			}
+			Rectangle wb = w.getBounds();
+			String text = w.getText();
+			if (wb != null
+				&& w.getItemId() <= 0
+				&& (text == null || text.isEmpty())
+				&& wb.height >= 4 && wb.height <= 24
+				&& wb.width >= slotBounds.width / 2
+				&& wb.y >= slotBounds.y + slotBounds.height / 3
+				&& (best == null || wb.width > best.width))
+			{
+				best = wb;
+			}
+			Widget[] dyn = w.getDynamicChildren();
+			if (dyn != null)
+			{
+				for (Widget c : dyn)
+				{
+					pending.push(c);
+				}
+			}
+			Widget[] stat = w.getStaticChildren();
+			if (stat != null)
+			{
+				for (Widget c : stat)
+				{
+					pending.push(c);
+				}
+			}
+		}
+		if (best != null)
+		{
+			return best;
+		}
+		Widget icon = findItemIcon(slot);
+		Rectangle ib = icon != null ? icon.getBounds() : null;
+		if (ib == null)
+		{
+			return null;
+		}
+		int top = ib.y + ib.height;
+		int bottom = slotBounds.y + slotBounds.height;
+		return new Rectangle(slotBounds.x + 6, (top + bottom) / 2 - 7, slotBounds.width - 12, 14);
+	}
+
 	private void renderQuickLook(Graphics2D graphics, ActiveOfferSnapshot snap, Verdict v, Rectangle slot)
 	{
 		ItemInsights.Current c = v.ins.current;
@@ -288,7 +427,7 @@ public class GeQuickLookOverlay extends Overlay
 			panel.getChildren().add(line("Updated", ageText(age), INFO));
 		}
 
-		com.o7flip.model.RepriceResult rp = plugin.getReprice(snap.itemId, snap.isBuy(),
+		com.o7flip.model.Models.RepriceResult rp = plugin.getReprice(snap.itemId, snap.isBuy(),
 			Math.max(1, snap.totalQuantity - snap.quantitySold), snap.price, plugin.offerHeldMinutes(snap.slot));
 		boolean repriceShown = rp != null && addRepriceSection(snap, rp);
 		if (!repriceShown)
@@ -336,7 +475,7 @@ public class GeQuickLookOverlay extends Overlay
 		return new Rectangle(px, py, width, 230);
 	}
 
-	private boolean addRepriceSection(ActiveOfferSnapshot snap, com.o7flip.model.RepriceResult rp)
+	private boolean addRepriceSection(ActiveOfferSnapshot snap, com.o7flip.model.Models.RepriceResult rp)
 	{
 		if (rp.status == null)
 		{

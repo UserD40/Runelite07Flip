@@ -24,7 +24,7 @@
  */
 package com.o7flip;
 
-import com.o7flip.model.OptimizeResult;
+import com.o7flip.model.Models.OptimizeResult;
 import org.junit.Test;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotSame;

@@ -727,6 +727,46 @@ public interface O7FlipConfig extends Config
 	}
 
 	@ConfigItem(
+		keyName = "activeFillCounter",
+		name = "Fill counter on offer bar",
+		description = "Show how much of each offer has filled (e.g. 1 / 100) on the Grand Exchange progress bar "
+			+ "and under the progress bar on the Trades tab.",
+		section = geOverlaySection,
+		position = 19
+	)
+	default boolean activeFillCounter()
+	{
+		return true;
+	}
+
+	@ConfigItem(
+		keyName = "activeLastFillAge",
+		name = "Time since last buy / sale",
+		description = "Show how long ago the last unit bought or sold (e.g. Last sale: 5m) on the Grand Exchange "
+			+ "progress bar and on the Trades tab.",
+		section = geOverlaySection,
+		position = 20
+	)
+	default boolean activeLastFillAge()
+	{
+		return true;
+	}
+
+	@Alpha
+	@ConfigItem(
+		keyName = "lastFillColour",
+		name = "Progress bar text colour",
+		description = "Colour of the fill counter and time-since-last-buy/sale text drawn on the Grand Exchange "
+			+ "progress bar. Lower the opacity to keep it subtle.",
+		section = geOverlaySection,
+		position = 21
+	)
+	default Color lastFillColour()
+	{
+		return new Color(255, 212, 0, 200);
+	}
+
+	@ConfigItem(
 		keyName = "itemTabLivePrices",
 		name = "Live prices",
 		description = "Show the live buy/sell/margin/tax/profit/ROI section on the Item tab.",

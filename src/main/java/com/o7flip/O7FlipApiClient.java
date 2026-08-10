@@ -29,18 +29,19 @@ import com.google.gson.Gson;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
-import com.o7flip.model.AuthStatus;
-import com.o7flip.model.DecantItem;
-import com.o7flip.model.DumpItem;
-import com.o7flip.model.FlipItem;
-import com.o7flip.model.DipItem;
-import com.o7flip.model.ItemInsights;
-import com.o7flip.model.OptimizeResult;
-import com.o7flip.model.RecommendedPrices;
-import com.o7flip.model.RepriceResult;
-import com.o7flip.model.SearchResultItem;
-import com.o7flip.model.TrackerStats;
-import com.o7flip.model.TradeRecord;
+import com.o7flip.model.Models;
+import com.o7flip.model.Models.AuthStatus;
+import com.o7flip.model.Models.DecantItem;
+import com.o7flip.model.Models.DumpItem;
+import com.o7flip.model.Models.FlipItem;
+import com.o7flip.model.Models.DipItem;
+import com.o7flip.model.Models.ItemInsights;
+import com.o7flip.model.Models.OptimizeResult;
+import com.o7flip.model.Models.RecommendedPrices;
+import com.o7flip.model.Models.RepriceResult;
+import com.o7flip.model.Models.SearchResultItem;
+import com.o7flip.model.Models.TrackerStats;
+import com.o7flip.model.Models.TradeRecord;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import okhttp3.Call;
@@ -706,6 +707,25 @@ public class O7FlipApiClient
 		});
 	}
 
+	public void fetchFreezes(Consumer<List<Models.FreezeRow>> callback)
+	{
+		if (sanitizedApiKey() == null)
+		{
+			callback.accept(new ArrayList<>());
+			return;
+		}
+		fetchList(BASE_URL + "/v2/freezes", "fetchFreezes", "freezes", obj ->
+		{
+			Models.FreezeRow r = new Models.FreezeRow();
+			r.itemId       = getInt(obj, "item_id", 0);
+			r.frozenBuy    = getLong(obj, "frozen_buy", 0L);
+			r.frozenSell   = getLong(obj, "frozen_sell", 0L);
+			r.frozenProfit = getLong(obj, "frozen_profit", 0L);
+			r.frozenAt     = getStringOrNull(obj, "frozen_at");
+			return r;
+		}, callback);
+	}
+
 	public void postUnfreeze(int itemId, Consumer<Boolean> callback)
 	{
 		String key = sanitizedApiKey();
@@ -975,6 +995,9 @@ public class O7FlipApiClient
 			ItemInsights.Frozen f = new ItemInsights.Frozen();
 			f.buy      = getLong(fz, "buy",  0L);
 			f.sell     = getLong(fz, "sell", 0L);
+			f.frozenAt = getStringOrNull(fz, "frozen_at");
+			f.expired  = getBool(fz, "expired", false);
+			f.profit   = getLong(fz, "frozen_profit", 0L);
 			out.frozen = f;
 		}
 
@@ -1520,7 +1543,7 @@ public class O7FlipApiClient
 		al.belowWealthThreshold  = getBoolOrNull(a, "below_wealth_threshold");
 		parseSlotFills(a, "buys",  al.buys);
 		parseSlotFills(a, "sells", al.sells);
-		al.state                 = com.o7flip.model.SlotState.fromWire(getString(a, "state", "pending"));
+		al.state                 = com.o7flip.model.Models.SlotState.fromWire(getString(a, "state", "pending"));
 		al.partial               = getBool(a, "partial", false);
 		al.sellListed            = getBool(a, "sell_listed", false);
 		al.reservedGp            = getLong(a, "reserved_gp", 0);
@@ -1635,7 +1658,7 @@ public class O7FlipApiClient
 		}
 	}
 
-	public void fetchActiveSession(Consumer<com.o7flip.model.OptimizerSession> callback)
+	public void fetchActiveSession(Consumer<com.o7flip.model.Models.OptimizerSession> callback)
 	{
 		String key = sanitizedApiKey();
 		if (key == null) { callback.accept(null); return; }
@@ -1674,7 +1697,7 @@ public class O7FlipApiClient
 						return;
 					}
 					String json = response.body().string();
-					com.o7flip.model.OptimizerSession session = parseSession(json);
+					com.o7flip.model.Models.OptimizerSession session = parseSession(json);
 					callback.accept(session);
 				}
 				finally { response.close(); }
@@ -1682,7 +1705,7 @@ public class O7FlipApiClient
 		});
 	}
 
-	public void postActiveSession(com.o7flip.model.OptimizerSession session, Consumer<Boolean> onComplete)
+	public void postActiveSession(com.o7flip.model.Models.OptimizerSession session, Consumer<Boolean> onComplete)
 	{
 		String key = sanitizedApiKey();
 		if (key == null) { if (onComplete != null) onComplete.accept(false); return; }
@@ -1720,9 +1743,9 @@ public class O7FlipApiClient
 		});
 	}
 
-	private com.o7flip.model.OptimizerSession parseSession(String json)
+	private com.o7flip.model.Models.OptimizerSession parseSession(String json)
 	{
-		com.o7flip.model.OptimizerSession s = new com.o7flip.model.OptimizerSession();
+		com.o7flip.model.Models.OptimizerSession s = new com.o7flip.model.Models.OptimizerSession();
 		try
 		{
 			JsonObject root = gson.fromJson(json, JsonObject.class);
@@ -1776,7 +1799,7 @@ public class O7FlipApiClient
 		return s;
 	}
 
-	private String sessionToJson(com.o7flip.model.OptimizerSession session)
+	private String sessionToJson(com.o7flip.model.Models.OptimizerSession session)
 	{
 		JsonObject body = new JsonObject();
 		JsonObject inputs = new JsonObject();
@@ -1859,11 +1882,11 @@ public class O7FlipApiClient
 		return gson.toJson(body);
 	}
 
-	private JsonArray fillsToJson(java.util.List<com.o7flip.model.SlotFill> fills)
+	private JsonArray fillsToJson(java.util.List<com.o7flip.model.Models.SlotFill> fills)
 	{
 		JsonArray arr = new JsonArray();
 		if (fills == null) return arr;
-		for (com.o7flip.model.SlotFill f : fills)
+		for (com.o7flip.model.Models.SlotFill f : fills)
 		{
 			if (f == null) continue;
 			JsonObject o = new JsonObject();
@@ -1875,7 +1898,7 @@ public class O7FlipApiClient
 		return arr;
 	}
 
-	public void fetchCompletedPositions(Consumer<List<com.o7flip.model.CompletedPosition>> callback)
+	public void fetchCompletedPositions(Consumer<List<com.o7flip.model.Models.CompletedPosition>> callback)
 	{
 		String key = sanitizedApiKey();
 		if (key == null) { callback.accept(null); return; }
@@ -1920,8 +1943,8 @@ public class O7FlipApiClient
 		});
 	}
 
-	public void postCompletedPosition(com.o7flip.model.CompletedPosition cp,
-	                                  Consumer<List<com.o7flip.model.CompletedPosition>> callback)
+	public void postCompletedPosition(com.o7flip.model.Models.CompletedPosition cp,
+	                                  Consumer<List<com.o7flip.model.Models.CompletedPosition>> callback)
 	{
 		String key = sanitizedApiKey();
 		if (key == null || cp == null) { if (callback != null) callback.accept(null); return; }
@@ -1962,9 +1985,9 @@ public class O7FlipApiClient
 		});
 	}
 
-	private List<com.o7flip.model.CompletedPosition> parseCompletedPositions(String json)
+	private List<com.o7flip.model.Models.CompletedPosition> parseCompletedPositions(String json)
 	{
-		List<com.o7flip.model.CompletedPosition> out = new ArrayList<>();
+		List<com.o7flip.model.Models.CompletedPosition> out = new ArrayList<>();
 		try
 		{
 			JsonObject root = gson.fromJson(json, JsonObject.class);
@@ -1978,7 +2001,7 @@ public class O7FlipApiClient
 				try
 				{
 					JsonObject o = arr.get(i).getAsJsonObject();
-					com.o7flip.model.CompletedPosition cp = new com.o7flip.model.CompletedPosition();
+					com.o7flip.model.Models.CompletedPosition cp = new com.o7flip.model.Models.CompletedPosition();
 					cp.itemId    = getInt(o, "item_id", 0);
 					cp.name      = getString(o, "name", "Unknown");
 					cp.qty       = getInt(o, "qty", 0);
@@ -2001,7 +2024,7 @@ public class O7FlipApiClient
 		return out;
 	}
 
-	private JsonObject completedPositionToJson(com.o7flip.model.CompletedPosition cp)
+	private JsonObject completedPositionToJson(com.o7flip.model.Models.CompletedPosition cp)
 	{
 		JsonObject o = new JsonObject();
 		o.addProperty("item_id",   cp.itemId);
@@ -2409,7 +2432,7 @@ public class O7FlipApiClient
 		return out;
 	}
 
-	private void parseSlotFills(JsonObject obj, String key, List<com.o7flip.model.SlotFill> target)
+	private void parseSlotFills(JsonObject obj, String key, List<com.o7flip.model.Models.SlotFill> target)
 	{
 		if (obj == null || !obj.has(key) || obj.get(key).isJsonNull()) return;
 		JsonElement el = obj.get(key);
@@ -2420,7 +2443,7 @@ public class O7FlipApiClient
 			try
 			{
 				JsonObject f = arr.get(i).getAsJsonObject();
-				com.o7flip.model.SlotFill fill = new com.o7flip.model.SlotFill();
+				com.o7flip.model.Models.SlotFill fill = new com.o7flip.model.Models.SlotFill();
 				fill.qty       = getInt(f,    "qty",        0);
 				fill.priceEach = getLong(f,   "price_each", 0);
 				fill.tradedAt  = getString(f, "traded_at",  "");

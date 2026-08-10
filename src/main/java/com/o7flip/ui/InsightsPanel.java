@@ -26,8 +26,8 @@ package com.o7flip.ui;
 
 import com.o7flip.O7FlipConfig;
 import com.o7flip.O7FlipPlugin;
-import com.o7flip.model.FlipItem;
-import com.o7flip.model.ItemInsights;
+import com.o7flip.model.Models.FlipItem;
+import com.o7flip.model.Models.ItemInsights;
 import com.o7flip.util.Fonts;
 import net.runelite.client.game.ItemManager;
 import net.runelite.client.ui.ColorScheme;
@@ -811,7 +811,10 @@ public class InsightsPanel extends JPanel
 		if (locked && frozenBuy != null && frozenBuy > 0 && frozenSell != null && frozenSell > 0)
 		{
 			JPanel panel = sectionPanel("07Flip recommended (locked)");
-			long fProfit = frozenSell - com.o7flip.util.ProfitCalculator.geTaxFor(ins.itemId, frozenSell, 1) - frozenBuy;
+			Long serverProfit = plugin.getFrozenProfit(ins.itemId);
+			long fProfit = serverProfit != null
+				? serverProfit
+				: frozenSell - com.o7flip.util.ProfitCalculator.geTaxFor(ins.itemId, frozenSell, 1) - frozenBuy;
 			panel.add(rowGp("Buy",    frozenBuy,  "frozen", FROZEN_COL));
 			panel.add(rowGp("Sell",   frozenSell, "frozen", FROZEN_COL));
 			panel.add(rowGp("Profit", fProfit,    null,     margingColor(fProfit)));

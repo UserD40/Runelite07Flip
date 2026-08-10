@@ -24,8 +24,8 @@
  */
 package com.o7flip;
 
-import com.o7flip.model.OptimizeResult.Allocation;
-import com.o7flip.model.SlotState;
+import com.o7flip.model.Models.OptimizeResult.Allocation;
+import com.o7flip.model.Models.SlotState;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.Set;

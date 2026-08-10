@@ -25,8 +25,8 @@
 package com.o7flip.ui;
 
 import com.o7flip.O7FlipPlugin;
-import com.o7flip.model.OptimizeResult;
-import com.o7flip.model.SlotState;
+import com.o7flip.model.Models.OptimizeResult;
+import com.o7flip.model.Models.SlotState;
 import com.o7flip.util.Fonts;
 import net.runelite.client.game.ItemManager;
 import net.runelite.client.ui.ColorScheme;
@@ -392,11 +392,11 @@ public class OptimizerAllocationCard extends JPanel
 		return chip;
 	}
 
-	private static int sumQty(java.util.List<com.o7flip.model.SlotFill> fills)
+	private static int sumQty(java.util.List<com.o7flip.model.Models.SlotFill> fills)
 	{
 		if (fills == null) return 0;
 		int total = 0;
-		for (com.o7flip.model.SlotFill f : fills)
+		for (com.o7flip.model.Models.SlotFill f : fills)
 		{
 			if (f != null) total += f.qty;
 		}

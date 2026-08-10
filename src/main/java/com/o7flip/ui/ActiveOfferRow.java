@@ -24,15 +24,15 @@
  */
 package com.o7flip.ui;
 
+import com.o7flip.O7FlipConfig;
 import com.o7flip.O7FlipPlugin;
-import com.o7flip.model.ActiveOfferSnapshot;
+import com.o7flip.model.Models.ActiveOfferSnapshot;
 import com.o7flip.util.Fonts;
 import net.runelite.client.game.ItemManager;
 import net.runelite.client.ui.ColorScheme;
 import javax.swing.BoxLayout;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
-import javax.swing.SwingConstants;
 import javax.swing.border.EmptyBorder;
 import java.awt.BorderLayout;
 import java.awt.Color;
@@ -52,6 +52,7 @@ public class ActiveOfferRow extends JPanel
 	private final ActiveOfferSnapshot offer;
 	private final O7FlipPlugin plugin;
 	private final Color baseBg;
+	private final JLabel captionLabel;
 	private int lastTier = -1;
 
 	public ActiveOfferRow(ActiveOfferSnapshot offer, ItemManager itemManager, boolean odd, O7FlipPlugin plugin)
@@ -87,12 +88,11 @@ public class ActiveOfferRow extends JPanel
 		ProgressBar bar = new ProgressBar(offer.quantitySold, offer.totalQuantity, barCol);
 		bar.setAlignmentX(Component.LEFT_ALIGNMENT);
 
-		JLabel qtyLabel = new JLabel(offer.quantitySold + " / " + offer.totalQuantity, SwingConstants.RIGHT);
-		qtyLabel.setFont(Fonts.SM_BOLD);
-		qtyLabel.setForeground(fullyFilled ? SELL_COL : Color.LIGHT_GRAY);
-		String fullCounter = offer.totalQuantity + " / " + offer.totalQuantity;
-		int qtyW = qtyLabel.getFontMetrics(Fonts.SM_BOLD).stringWidth(fullCounter) + 2;
-		qtyLabel.setPreferredSize(new Dimension(qtyW, qtyLabel.getPreferredSize().height));
+		captionLabel = new JLabel();
+		captionLabel.setFont(Fonts.SM_BOLD);
+		captionLabel.setForeground(fullyFilled ? SELL_COL : Color.LIGHT_GRAY);
+		captionLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
+		captionLabel.setBorder(new EmptyBorder(4, 0, 0, 0));
 
 		JPanel textCol = new JPanel();
 		textCol.setLayout(new BoxLayout(textCol, BoxLayout.Y_AXIS));
@@ -103,14 +103,46 @@ public class ActiveOfferRow extends JPanel
 		textCol.add(typeLabel);
 		textCol.add(javax.swing.Box.createVerticalStrut(4));
 		textCol.add(bar);
+		textCol.add(captionLabel);
 
 		add(iconLabel, BorderLayout.WEST);
 		add(textCol,   BorderLayout.CENTER);
-		add(qtyLabel,  BorderLayout.EAST);
 
 		ClickRouter.attachInsightsOnly(this, plugin, offer.itemId, offer.name);
 
+		refreshCaption();
+	}
+
+	public void refreshCaption()
+	{
+		O7FlipConfig cfg = plugin != null ? plugin.getConfig() : null;
+		StringBuilder sb = new StringBuilder();
+		if (cfg == null || cfg.activeFillCounter())
+		{
+			sb.append(offer.quantitySold).append('/').append(offer.totalQuantity);
+		}
+		String age = (cfg == null || cfg.activeLastFillAge()) ? lastFillText() : null;
+		if (age != null)
+		{
+			if (sb.length() > 0)
+			{
+				sb.append(" · ");
+			}
+			sb.append(age);
+		}
+		captionLabel.setText(sb.toString());
+		captionLabel.setVisible(sb.length() > 0);
 		setMaximumSize(new Dimension(Integer.MAX_VALUE, getPreferredSize().height));
+	}
+
+	private String lastFillText()
+	{
+		if (plugin == null || offer.quantitySold <= 0)
+		{
+			return null;
+		}
+		String age = plugin.offerLastFillText(offer.slot);
+		return age == null ? null : (offer.isBuy() ? "Last buy: " : "Last sale: ") + age;
 	}
 
 	@Override
@@ -141,10 +173,10 @@ public class ActiveOfferRow extends JPanel
 		sb.append(verdictText(lastTier, isBuy)).append("</b><br>");
 		sb.append("Your ").append(isBuy ? "buy" : "sell").append(": ")
 			.append(FlipItemPanel.formatGp(offer.price)).append(" gp");
-		com.o7flip.model.ItemInsights ins = plugin.getOverlayInsights(offer.itemId);
+		com.o7flip.model.Models.ItemInsights ins = plugin.getOverlayInsights(offer.itemId);
 		if (ins != null && ins.current != null)
 		{
-			com.o7flip.model.ItemInsights.Current c = ins.current;
+			com.o7flip.model.Models.ItemInsights.Current c = ins.current;
 			if (c.buyPrice > 0)  sb.append("<br>Live buy: ").append(FlipItemPanel.formatGp(c.buyPrice)).append(" gp");
 			if (c.sellPrice > 0) sb.append("<br>Live sell: ").append(FlipItemPanel.formatGp(c.sellPrice)).append(" gp");
 		}

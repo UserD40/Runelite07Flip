@@ -24,7 +24,7 @@
  */
 package com.o7flip;
 
-import com.o7flip.model.TradeRecord;
+import com.o7flip.model.Models.TradeRecord;
 import org.junit.Test;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;

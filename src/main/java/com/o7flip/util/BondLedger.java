@@ -24,7 +24,7 @@
  */
 package com.o7flip.util;
 
-import com.o7flip.model.TradeRecord;
+import com.o7flip.model.Models.TradeRecord;
 import java.util.List;
 
 public final class BondLedger

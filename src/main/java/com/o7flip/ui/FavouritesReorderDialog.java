@@ -24,7 +24,7 @@
  */
 package com.o7flip.ui;
 
-import com.o7flip.model.FlipItem;
+import com.o7flip.model.Models.FlipItem;
 import com.o7flip.util.Fonts;
 import java.awt.BorderLayout;
 import java.awt.Color;
