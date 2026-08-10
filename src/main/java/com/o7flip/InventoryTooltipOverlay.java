@@ -60,6 +60,10 @@ public class InventoryTooltipOverlay extends WidgetItemOverlay
 	@Override
 	public void renderItemOverlay(java.awt.Graphics2D graphics, int itemId, WidgetItem widgetItem)
 	{
+		if (!plugin.getConfig().showInGameOverlays())
+		{
+			return;
+		}
 		if (!plugin.getConfig().showInventoryTooltip())
 		{
 			return;

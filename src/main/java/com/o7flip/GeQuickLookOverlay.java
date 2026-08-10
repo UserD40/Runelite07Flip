@@ -82,6 +82,10 @@ public class GeQuickLookOverlay extends Overlay
 	@Override
 	public Dimension render(Graphics2D graphics)
 	{
+		if (!config.showInGameOverlays())
+		{
+			return null;
+		}
 		final boolean wantQuickLook = config.showGeQuickLook();
 		final boolean wantTimer = config.showGeSlotTimer();
 		final boolean wantFill = config.activeFillCounter() || config.activeLastFillAge();

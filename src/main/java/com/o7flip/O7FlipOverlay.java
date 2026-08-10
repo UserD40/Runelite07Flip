@@ -60,6 +60,11 @@ public class O7FlipOverlay extends Overlay
 	@Override
 	public Dimension render(Graphics2D graphics)
 	{
+		if (!plugin.getConfig().showInGameOverlays())
+		{
+			return null;
+		}
+
 		if (plugin.hasOverlayQueue())
 		{
 			renderEmptySlotHints(graphics);

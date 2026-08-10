@@ -72,6 +72,11 @@ public class GeChatPriceOverlay extends Overlay implements MouseListener
 	{
 		zones.clear();
 
+		if (!config.showInGameOverlays())
+		{
+			return null;
+		}
+
 		if (!config.showGeChatPrice())
 		{
 			return null;

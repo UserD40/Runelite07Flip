@@ -79,6 +79,10 @@ public class GpDropOverlay extends Overlay
 	@Override
 	public Dimension render(Graphics2D graphics)
 	{
+		if (!config.showInGameOverlays())
+		{
+			return null;
+		}
 		boolean preview = config.gpDropPreview();
 		if (drops.isEmpty() && !preview)
 		{
