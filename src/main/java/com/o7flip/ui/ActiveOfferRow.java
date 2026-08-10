@@ -47,7 +47,8 @@ public class ActiveOfferRow extends JPanel
 	private static final Color ODD_BG    = new Color(0x272727);
 	private static final Color BUY_COL   = new Color(0x5B9BD5);
 	private static final Color SELL_COL  = new Color(0x00C27A);
-	private static final Color BAR_TRACK = new Color(0x3A3A3A);
+	private static final Color BAR_TRACK  = new Color(0x141414);
+	private static final Color BAR_BORDER = new Color(0x2E2E2E);
 
 	private final ActiveOfferSnapshot offer;
 	private final O7FlipPlugin plugin;
@@ -202,7 +203,7 @@ public class ActiveOfferRow extends JPanel
 
 	private static class ProgressBar extends JPanel
 	{
-		private static final int HEIGHT = 11;
+		private static final int HEIGHT = 13;
 		private static final int PAD = 5;
 		private static final java.awt.Font BAR_FONT = Fonts.SM_BOLD.deriveFont(10f);
 
@@ -223,6 +224,14 @@ public class ActiveOfferRow extends JPanel
 			setPreferredSize(new Dimension(0, HEIGHT));
 			setMaximumSize(new Dimension(Integer.MAX_VALUE, HEIGHT));
 			setMinimumSize(new Dimension(50, HEIGHT));
+		}
+
+		private static Color deepen(Color c)
+		{
+			return new Color(
+				(int) Math.round(c.getRed()   * 0.55),
+				(int) Math.round(c.getGreen() * 0.55),
+				(int) Math.round(c.getBlue()  * 0.55));
 		}
 
 		void setLabels(String left, String right)
@@ -253,10 +262,15 @@ public class ActiveOfferRow extends JPanel
 					int fillW = (int) Math.round(frac * w);
 					if (fillW > 0)
 					{
-						g2.setColor(colour);
-						g2.fillRoundRect(0, 0, fillW, h, radius, radius);
+						g2.setClip(new java.awt.geom.RoundRectangle2D.Float(0, 0, w, h, radius, radius));
+						g2.setColor(deepen(colour));
+						g2.fillRect(0, 0, fillW, h);
+						g2.setClip(null);
 					}
 				}
+
+				g2.setColor(BAR_BORDER);
+				g2.drawRoundRect(0, 0, w - 1, h - 1, radius, radius);
 
 				g2.setFont(BAR_FONT);
 				java.awt.FontMetrics fm = g2.getFontMetrics();
