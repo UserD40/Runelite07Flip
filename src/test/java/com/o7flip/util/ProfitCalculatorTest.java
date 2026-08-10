@@ -53,6 +53,16 @@ public class ProfitCalculatorTest
 	}
 
 	@Test
+	public void geTaxFor_exemptItemsAreUntaxed()
+	{
+		assertEquals(0L, ProfitCalculator.geTaxFor(2552, 5_000L, 1));
+		assertEquals(0L, ProfitCalculator.geTaxFor(8013, 10_000L, 3));
+		assertEquals(0L, ProfitCalculator.geTaxFor(379, 500L, 1));
+		assertEquals(0L, ProfitCalculator.geTaxFor(952, 200L, 1));
+		assertEquals(100L, ProfitCalculator.geTaxFor(4151, 5_000L, 1));
+	}
+
+	@Test
 	public void emptyList_returnsEmptyResult()
 	{
 		ProfitCalculator.Result r = ProfitCalculator.compute(Collections.emptyList());
