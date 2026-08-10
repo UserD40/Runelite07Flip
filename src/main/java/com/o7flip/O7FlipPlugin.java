@@ -1509,6 +1509,10 @@ public class O7FlipPlugin extends Plugin
 
 	private void setPriceInput(long price)
 	{
+		if (panel == null || !panel.isPremium())
+		{
+			return;
+		}
 		Widget input = client.getWidget(ComponentID.CHATBOX_FULL_INPUT);
 		if (input == null)
 		{

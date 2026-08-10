@@ -103,6 +103,29 @@ public class O7FlipPanel extends PluginPanel
 	private static final Color  GREEN        = new Color(0x00C27A);
 	private static final int    PAGE_SIZE    = 10;
 	private static final int    FREE_ROWS    = 5;
+	private static final int    FREE_TRADE_ROWS  = 1;
+	private static final int    FREE_SEARCH_ROWS = 3;
+
+	private static final String PITCH_PLAN =
+		"Let 07Flip build a flipping plan that fits you. It picks the items, splits your capital across "
+		+ "your GE slots, and follows every buy and sell through to a finished flip.";
+	private static final String PITCH_ITEM =
+		"Get the full picture on any item: live buy and sell prices, 07Flip's recommended entry and exit, "
+		+ "price history, volume, and the signals behind the score.";
+	private static final String PITCH_TRADES =
+		"See how your flipping is really going. Profit today, best and worst flips, win rate, and your "
+		+ "full trade history kept in sync across every device.";
+	private static final String PITCH_SEARCH =
+		"Search every item in the game and get 07Flip's recommended buy and sell prices for each one.";
+	private static final String PITCH_DUMPS =
+		"Catch items being dumped below their usual price, with the score and history to tell a real "
+		+ "opportunity from a falling knife.";
+	private static final String PITCH_DIPS =
+		"Spot items trading under their recent range, ranked by how far they have fallen and how "
+		+ "reliably they bounce back.";
+	private static final String PITCH_DECANT =
+		"Turn potion decanting into steady profit. 07Flip works out which doses to buy and sell for "
+		+ "the best margin.";
 
 	private static final String[][] PRESETS = {
 		{"",                 "All Flips"},
@@ -1198,7 +1221,7 @@ public class O7FlipPanel extends PluginPanel
 
 		com.o7flip.util.ProfitCalculator.Result result = com.o7flip.util.ProfitCalculator.compute(allMyFlips);
 
-		if (myFlipsStatsPanel != null)
+		if (myFlipsStatsPanel != null && isPremium)
 		{
 			long activeBuyGp = 0L;
 			java.util.Map<Integer, Integer> qtyInActiveSells = new java.util.HashMap<>();
@@ -1267,9 +1290,39 @@ public class O7FlipPanel extends PluginPanel
 				break;
 		}
 
+		if (!isPremium)
+		{
+			trimToFreeTradeRows();
+			myFlipsListPanel.add(lockedCard("Trades", PITCH_TRADES));
+		}
+
 		myFlipsListPanel.revalidate();
 		myFlipsListPanel.repaint();
 		updateActiveColorTimer();
+	}
+
+	private void trimToFreeTradeRows()
+	{
+		int rows = 0;
+		java.util.List<Component> drop = new ArrayList<>();
+		for (Component c : myFlipsListPanel.getComponents())
+		{
+			boolean isRow = c instanceof com.o7flip.ui.ActiveOfferRow
+				|| c instanceof com.o7flip.ui.TradeRecordPanel
+				|| c instanceof com.o7flip.ui.CompletedFlipRow;
+			if (isRow)
+			{
+				rows++;
+			}
+			if (rows > FREE_TRADE_ROWS)
+			{
+				drop.add(c);
+			}
+		}
+		for (Component c : drop)
+		{
+			myFlipsListPanel.remove(c);
+		}
 	}
 
 	private void updateActiveColorTimer()
@@ -1604,10 +1657,15 @@ public class O7FlipPanel extends PluginPanel
 		}
 		else
 		{
-			for (int i = 0; i < items.size(); i++)
+			int shown = isPremium ? items.size() : Math.min(FREE_SEARCH_ROWS, items.size());
+			for (int i = 0; i < shown; i++)
 			{
 				searchResultsPanel.add(new SearchResultPanel(items.get(i), itemManager, i % 2 != 0, plugin));
 				searchResultsPanel.add(sep());
+			}
+			if (shown < items.size())
+			{
+				searchResultsPanel.add(lockedCard("Search", PITCH_SEARCH));
 			}
 		}
 
@@ -1657,6 +1715,16 @@ public class O7FlipPanel extends PluginPanel
 		JPanel p = new JPanel(new BorderLayout());
 		p.setBackground(ColorScheme.DARK_GRAY_COLOR);
 		renderLocked(p, title, sub);
+		return p;
+	}
+
+	private JPanel lockedCard(String title, String pitch)
+	{
+		JPanel p = new JPanel(new BorderLayout());
+		p.setBackground(ColorScheme.DARK_GRAY_COLOR);
+		p.setAlignmentX(Component.LEFT_ALIGNMENT);
+		renderLocked(p, title, pitch);
+		p.setMaximumSize(new Dimension(Integer.MAX_VALUE, p.getPreferredSize().height));
 		return p;
 	}
 
@@ -2260,11 +2328,11 @@ public class O7FlipPanel extends PluginPanel
 
 		if (!isPremium)
 		{
-			final String gate = "To view this feature you need to be a member and link your API key.";
-			dumpsContent     = buildPremiumGateTab("Dumps",     gate);
-			dipsContent      = buildPremiumGateTab("Dips",      gate);
-			decantContent    = buildPremiumGateTab("Decant",    gate);
-			planContent      = buildPremiumGateTab("Plan",      gate);
+			dumpsContent     = buildPremiumGateTab("Dumps",  PITCH_DUMPS);
+			dipsContent      = buildPremiumGateTab("Dips",   PITCH_DIPS);
+			decantContent    = buildPremiumGateTab("Decant", PITCH_DECANT);
+			planContent      = buildPremiumGateTab("Plan",   PITCH_PLAN);
+			insightsContent  = buildPremiumGateTab("Item",   PITCH_ITEM);
 		}
 
 		JPanel otherContent      = buildOtherTab(dipsContent,
