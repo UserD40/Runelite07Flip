@@ -201,6 +201,8 @@ public class O7FlipPlugin extends Plugin
 		= java.util.concurrent.ConcurrentHashMap.newKeySet();
 	private static final long REPRICE_TTL_MS = 30_000L;
 
+	private static final long FREEZE_TTL_MS = 12L * 60L * 60L * 1000L;
+
 	public volatile Map<Integer, com.o7flip.model.Models.ActiveOfferSnapshot> activeOffers = Collections.emptyMap();
 
 	private final Map<Integer, GrandExchangeOfferState> prevSlotStates = new HashMap<>();
@@ -449,7 +451,16 @@ public class O7FlipPlugin extends Plugin
 	private void restoreFreezeFromServer(int itemId, com.o7flip.model.Models.ItemInsights ins)
 	{
 		com.o7flip.model.Models.ItemInsights.Frozen f = ins != null ? ins.frozen : null;
-		if (f == null || f.expired || f.sell <= 0 || frozenSellByItemId.containsKey(itemId))
+		if (f == null)
+		{
+			return;
+		}
+		if (f.expired)
+		{
+			dropFreeze(itemId);
+			return;
+		}
+		if (f.sell <= 0 || frozenSellByItemId.containsKey(itemId))
 		{
 			return;
 		}
@@ -534,7 +545,7 @@ public class O7FlipPlugin extends Plugin
 
 	public boolean isPriceLocked(int itemId)
 	{
-		return panel != null && panel.isPremium() && frozenSellByItemId.get(itemId) != null;
+		return panel != null && panel.isPremium() && getFrozenSell(itemId) != null;
 	}
 
 	public void lockPrice(int itemId, Long recBuy, Long recSell)
@@ -740,19 +751,19 @@ public class O7FlipPlugin extends Plugin
 		{
 			return null;
 		}
-		long staleAfterMs = (long) config.frozenSellStaleAfterHours() * 60L * 60L * 1000L;
-		if (System.currentTimeMillis() - f.frozenAtMillis <= staleAfterMs)
+		if (System.currentTimeMillis() - f.frozenAtMillis > FREEZE_TTL_MS)
 		{
-			return f.price;
+			dropFreeze(itemId);
+			return null;
 		}
-		Long live = lookupLiveRecSell(itemId);
-		if (live == null || live <= 0)
-		{
-			return f.price;
-		}
-		FrozenSell refreshed = new FrozenSell(live, System.currentTimeMillis());
-		frozenSellByItemId.put(itemId, refreshed);
-		return live;
+		return f.price;
+	}
+
+	private void dropFreeze(int itemId)
+	{
+		frozenSellByItemId.remove(itemId);
+		frozenBuyByItemId.remove(itemId);
+		frozenProfitByItemId.remove(itemId);
 	}
 
 	public long ladderPrice(int itemId, boolean sell, O7FlipConfig.GePriceDefault which)
@@ -828,16 +839,6 @@ public class O7FlipPlugin extends Plugin
 			return cur;
 		}
 		return getOverlayInsights(itemId);
-	}
-
-	private Long lookupLiveRecSell(int itemId)
-	{
-		com.o7flip.model.Models.ItemInsights ins = recInsightsFor(itemId);
-		if (ins != null && ins.current != null && ins.current.recSell != null && ins.current.recSell > 0)
-		{
-			return ins.current.recSell;
-		}
-		return null;
 	}
 
 	long computeAutoBuyPrice(int itemId)

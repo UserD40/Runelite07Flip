@@ -544,23 +544,6 @@ public interface O7FlipConfig extends Config
 	}
 
 	@ConfigItem(
-		keyName = "frozenSellStaleAfterHours",
-		name = "Frozen sell expiry (hours)",
-		description = "<html>When you buy an item, the recommended sell price at that moment is "
-			+ "<b>frozen</b> so the GE setup overlay keeps suggesting that target even if the market dips. "
-			+ "If the item stays unsold for longer than this many hours, the frozen price is replaced "
-			+ "with the live 07flip recommended price so you're not chasing a stale target.<br>"
-			+ "Set higher to hold targets longer, lower to follow the market more aggressively.</html>",
-		section = geSection,
-		position = 2
-	)
-	@Range(min = 1, max = 48)
-	default int frozenSellStaleAfterHours()
-	{
-		return 3;
-	}
-
-	@ConfigItem(
 		keyName = "autoOpenItemTab",
 		name = "Open Item tab on offer setup",
 		description = "<html>When you pick an item on the GE offer setup screen — buying after a search, or "
