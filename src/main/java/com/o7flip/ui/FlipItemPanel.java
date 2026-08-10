@@ -165,8 +165,6 @@ public class FlipItemPanel extends JPanel
 		sellTip.append("<font color='#666666'>Right-click anywhere to queue a Buy on the GE · Click for insights · Shift+click or double-click to open on 07flip.com</font></html>");
 		sellLabel.setToolTipText(sellTip.toString());
 		sellLabel.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
-		final long sellTarget = (showRecPrices && flip.recSellPrice != null && flip.recSellPrice > 0)
-			? flip.recSellPrice : flip.buyPrice;
 
 		JLabel profitLabel;
 		StringBuilder tip = new StringBuilder("<html><b>");
@@ -207,7 +205,8 @@ public class FlipItemPanel extends JPanel
 				+ profitSign + formatGpCompact(flip.profit) + "</font></html>");
 			profitLabel.setForeground(flip.profit >= 0 ? GREEN : new Color(0xE85050));
 
-			tip.append("Market margin: <font color='#00C27A'>+").append(formatGp(flip.profit)).append("</font>");
+			tip.append("Market margin: <font color='").append(profitColor).append("'>")
+				.append(profitSign).append(formatGp(flip.profit)).append("</font>");
 			tip.append("  (").append(String.format("%.2f", flip.roiPct)).append("% ROI)<br>");
 			if (flip.recProfit != null && flip.recProfit > 0)
 			{

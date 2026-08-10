@@ -39,7 +39,6 @@ public final class ProfitCalculator
 	public static final int BOND_ITEM_ID = 13190;
 
 	private static final double GE_TAX_RATE = 0.02;
-	private static final long   GE_TAX_MIN_PRICE_PER_ITEM = 100L;
 	private static final long   GE_TAX_CAP_PER_ITEM = 5_000_000L;
 
 	private ProfitCalculator()
@@ -53,10 +52,6 @@ public final class ProfitCalculator
 			return 0L;
 		}
 		long pricePerItem = grossSellTotal / quantity;
-		if (pricePerItem < GE_TAX_MIN_PRICE_PER_ITEM)
-		{
-			return 0L;
-		}
 		long taxPerItem = (long) Math.floor(pricePerItem * GE_TAX_RATE);
 		if (taxPerItem > GE_TAX_CAP_PER_ITEM)
 		{

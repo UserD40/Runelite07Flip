@@ -36,6 +36,23 @@ import static org.junit.Assert.assertTrue;
 public class ProfitCalculatorTest
 {
 	@Test
+	public void geTaxFor_thresholdIs50NotOneHundred()
+	{
+		assertEquals(0L, ProfitCalculator.geTaxFor(4151, 49L, 1));
+		assertEquals(1L, ProfitCalculator.geTaxFor(4151, 50L, 1));
+		assertEquals(1L, ProfitCalculator.geTaxFor(4151, 99L, 1));
+		assertEquals(2L, ProfitCalculator.geTaxFor(4151, 100L, 1));
+	}
+
+	@Test
+	public void geTaxFor_capsPerItemAndSkipsBonds()
+	{
+		assertEquals(5_000_000L, ProfitCalculator.geTaxFor(4151, 400_000_000L, 1));
+		assertEquals(10_000_000L, ProfitCalculator.geTaxFor(4151, 800_000_000L, 2));
+		assertEquals(0L, ProfitCalculator.geTaxFor(ProfitCalculator.BOND_ITEM_ID, 10_000_000L, 1));
+	}
+
+	@Test
 	public void emptyList_returnsEmptyResult()
 	{
 		ProfitCalculator.Result r = ProfitCalculator.compute(Collections.emptyList());
