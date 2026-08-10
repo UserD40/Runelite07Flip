@@ -47,8 +47,7 @@ public class ActiveOfferRow extends JPanel
 	private static final Color ODD_BG    = new Color(0x272727);
 	private static final Color BUY_COL   = new Color(0x5B9BD5);
 	private static final Color SELL_COL  = new Color(0x00C27A);
-	private static final Color BAR_TRACK  = new Color(0x141414);
-	private static final Color BAR_BORDER = new Color(0x2E2E2E);
+	private static final Color BAR_TRACK  = new Color(0x1F1F1F);
 
 	private final ActiveOfferSnapshot offer;
 	private final O7FlipPlugin plugin;
@@ -145,6 +144,7 @@ public class ActiveOfferRow extends JPanel
 		}
 		g.setColor(fill);
 		g.fillRect(0, 0, getWidth(), getHeight());
+		bar.setTrackBase(fill);
 	}
 
 	@Override
@@ -211,6 +211,7 @@ public class ActiveOfferRow extends JPanel
 		private final int total;
 		private final Color colour;
 		private final Color textColour;
+		private Color trackBase = BAR_TRACK;
 		private String left = "";
 		private String right = "";
 
@@ -226,12 +227,17 @@ public class ActiveOfferRow extends JPanel
 			setMinimumSize(new Dimension(50, HEIGHT));
 		}
 
-		private static Color deepen(Color c)
+		void setTrackBase(Color c)
+		{
+			this.trackBase = c;
+		}
+
+		private static Color scale(Color c, double f)
 		{
 			return new Color(
-				(int) Math.round(c.getRed()   * 0.55),
-				(int) Math.round(c.getGreen() * 0.55),
-				(int) Math.round(c.getBlue()  * 0.55));
+				clampByte((int) Math.round(c.getRed()   * f)),
+				clampByte((int) Math.round(c.getGreen() * f)),
+				clampByte((int) Math.round(c.getBlue()  * f)));
 		}
 
 		void setLabels(String left, String right)
@@ -253,7 +259,7 @@ public class ActiveOfferRow extends JPanel
 				int h = getHeight();
 				int radius = h;
 
-				g2.setColor(BAR_TRACK);
+				g2.setColor(scale(trackBase, 0.62));
 				g2.fillRoundRect(0, 0, w, h, radius, radius);
 
 				if (total > 0 && filled > 0)
@@ -263,14 +269,12 @@ public class ActiveOfferRow extends JPanel
 					if (fillW > 0)
 					{
 						g2.setClip(new java.awt.geom.RoundRectangle2D.Float(0, 0, w, h, radius, radius));
-						g2.setColor(deepen(colour));
+						g2.setColor(scale(colour, 0.62));
 						g2.fillRect(0, 0, fillW, h);
 						g2.setClip(null);
 					}
 				}
 
-				g2.setColor(BAR_BORDER);
-				g2.drawRoundRect(0, 0, w - 1, h - 1, radius, radius);
 
 				g2.setFont(BAR_FONT);
 				java.awt.FontMetrics fm = g2.getFontMetrics();
