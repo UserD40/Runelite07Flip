@@ -303,7 +303,7 @@ public class GeQuickLookOverlay extends Overlay
 			return;
 		}
 
-		int y = bar.y + (bar.height + fm.getAscent()) / 2 - 1;
+		int y = bar.y + (bar.height + fm.getAscent() - fm.getDescent()) / 2;
 		if (panelRect != null && panelRect.intersects(bar))
 		{
 			return;

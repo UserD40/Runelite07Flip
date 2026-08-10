@@ -85,8 +85,9 @@ public class ActiveOfferRow extends JPanel
 		boolean fullyFilled = offer.totalQuantity > 0 && offer.quantitySold >= offer.totalQuantity;
 		Color barCol = fullyFilled ? SELL_COL : sideCol;
 
+		O7FlipConfig cfg = plugin != null ? plugin.getConfig() : null;
 		bar = new ProgressBar(offer.quantitySold, offer.totalQuantity, barCol,
-			fullyFilled ? SELL_COL : Color.LIGHT_GRAY);
+			cfg != null ? cfg.lastFillColour() : Color.LIGHT_GRAY);
 		bar.setAlignmentX(Component.LEFT_ALIGNMENT);
 
 		JPanel textCol = new JPanel();
@@ -201,8 +202,9 @@ public class ActiveOfferRow extends JPanel
 
 	private static class ProgressBar extends JPanel
 	{
-		private static final int HEIGHT = 15;
+		private static final int HEIGHT = 11;
 		private static final int PAD = 5;
+		private static final java.awt.Font BAR_FONT = Fonts.SM_BOLD.deriveFont(10f);
 
 		private final int filled;
 		private final int total;
@@ -256,7 +258,7 @@ public class ActiveOfferRow extends JPanel
 					}
 				}
 
-				g2.setFont(Fonts.SM_BOLD);
+				g2.setFont(BAR_FONT);
 				java.awt.FontMetrics fm = g2.getFontMetrics();
 				String tail = right;
 				if (!left.isEmpty() && !tail.isEmpty()

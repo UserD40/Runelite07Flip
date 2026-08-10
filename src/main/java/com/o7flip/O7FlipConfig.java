@@ -764,7 +764,7 @@ public interface O7FlipConfig extends Config
 		keyName = "lastFillColour",
 		name = "Progress bar text colour",
 		description = "Colour of the fill counter and time-since-last-buy/sale text drawn on the Grand Exchange "
-			+ "progress bar. Lower the opacity to keep it subtle.",
+			+ "offer progress bars and on the Trades tab rows. Lower the opacity to keep it subtle.",
 		section = geSlotsSection,
 		position = 11
 	)
