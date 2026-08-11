@@ -237,6 +237,8 @@ public class O7FlipPanel extends PluginPanel
 
 	public boolean isSignedIn() { return isSignedIn; }
 	public boolean isPremium()  { return isPremium;  }
+
+	public boolean isKnownFree() { return authChecked && !isPremium; }
 	private boolean authChecked = false;
 
 	@Override

@@ -287,7 +287,7 @@ public class O7FlipPlugin extends Plugin
 		setOverlayQueue(itemId, price, true);
 
 		final boolean premiumAtQueue = panel != null && panel.isPremium();
-		if (premiumAtQueue)
+		if (panel == null || !panel.isKnownFree())
 		{
 			freezeAtPlacement(itemId, price);
 		}
@@ -774,7 +774,7 @@ public class O7FlipPlugin extends Plugin
 		{
 			return -1L;
 		}
-		boolean premium = panel != null && panel.isPremium();
+		boolean premium = panel == null || !panel.isKnownFree();
 		long live = sell ? ins.current.sellPrice : ins.current.buyPrice;
 		Long rec = premium ? (sell ? ins.current.recSell : ins.current.recBuy) : null;
 		long base = (rec != null && rec > 0) ? rec : live;
@@ -799,7 +799,7 @@ public class O7FlipPlugin extends Plugin
 		{
 			return -1L;
 		}
-		if (panel != null && panel.isPremium() && config.geDefaultPrice() != O7FlipConfig.GePriceDefault.MARKET)
+		if ((panel == null || !panel.isKnownFree()) && config.geDefaultPrice() != O7FlipConfig.GePriceDefault.MARKET)
 		{
 			Long frozen = getFrozenSell(itemId);
 			if (frozen != null && frozen > candidate)
@@ -1509,8 +1509,9 @@ public class O7FlipPlugin extends Plugin
 
 	private void setPriceInput(long price)
 	{
-		if (panel == null || !panel.isPremium())
+		if (panel != null && panel.isKnownFree())
 		{
+			log.debug("[07Flip] price auto-fill skipped — free account");
 			return;
 		}
 		Widget input = client.getWidget(ComponentID.CHATBOX_FULL_INPUT);
@@ -2186,7 +2187,7 @@ public class O7FlipPlugin extends Plugin
 
 		if (state == GrandExchangeOfferState.BUYING
 			&& prevSlotStates.get(slot) != GrandExchangeOfferState.BUYING
-			&& panel != null && panel.isPremium()
+			&& (panel == null || !panel.isKnownFree())
 			&& !frozenSellByItemId.containsKey(offer.getItemId()))
 		{
 			freezeAtPlacement(offer.getItemId(), offer.getPrice());
@@ -2397,7 +2398,7 @@ public class O7FlipPlugin extends Plugin
 		{
 			getRecommendedPrices(offer.getItemId());
 			recordBuyForLimit(offer.getItemId(), deltaQty, timestamp);
-			if (panel != null && panel.isPremium() && !frozenSellByItemId.containsKey(offer.getItemId()))
+			if ((panel == null || !panel.isKnownFree()) && !frozenSellByItemId.containsKey(offer.getItemId()))
 			{
 				long paidEach = deltaQty > 0 ? deltaGp / deltaQty : offer.getPrice();
 				freezeAtPlacement(offer.getItemId(), paidEach);
