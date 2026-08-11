@@ -4193,6 +4193,25 @@ public class O7FlipPlugin extends Plugin
 
 	private volatile com.o7flip.model.Models.OptimizerSession activeSession;
 
+	public int planRemainingBuyQty(int itemId)
+	{
+		com.o7flip.model.Models.OptimizeResult.Allocation a = planAllocationFor(itemId);
+		if (a == null || a.qty <= 0)
+		{
+			return -1;
+		}
+		int bought = 0;
+		if (a.buys != null)
+		{
+			for (com.o7flip.model.Models.SlotFill f : a.buys)
+			{
+				if (f != null) bought += f.qty;
+			}
+		}
+		int remaining = a.qty - bought;
+		return remaining > 0 ? remaining : -1;
+	}
+
 	public com.o7flip.model.Models.OptimizeResult.Allocation planAllocationFor(int itemId)
 	{
 		com.o7flip.model.Models.OptimizerSession s = activeSession;

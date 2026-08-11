@@ -114,10 +114,18 @@ public class GeChatPriceOverlay extends Overlay implements MouseListener
 
 		if (!priceOpen)
 		{
+			int qtyTop = ib.y - 40 - 2 * chipH;
 			if (!sell && ins.buyLimit > 0)
 			{
 				drawPriceItem(graphics, fm, "Buy limit: ", FlipItemPanel.formatGp(ins.buyLimit), "",
-					ib.x + 4, ib.y - 40 - 2 * chipH, chipH, ins.buyLimit);
+					ib.x + 4, qtyTop, chipH, ins.buyLimit);
+				qtyTop += chipH;
+			}
+			int planQty = !sell ? plugin.planRemainingBuyQty(itemId) : -1;
+			if (planQty > 0)
+			{
+				drawPriceItem(graphics, fm, "Plan: ", FlipItemPanel.formatGp(planQty), "",
+					ib.x + 4, qtyTop, chipH, planQty);
 			}
 			return null;
 		}
