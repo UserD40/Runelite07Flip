@@ -203,7 +203,7 @@ public class ActiveOfferRow extends JPanel
 
 	private static class ProgressBar extends JPanel
 	{
-		private static final int HEIGHT = 13;
+		private static final int HEIGHT = 15;
 		private static final int PAD = 5;
 		private static final java.awt.Font BAR_FONT = Fonts.SM_BOLD.deriveFont(10f);
 
@@ -257,10 +257,9 @@ public class ActiveOfferRow extends JPanel
 				g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
 				int w = getWidth();
 				int h = getHeight();
-				int radius = h;
 
 				g2.setColor(scale(trackBase, 0.62));
-				g2.fillRoundRect(0, 0, w, h, radius, radius);
+				g2.fillRect(0, 0, w, h);
 
 				if (total > 0 && filled > 0)
 				{
@@ -268,10 +267,8 @@ public class ActiveOfferRow extends JPanel
 					int fillW = (int) Math.round(frac * w);
 					if (fillW > 0)
 					{
-						g2.setClip(new java.awt.geom.RoundRectangle2D.Float(0, 0, w, h, radius, radius));
 						g2.setColor(scale(colour, 0.62));
 						g2.fillRect(0, 0, fillW, h);
-						g2.setClip(null);
 					}
 				}
 
