@@ -92,6 +92,10 @@ public class GePriceOverlay extends Overlay
 	@Override
 	public Dimension render(Graphics2D graphics)
 	{
+		if (!config.showInGameOverlays())
+		{
+			return null;
+		}
 		if (!config.showGeOfferOverlay())
 		{
 			return null;

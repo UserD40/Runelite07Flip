@@ -51,37 +51,46 @@ public interface O7FlipConfig extends Config
 	String itemTabSection = "itemtab";
 
 	@ConfigSection(
-		name = "GE offers",
-		description = "Helpers for setting up buy and sell offers at the Grand Exchange.",
+		name = "Price entry",
+		description = "What happens when you set a price on the GE offer screen — auto-fill, the "
+			+ "'Enter price' highlight, and the price ladder drawn above the chatbox.",
 		position = 3
 	)
 	String geSection = "ge";
 
 	@ConfigSection(
 		name = "GE price overlay",
-		description = "The movable 07Flip overlay shown on the GE offer setup screen.",
+		description = "The movable 07Flip panel shown on the GE offer setup screen, and which rows it lists.",
 		position = 4
 	)
 	String geOverlaySection = "geoverlay";
 
 	@ConfigSection(
+		name = "GE offer slots",
+		description = "What 07Flip draws on the eight Grand Exchange offer boxes — Quick Look, the "
+			+ "time-on-sale timer, border colours, and the text on each offer's progress bar.",
+		position = 5
+	)
+	String geSlotsSection = "geslots";
+
+	@ConfigSection(
 		name = "Inventory",
 		description = "Helpers shown on items in your inventory.",
-		position = 5
+		position = 6
 	)
 	String inventorySection = "inventory";
 
 	@ConfigSection(
 		name = "GP drop animation",
 		description = "The fading +X gp / -X gp drop shown when a flip completes — position, font and colours.",
-		position = 6
+		position = 7
 	)
 	String gpDropSection = "gpdrop";
 
 	@ConfigSection(
 		name = "Trade tracker",
 		description = "Options for the local trade history and sharing it with 07flip.com.",
-		position = 7
+		position = 8
 	)
 	String trackerSection = "tracker";
 
@@ -115,6 +124,21 @@ public interface O7FlipConfig extends Config
 	enum CapitalMode
 	{
 		OFF, MANUAL
+	}
+
+	@ConfigItem(
+		keyName = "showInGameOverlays",
+		name = "Show 07Flip overlays in-game",
+		description = "<html>Master switch for everything 07Flip draws on the game screen — the GE price "
+			+ "overlay, offer-slot decorations, the chatbox price ladder, inventory tooltips and the GP drop.<br>"
+			+ "<b>Turn this off if another flipping plugin's overlay overlaps ours.</b> The sidebar panel "
+			+ "keeps working exactly as before.</html>",
+		section = generalSection,
+		position = 2
+	)
+	default boolean showInGameOverlays()
+	{
+		return true;
 	}
 
 	@ConfigItem(
@@ -278,7 +302,7 @@ public interface O7FlipConfig extends Config
 		name = "Highlight 'Enter price' button",
 		description = "Show the yellow highlight around the Enter price button after you right-click a flip in the panel.",
 		section = geSection,
-		position = 1
+		position = 2
 	)
 	default boolean showGePriceHint()
 	{
@@ -350,8 +374,8 @@ public interface O7FlipConfig extends Config
 		name = "Quick Look on offers",
 		description = "Colour-code each active GE slot by whether your price is competitive, and hover a slot for "
 			+ "a preview comparing your offer to 07Flip prices with what to set it to.",
-		section = geOverlaySection,
-		position = 5
+		section = geSlotsSection,
+		position = 0
 	)
 	default boolean showGeQuickLook()
 	{
@@ -363,8 +387,8 @@ public interface O7FlipConfig extends Config
 		name = "Time-on-sale timer",
 		description = "Show how long each active GE offer has been listed, in the top-right of the slot. "
 			+ "Replaces the timer from other flipping plugins.",
-		section = geOverlaySection,
-		position = 6
+		section = geSlotsSection,
+		position = 5
 	)
 	default boolean showGeSlotTimer()
 	{
@@ -375,8 +399,8 @@ public interface O7FlipConfig extends Config
 		keyName = "geTimerWhiteMins",
 		name = "Timer white after (min)",
 		description = "The time-on-sale timer turns to the borderline colour once an offer has been listed this many minutes.",
-		section = geOverlaySection,
-		position = 7
+		section = geSlotsSection,
+		position = 6
 	)
 	default int geTimerWhiteMins()
 	{
@@ -387,8 +411,8 @@ public interface O7FlipConfig extends Config
 		keyName = "geTimerRedMins",
 		name = "Timer red after (min)",
 		description = "The time-on-sale timer turns to the off-market colour once an offer has been listed this many minutes.",
-		section = geOverlaySection,
-		position = 8
+		section = geSlotsSection,
+		position = 7
 	)
 	default int geTimerRedMins()
 	{
@@ -399,8 +423,8 @@ public interface O7FlipConfig extends Config
 		keyName = "geTimerCompact",
 		name = "Timer compact (HH:MM)",
 		description = "Show the time-on-sale timer as HH:MM instead of HH:MM:SS (hides the seconds).",
-		section = geOverlaySection,
-		position = 9
+		section = geSlotsSection,
+		position = 8
 	)
 	default boolean geTimerCompact()
 	{
@@ -412,8 +436,8 @@ public interface O7FlipConfig extends Config
 		name = "Quick Look hover panel",
 		description = "Show the hover panel (prices, trend, suggestion, progress) when hovering an active GE slot. "
 			+ "Turn off to keep only the slot colour-coding and timer.",
-		section = geOverlaySection,
-		position = 10
+		section = geSlotsSection,
+		position = 1
 	)
 	default boolean showGeQuickLookTooltip()
 	{
@@ -424,8 +448,8 @@ public interface O7FlipConfig extends Config
 		keyName = "geBorderGood",
 		name = "Competitive colour",
 		description = "Border, icon and timer colour when your price is competitive (or the offer is fresh).",
-		section = geOverlaySection,
-		position = 11
+		section = geSlotsSection,
+		position = 2
 	)
 	default Color geBorderGood()
 	{
@@ -436,8 +460,8 @@ public interface O7FlipConfig extends Config
 		keyName = "geBorderMid",
 		name = "Borderline colour",
 		description = "Border, icon and timer colour when your price is slightly off (or the offer is ageing).",
-		section = geOverlaySection,
-		position = 12
+		section = geSlotsSection,
+		position = 3
 	)
 	default Color geBorderMid()
 	{
@@ -448,8 +472,8 @@ public interface O7FlipConfig extends Config
 		keyName = "geBorderBad",
 		name = "Off-market colour",
 		description = "Border, icon and timer colour when your price is well off-market (or the offer is stale).",
-		section = geOverlaySection,
-		position = 13
+		section = geSlotsSection,
+		position = 4
 	)
 	default Color geBorderBad()
 	{
@@ -461,8 +485,8 @@ public interface O7FlipConfig extends Config
 		name = "Price ladder on chatbox",
 		description = "On the Set-a-price chatbox, show clickable price options (07Flip, a quicker and a more patient "
 			+ "price, and the live market price), the last instant-buy price, and a Clear button.",
-		section = geOverlaySection,
-		position = 14
+		section = geSection,
+		position = 4
 	)
 	default boolean showGeChatPrice()
 	{
@@ -475,8 +499,8 @@ public interface O7FlipConfig extends Config
 		description = "Which price auto-fills the Set-a-price chatbox by default: the 07Flip recommended price, "
 			+ "a quicker-filling price, a more patient price, or the live market price. Sells are never auto-filled "
 			+ "below your break-even.",
-		section = geOverlaySection,
-		position = 15
+		section = geSection,
+		position = 1
 	)
 	default GePriceDefault geDefaultPrice()
 	{
@@ -487,8 +511,8 @@ public interface O7FlipConfig extends Config
 		keyName = "geChatFontType",
 		name = "Price ladder font",
 		description = "Typeface used for the price ladder, Clear button and last-trade line on the GE chatbox.",
-		section = geOverlaySection,
-		position = 16
+		section = geSection,
+		position = 5
 	)
 	default GpDropFontType geChatFontType()
 	{
@@ -499,8 +523,8 @@ public interface O7FlipConfig extends Config
 		keyName = "geChatFontSize",
 		name = "Price ladder font size",
 		description = "Size of the price ladder text on the GE chatbox, in points.",
-		section = geOverlaySection,
-		position = 17
+		section = geSection,
+		position = 6
 	)
 	@Range(min = 8, max = 28)
 	default int geChatFontSize()
@@ -515,7 +539,7 @@ public interface O7FlipConfig extends Config
 		description = "Background colour of the GE offer-setup overlay and the Quick Look hover panel. "
 			+ "Increase the opacity for a more solid, easier-to-read panel.",
 		section = geOverlaySection,
-		position = 18
+		position = 5
 	)
 	default Color geTooltipBg()
 	{
@@ -714,8 +738,8 @@ public interface O7FlipConfig extends Config
 		name = "Fill counter on offer bar",
 		description = "Show how much of each offer has filled (e.g. 1 / 100) on the Grand Exchange progress bar "
 			+ "and under the progress bar on the Trades tab.",
-		section = geOverlaySection,
-		position = 19
+		section = geSlotsSection,
+		position = 9
 	)
 	default boolean activeFillCounter()
 	{
@@ -727,8 +751,8 @@ public interface O7FlipConfig extends Config
 		name = "Time since last buy / sale",
 		description = "Show how long ago the last unit bought or sold (e.g. Last sale: 5m) on the Grand Exchange "
 			+ "progress bar and on the Trades tab.",
-		section = geOverlaySection,
-		position = 20
+		section = geSlotsSection,
+		position = 10
 	)
 	default boolean activeLastFillAge()
 	{
@@ -740,9 +764,9 @@ public interface O7FlipConfig extends Config
 		keyName = "lastFillColour",
 		name = "Progress bar text colour",
 		description = "Colour of the fill counter and time-since-last-buy/sale text drawn on the Grand Exchange "
-			+ "progress bar. Lower the opacity to keep it subtle.",
-		section = geOverlaySection,
-		position = 21
+			+ "offer progress bars and on the Trades tab rows. Lower the opacity to keep it subtle.",
+		section = geSlotsSection,
+		position = 11
 	)
 	default Color lastFillColour()
 	{
@@ -793,6 +817,19 @@ public interface O7FlipConfig extends Config
 		position = 3
 	)
 	default boolean itemTabRecommended()
+	{
+		return true;
+	}
+
+	@ConfigItem(
+		keyName = "itemTabPlan",
+		name = "Your plan",
+		description = "Show the Plan tab's target buy/sell, quantity and fill progress on the Item tab, "
+			+ "for items the optimiser has allocated. Hidden for items that are not in your plan.",
+		section = itemTabSection,
+		position = 6
+	)
+	default boolean itemTabPlan()
 	{
 		return true;
 	}

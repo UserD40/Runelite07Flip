@@ -27,20 +27,39 @@ package com.o7flip.util;
 import com.o7flip.model.Models.TradeRecord;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.Deque;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 public final class ProfitCalculator
 {
 	public static final int BOND_ITEM_ID = 13190;
 
 	private static final double GE_TAX_RATE = 0.02;
-	private static final long   GE_TAX_MIN_PRICE_PER_ITEM = 100L;
 	private static final long   GE_TAX_CAP_PER_ITEM = 5_000_000L;
+
+	// Must stay in step with the server's TAX_EXEMPT_ITEMS (flipping-engine.ts); any drift
+	// makes the plugin's profit maths disagree with 07flip.com's for these items.
+	private static final Set<Integer> TAX_EXEMPT = new HashSet<>(Arrays.asList(
+		13190,
+		3010, 3012, 3014, 3016,
+		882, 884, 886,
+		806, 807, 808,
+		558,
+		365, 2309, 1891, 2140, 2142,
+		347, 379, 355, 2327, 351,
+		329, 315, 361,
+		8011, 8010, 28598, 8009, 3853,
+		21120, 8008, 2552, 8013, 8007,
+		1755, 5325, 1785, 2347, 1733,
+		233, 5341, 8794, 5329, 5343,
+		1735, 952, 5331));
 
 	private ProfitCalculator()
 	{
@@ -48,15 +67,11 @@ public final class ProfitCalculator
 
 	public static long geTaxFor(int itemId, long grossSellTotal, int quantity)
 	{
-		if (itemId == BOND_ITEM_ID || quantity <= 0 || grossSellTotal <= 0)
+		if (TAX_EXEMPT.contains(itemId) || quantity <= 0 || grossSellTotal <= 0)
 		{
 			return 0L;
 		}
 		long pricePerItem = grossSellTotal / quantity;
-		if (pricePerItem < GE_TAX_MIN_PRICE_PER_ITEM)
-		{
-			return 0L;
-		}
 		long taxPerItem = (long) Math.floor(pricePerItem * GE_TAX_RATE);
 		if (taxPerItem > GE_TAX_CAP_PER_ITEM)
 		{

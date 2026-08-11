@@ -82,6 +82,10 @@ public class GeQuickLookOverlay extends Overlay
 	@Override
 	public Dimension render(Graphics2D graphics)
 	{
+		if (!config.showInGameOverlays())
+		{
+			return null;
+		}
 		final boolean wantQuickLook = config.showGeQuickLook();
 		final boolean wantTimer = config.showGeSlotTimer();
 		final boolean wantFill = config.activeFillCounter() || config.activeLastFillAge();
@@ -299,7 +303,7 @@ public class GeQuickLookOverlay extends Overlay
 			return;
 		}
 
-		int y = bar.y + (bar.height + fm.getAscent()) / 2 - 1;
+		int y = bar.y + (bar.height + fm.getAscent() - fm.getDescent()) / 2;
 		if (panelRect != null && panelRect.intersects(bar))
 		{
 			return;

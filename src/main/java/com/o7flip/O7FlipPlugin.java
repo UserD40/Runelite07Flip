@@ -270,6 +270,7 @@ public class O7FlipPlugin extends Plugin
 	private static final String SLOT_FILLS_KEY = "slotRecordedFills";
 	private static final String SLOT_LISTED_KEY = "slotListedAt";
 	private static final String SLOT_FILL_CLOCK_KEY = "slotFillClock";
+	private static final String AUTH_CACHE_KEY = "authStatusCache";
 	private static final String BOND_LEDGER_SPEND_KEY = "bondLedgerSpend";
 	private static final String BOND_LEDGER_COUNT_KEY = "bondLedgerCount";
 	private static final String BOND_LEDGER_MIGRATED_KEY = "bondLedgerMigrated";
@@ -946,6 +947,7 @@ public class O7FlipPlugin extends Plugin
 		loadSlotListedAt();
 		loadSlotFillClock();
 		restoreFreezesFromServer();
+		applyCachedAuthStatus();
 
 		apiClient.setOnFavouritesUnauthorized(() -> SwingUtilities.invokeLater(() ->
 			notifier.notify("Your 07Flip API key was rejected. Open the plugin config and paste it again.")));
@@ -1507,6 +1509,10 @@ public class O7FlipPlugin extends Plugin
 
 	private void setPriceInput(long price)
 	{
+		if (panel == null || !panel.isPremium())
+		{
+			return;
+		}
 		Widget input = client.getWidget(ComponentID.CHATBOX_FULL_INPUT);
 		if (input == null)
 		{
@@ -1699,20 +1705,23 @@ public class O7FlipPlugin extends Plugin
 
 	void fetchAuthStatus()
 	{
-		fetchAuthStatusInternal(false);
+		fetchAuthStatusInternal(0);
 	}
 
-	private void fetchAuthStatusInternal(boolean isRetry)
+	private void fetchAuthStatusInternal(int attempt)
 	{
 		String key = config.apiKey();
 		if (key == null || key.trim().isEmpty())
 		{
+			configManager.unsetConfiguration("o7flip", AUTH_CACHE_KEY);
 			SwingUtilities.invokeLater(() -> panel.updateAuthStatus(false, false));
 			return;
 		}
 		apiClient.fetchAuthStatus(
 			status -> SwingUtilities.invokeLater(() ->
 			{
+				configManager.setConfiguration("o7flip", AUTH_CACHE_KEY,
+					(status.authenticated ? "1" : "0") + (status.premium ? "1" : "0"));
 				panel.updateAuthStatus(status.authenticated, status.premium);
 				if (status.premium && activeSession == null
 					&& executor != null && !executor.isShutdown())
@@ -1722,12 +1731,26 @@ public class O7FlipPlugin extends Plugin
 			}),
 			() ->
 			{
-				if (!isRetry && executor != null && !executor.isShutdown())
+				if (attempt < 5 && executor != null && !executor.isShutdown())
 				{
-					executor.schedule(() -> fetchAuthStatusInternal(true), 60, TimeUnit.SECONDS);
+					long delay = 30L << attempt;
+					executor.schedule(() -> fetchAuthStatusInternal(attempt + 1), delay, TimeUnit.SECONDS);
 				}
 			}
 		);
+	}
+
+	private void applyCachedAuthStatus()
+	{
+		String key = config.apiKey();
+		String cached = configManager.getConfiguration("o7flip", AUTH_CACHE_KEY);
+		if (key == null || key.trim().isEmpty() || cached == null || cached.length() < 2)
+		{
+			return;
+		}
+		boolean signedIn = cached.charAt(0) == '1';
+		boolean premium  = cached.charAt(1) == '1';
+		SwingUtilities.invokeLater(() -> panel.updateAuthStatus(signedIn, premium));
 	}
 
 	void fetchAll(boolean forced)
@@ -4168,6 +4191,23 @@ public class O7FlipPlugin extends Plugin
 	}
 
 	private volatile com.o7flip.model.Models.OptimizerSession activeSession;
+
+	public com.o7flip.model.Models.OptimizeResult.Allocation planAllocationFor(int itemId)
+	{
+		com.o7flip.model.Models.OptimizerSession s = activeSession;
+		if (s == null || s.slots == null)
+		{
+			return null;
+		}
+		for (com.o7flip.model.Models.OptimizeResult.Allocation a : s.slots)
+		{
+			if (a != null && a.itemId == itemId)
+			{
+				return a;
+			}
+		}
+		return null;
+	}
 	private volatile boolean offlineReconcileArmed = false;
 	private ScheduledFuture<?> pendingSessionPost;
 	private ScheduledFuture<?> sessionPollTask;
