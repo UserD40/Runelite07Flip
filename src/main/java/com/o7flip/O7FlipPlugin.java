@@ -38,6 +38,7 @@ import net.runelite.api.GrandExchangeOfferState;
 import net.runelite.api.events.GameStateChanged;
 import net.runelite.api.events.GrandExchangeOfferChanged;
 import net.runelite.api.ScriptID;
+import net.runelite.api.events.ClientTick;
 import net.runelite.api.events.GameTick;
 import net.runelite.api.events.ScriptPostFired;
 import net.runelite.api.gameval.InterfaceID;
@@ -150,6 +151,7 @@ public class O7FlipPlugin extends Plugin
 	volatile long   pendingGeSetPrice  = -1;
 	volatile int    pendingGeSetItemId = -1;
 	volatile long   pendingGeInputPrice = -1;
+	private boolean gePriceInputFilled  = false;
 
 	public volatile long confirmHighlightUntilMs = 0L;
 
@@ -1081,8 +1083,6 @@ public class O7FlipPlugin extends Plugin
 		return true;
 	}
 
-	private static final int SCRIPT_CHATBOX_INPUT_OPEN = 108;
-
 	private void detectAndArmSellSetup()
 	{
 		Widget setup = client.getWidget(InterfaceID.GeOffers.SETUP);
@@ -1329,7 +1329,7 @@ public class O7FlipPlugin extends Plugin
 
 	private static boolean widgetTreeHasText(Widget w, String needle)
 	{
-		if (w == null)
+		if (w == null || w.isHidden())
 		{
 			return false;
 		}
@@ -1410,87 +1410,85 @@ public class O7FlipPlugin extends Plugin
 	@Subscribe
 	public void onScriptPostFired(ScriptPostFired event)
 	{
-		if (event.getScriptId() == ScriptID.GE_OFFERS_SETUP_BUILD)
+		if (event.getScriptId() != ScriptID.GE_OFFERS_SETUP_BUILD)
 		{
-			clearOverlayQueue();
-
-			int searchedItemId = client.getVarpValue(VarPlayerID.TRADINGPOST_SEARCH);
-			int currentItemId = searchedItemId > 0 ? searchedItemId : resolveItemIdFromSetupWidget();
-			long price = -1;
-
-			if (pendingGeSetPrice != -1)
-			{
-				if (currentItemId > 0)
-				{
-					if (pendingGeSetItemId == -1 || currentItemId == pendingGeSetItemId)
-					{
-						price = pendingGeSetPrice;
-					}
-					pendingGeSetPrice  = -1;
-					pendingGeSetItemId = -1;
-				}
-			}
-			else if (pendingGeSellItemId != -1)
-			{
-				int offerType = client.getVarbitValue(VarbitID.GE_NEWOFFER_TYPE);
-				if (offerType == 0 && currentItemId == pendingGeSellItemId)
-				{
-					price = pendingGeSellPrice;
-					pendingGeSellItemId = -1;
-					pendingGeSellPrice  = -1;
-					pendingGeSellName   = null;
-				}
-			}
-
-			Widget setup = client.getWidget(InterfaceID.GeOffers.SETUP);
-			if (setup != null && !setup.isHidden() && isSellSetupVisible(setup))
-			{
-				int sellItemId = resolveItemIdFromSetupWidget();
-				if (sellItemId > 0 && computeAutoSellPrice(sellItemId) <= 0)
-				{
-					getOverlayInsights(sellItemId);
-				}
-			}
-
-			if (price != -1)
-			{
-				pendingGeInputPrice = price;
-			}
-
 			return;
 		}
+		clearOverlayQueue();
 
-		if (event.getScriptId() == SCRIPT_CHATBOX_INPUT_OPEN)
+		int searchedItemId = client.getVarpValue(VarPlayerID.TRADINGPOST_SEARCH);
+		int currentItemId = searchedItemId > 0 ? searchedItemId : resolveItemIdFromSetupWidget();
+		long price = -1;
+
+		if (pendingGeSetPrice != -1)
 		{
-			Widget setup = client.getWidget(InterfaceID.GeOffers.SETUP);
-			if (setup == null || setup.isHidden())
+			if (currentItemId > 0)
 			{
-				pendingGeInputPrice = -1;
-				return;
-			}
-
-			if (pendingGeInputPrice == -1 && isSellSetupVisible(setup))
-			{
-				int currentItemId = resolveItemIdFromSetupWidget();
-				if (currentItemId > 0)
+				if (pendingGeSetItemId == -1 || currentItemId == pendingGeSetItemId)
 				{
-					long auto = computeAutoSellPrice(currentItemId);
-					if (auto > 0)
-					{
-						pendingGeInputPrice = auto;
-						log.debug("[07Flip] chatbox-open last-ditch armed sell price {} for itemId {}", auto, currentItemId);
-					}
+					price = pendingGeSetPrice;
 				}
+				pendingGeSetPrice  = -1;
+				pendingGeSetItemId = -1;
 			}
+		}
+		else if (pendingGeSellItemId != -1)
+		{
+			int offerType = client.getVarbitValue(VarbitID.GE_NEWOFFER_TYPE);
+			if (offerType == 0 && currentItemId == pendingGeSellItemId)
+			{
+				price = pendingGeSellPrice;
+				pendingGeSellItemId = -1;
+				pendingGeSellPrice  = -1;
+				pendingGeSellName   = null;
+			}
+		}
 
-			if (pendingGeInputPrice == -1)
+		Widget setup = client.getWidget(InterfaceID.GeOffers.SETUP);
+		if (setup != null && !setup.isHidden() && isSellSetupVisible(setup))
+		{
+			int sellItemId = resolveItemIdFromSetupWidget();
+			if (sellItemId > 0 && computeAutoSellPrice(sellItemId) <= 0)
+			{
+				getOverlayInsights(sellItemId);
+			}
+		}
+
+		if (price != -1)
+		{
+			pendingGeInputPrice = price;
+		}
+	}
+
+	@Subscribe
+	public void onClientTick(ClientTick event)
+	{
+		Widget setup = client.getWidget(InterfaceID.GeOffers.SETUP);
+		if (setup == null || setup.isHidden() || !isGePriceEntryOpen())
+		{
+			gePriceInputFilled = false;
+			return;
+		}
+		if (gePriceInputFilled)
+		{
+			return;
+		}
+		long price = pendingGeInputPrice;
+		if (price == -1)
+		{
+			int itemId = resolveItemIdFromSetupWidget();
+			if (itemId <= 0)
 			{
 				return;
 			}
-			final long price = pendingGeInputPrice;
-			pendingGeInputPrice = -1;
-			clientThread.invokeLater(() -> autoFillPriceInput(price));
+			price = isGeSellSetup() ? computeAutoSellPrice(itemId) : computeAutoBuyPrice(itemId);
 		}
+		if (price <= 0)
+		{
+			return;
+		}
+		pendingGeInputPrice = -1;
+		autoFillPriceInput(price);
 	}
 
 	private void autoFillPriceInput(long price)
@@ -1500,6 +1498,7 @@ public class O7FlipPlugin extends Plugin
 			pendingGeInputPrice = price;
 			return;
 		}
+		gePriceInputFilled = true;
 		if (!config.autoFillGePrice())
 		{
 			return;
@@ -1530,7 +1529,11 @@ public class O7FlipPlugin extends Plugin
 		{
 			return;
 		}
-		clientThread.invokeLater(() -> setPriceInput(price));
+		clientThread.invokeLater(() ->
+		{
+			gePriceInputFilled = true;
+			setPriceInput(price);
+		});
 	}
 
 	public void clearPriceInput()
@@ -1542,6 +1545,7 @@ public class O7FlipPlugin extends Plugin
 			{
 				return;
 			}
+			gePriceInputFilled = true;
 			input.setText("*");
 			client.setVarcStrValue(VarClientID.MESLAYERINPUT, "");
 		});
