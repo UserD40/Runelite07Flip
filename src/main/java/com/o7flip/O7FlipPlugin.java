@@ -3269,12 +3269,20 @@ public class O7FlipPlugin extends Plugin
 
 	public String offerLastFillText(int slot)
 	{
-		long filledAt = offerLastFillAtMs(slot);
-		if (filledAt <= 0)
+		return ageText(offerLastFillAtMs(slot));
+	}
+
+	private static String ageText(long sinceMs)
+	{
+		if (sinceMs <= 0)
 		{
 			return null;
 		}
-		long minutes = Math.max(0L, (System.currentTimeMillis() - filledAt) / 60_000L);
+		return ageFromMinutes(Math.max(0L, (System.currentTimeMillis() - sinceMs) / 60_000L));
+	}
+
+	public static String ageFromMinutes(long minutes)
+	{
 		if (minutes < 1)
 		{
 			return ">1m";
