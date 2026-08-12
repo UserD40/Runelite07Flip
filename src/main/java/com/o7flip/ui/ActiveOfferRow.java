@@ -41,6 +41,8 @@ import java.awt.Dimension;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.RenderingHints;
+import java.awt.Shape;
+import java.awt.geom.RoundRectangle2D;
 
 public class ActiveOfferRow extends JPanel
 {
@@ -87,7 +89,7 @@ public class ActiveOfferRow extends JPanel
 
 		O7FlipConfig cfg = plugin != null ? plugin.getConfig() : null;
 		bar = new ProgressBar(offer.quantitySold, offer.totalQuantity, barCol,
-			cfg != null ? cfg.lastFillColour() : Color.LIGHT_GRAY);
+			fullyFilled ? Color.WHITE : (cfg != null ? cfg.lastFillColour() : Color.LIGHT_GRAY));
 		bar.setAlignmentX(Component.LEFT_ALIGNMENT);
 
 		JPanel textCol = new JPanel();
@@ -116,18 +118,32 @@ public class ActiveOfferRow extends JPanel
 		String counter = (cfg == null || cfg.activeFillCounter())
 			? offer.quantitySold + "/" + offer.totalQuantity
 			: "";
-		String age = (cfg == null || cfg.activeLastFillAge()) ? lastFillText() : "";
-		bar.setLabels(counter, age);
+		boolean done = offer.totalQuantity > 0 && offer.quantitySold >= offer.totalQuantity;
+		String right = done || (cfg != null && !cfg.activeLastFillAge()) ? "" : lastFillText();
+		bar.setLabels(counter, right);
 	}
 
 	private String lastFillText()
 	{
-		if (plugin == null || offer.quantitySold <= 0)
+		if (plugin == null)
 		{
 			return "";
 		}
-		String age = plugin.offerLastFillText(offer.slot);
-		return age == null ? "" : (offer.isBuy() ? "Last buy: " : "Last sale: ") + age;
+		if (offer.quantitySold > 0)
+		{
+			String age = plugin.offerLastFillText(offer.slot);
+			if (age != null)
+			{
+				return age;
+			}
+		}
+		com.o7flip.model.Models.ItemInsights ins = plugin.getOverlayInsights(offer.itemId);
+		if (ins == null || ins.current == null)
+		{
+			return "";
+		}
+		Integer mins = offer.isBuy() ? ins.current.buyAgeMinutes : ins.current.sellAgeMinutes;
+		return mins == null || mins < 0 ? "" : O7FlipPlugin.ageFromMinutes(mins);
 	}
 
 	@Override
@@ -204,8 +220,13 @@ public class ActiveOfferRow extends JPanel
 	private static class ProgressBar extends JPanel
 	{
 		private static final int HEIGHT = 15;
-		private static final int PAD = 5;
-		private static final java.awt.Font BAR_FONT = Fonts.SM_BOLD.deriveFont(10f);
+		private static final int PAD = 10;
+		private static final int ARC = 9;
+		private static final double TRACK_SHADE   = 0.82;
+		private static final double BORDER_SHADE  = 0.55;
+		private static final double FILL_SHADE    = 0.80;
+		private static final Color  TEXT_SHADOW   = new Color(0, 0, 0, 150);
+		private static final java.awt.Font BAR_FONT = Fonts.REG;
 
 		private final int filled;
 		private final int total;
@@ -240,6 +261,20 @@ public class ActiveOfferRow extends JPanel
 				clampByte((int) Math.round(c.getBlue()  * f)));
 		}
 
+		private boolean tailFits(java.awt.FontMetrics fm, int w)
+		{
+			return !right.isEmpty()
+				&& fm.stringWidth(right) <= w - PAD * 3 - fm.stringWidth(left);
+		}
+
+		private void drawShadowed(Graphics2D g2, String s, int x, int baseline)
+		{
+			g2.setColor(TEXT_SHADOW);
+			g2.drawString(s, x + 1, baseline + 1);
+			g2.setColor(textColour);
+			g2.drawString(s, x, baseline);
+		}
+
 		void setLabels(String left, String right)
 		{
 			this.left  = left  != null ? left  : "";
@@ -258,8 +293,9 @@ public class ActiveOfferRow extends JPanel
 				int w = getWidth();
 				int h = getHeight();
 
-				g2.setColor(scale(trackBase, 0.62));
-				g2.fillRect(0, 0, w, h);
+				RoundRectangle2D well = new RoundRectangle2D.Float(0.5f, 0.5f, w - 1f, h - 1f, ARC, ARC);
+				g2.setColor(scale(trackBase, TRACK_SHADE));
+				g2.fill(well);
 
 				if (total > 0 && filled > 0)
 				{
@@ -267,30 +303,27 @@ public class ActiveOfferRow extends JPanel
 					int fillW = (int) Math.round(frac * w);
 					if (fillW > 0)
 					{
-						g2.setColor(scale(colour, 0.62));
+						Shape clip = g2.getClip();
+						g2.clip(well);
+						g2.setColor(scale(colour, FILL_SHADE));
 						g2.fillRect(0, 0, fillW, h);
+						g2.setClip(clip);
 					}
 				}
 
+				g2.setColor(scale(trackBase, BORDER_SHADE));
+				g2.draw(well);
 
 				g2.setFont(BAR_FONT);
 				java.awt.FontMetrics fm = g2.getFontMetrics();
-				String tail = right;
-				if (!left.isEmpty() && !tail.isEmpty()
-					&& fm.stringWidth(left) + fm.stringWidth(tail) + PAD * 3 > w)
-				{
-					int colon = tail.indexOf(": ");
-					tail = colon >= 0 ? tail.substring(colon + 2) : tail;
-				}
 				int baseline = (h + fm.getAscent() - fm.getDescent()) / 2;
-				g2.setColor(textColour);
 				if (!left.isEmpty())
 				{
-					g2.drawString(left, PAD, baseline);
+					drawShadowed(g2, left, PAD, baseline);
 				}
-				if (!tail.isEmpty() && fm.stringWidth(left) + fm.stringWidth(tail) + PAD * 3 <= w)
+				if (tailFits(fm, w))
 				{
-					g2.drawString(tail, w - PAD - fm.stringWidth(tail), baseline);
+					drawShadowed(g2, right, w - PAD - fm.stringWidth(right), baseline);
 				}
 			}
 			finally
