@@ -205,6 +205,8 @@ public class ActiveOfferRow extends JPanel
 	{
 		private static final int HEIGHT = 15;
 		private static final int PAD = 5;
+		private static final double TRACK_SHADE = 0.82;
+		private static final double FILL_SHADE  = 0.80;
 		private static final java.awt.Font BAR_FONT = Fonts.SM_BOLD.deriveFont(10f);
 
 		private final int filled;
@@ -258,7 +260,7 @@ public class ActiveOfferRow extends JPanel
 				int w = getWidth();
 				int h = getHeight();
 
-				g2.setColor(scale(trackBase, 0.62));
+				g2.setColor(scale(trackBase, TRACK_SHADE));
 				g2.fillRect(0, 0, w, h);
 
 				if (total > 0 && filled > 0)
@@ -267,11 +269,10 @@ public class ActiveOfferRow extends JPanel
 					int fillW = (int) Math.round(frac * w);
 					if (fillW > 0)
 					{
-						g2.setColor(scale(colour, 0.62));
+						g2.setColor(scale(colour, FILL_SHADE));
 						g2.fillRect(0, 0, fillW, h);
 					}
 				}
-
 
 				g2.setFont(BAR_FONT);
 				java.awt.FontMetrics fm = g2.getFontMetrics();
