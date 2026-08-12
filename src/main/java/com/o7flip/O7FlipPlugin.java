@@ -187,6 +187,7 @@ public class O7FlipPlugin extends Plugin
 		= java.util.concurrent.ConcurrentHashMap.newKeySet();
 
 	private static final long REC_PRICE_TTL_MS = 60_000L;
+	private static final long FETCH_FAIL_RETRY_MS = 8_000L;
 
 	private final java.util.concurrent.ConcurrentHashMap<Integer, com.o7flip.model.Models.ItemInsights> overlayInsightsCache
 		= new java.util.concurrent.ConcurrentHashMap<>();
@@ -3092,6 +3093,12 @@ public class O7FlipPlugin extends Plugin
 		configManager.setConfiguration("o7flip", BLOCKLIST_KEY, sb.toString());
 	}
 
+	private static long fetchStamp(boolean ok, long ttlMs)
+	{
+		long now = System.currentTimeMillis();
+		return ok ? now : now - Math.max(0, ttlMs - FETCH_FAIL_RETRY_MS);
+	}
+
 	public com.o7flip.model.Models.RecommendedPrices getRecommendedPrices(int itemId)
 	{
 		if (itemId <= 0)
@@ -3116,7 +3123,7 @@ public class O7FlipPlugin extends Plugin
 								armBuyPriceIfStillRelevant(itemId);
 							});
 						}
-						recPriceFetchedAt.put(itemId, System.currentTimeMillis());
+						recPriceFetchedAt.put(itemId, fetchStamp(rp != null, REC_PRICE_TTL_MS));
 					}
 					finally
 					{
@@ -3171,7 +3178,7 @@ public class O7FlipPlugin extends Plugin
 							armBuyPriceIfStillRelevant(itemId);
 						});
 					}
-					overlayInsightsFetchedAt.put(itemId, System.currentTimeMillis());
+					overlayInsightsFetchedAt.put(itemId, fetchStamp(ins != null, REC_PRICE_TTL_MS));
 				}
 				finally
 				{
@@ -3243,7 +3250,7 @@ public class O7FlipPlugin extends Plugin
 					{
 						repriceCache.put(itemId, res);
 					}
-					repriceFetchedAt.put(itemId, System.currentTimeMillis());
+					repriceFetchedAt.put(itemId, fetchStamp(res != null, REPRICE_TTL_MS));
 				}
 				finally
 				{
