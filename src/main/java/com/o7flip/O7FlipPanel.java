@@ -244,6 +244,11 @@ public class O7FlipPanel extends PluginPanel
 	@Override
 	public void onActivate()
 	{
+		if (flipsStaleTimer != null && !flipsStaleTimer.isRunning())
+		{
+			flipsStaleTimer.start();
+		}
+		repaintFlipsFreshness();
 		if (plugin != null)
 		{
 			plugin.onPanelShown();
@@ -253,6 +258,10 @@ public class O7FlipPanel extends PluginPanel
 	@Override
 	public void onDeactivate()
 	{
+		if (flipsStaleTimer != null && flipsStaleTimer.isRunning())
+		{
+			flipsStaleTimer.stop();
+		}
 		if (plugin != null)
 		{
 			plugin.onPanelHidden();
@@ -344,6 +353,9 @@ public class O7FlipPanel extends PluginPanel
 	private JLabel statusLabel;
 	private JLabel hiddenCountLabel;
 	private JLabel lastUpdatedLabel;
+	private JLabel flipsUpdatedLabel;
+	private long   flipsUpdatedAtMs;
+	private Timer  flipsStaleTimer;
 	private JPanel mainArea;
 	private Timer  searchDebounce;
 
@@ -673,6 +685,18 @@ public class O7FlipPanel extends PluginPanel
 		pushInsightsRecommendations();
 		updateTimestamp();
 		setLoading(false);
+		if (plugin != null)
+		{
+			plugin.primeFlipAges(items);
+		}
+	}
+
+	public void refreshFlipRows()
+	{
+		if (allFlips != null && !allFlips.isEmpty())
+		{
+			renderFlips(filtered());
+		}
 	}
 
 	public void updateDumps(com.o7flip.model.Models.DumpItem.Response resp, int page)
@@ -3049,6 +3073,42 @@ public class O7FlipPanel extends PluginPanel
 		dialog.setVisible(true);
 	}
 
+	private static final long FLIPS_STALE_AFTER_MS = 5 * 60 * 1000L;
+
+	private JPanel buildFlipsFreshnessBar()
+	{
+		flipsUpdatedLabel = new JLabel(" ");
+		flipsUpdatedLabel.setFont(Fonts.SM);
+		flipsUpdatedLabel.setForeground(new Color(0x888888));
+
+		JPanel bar = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
+		bar.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+		bar.add(flipsUpdatedLabel);
+
+		flipsStaleTimer = new Timer(30_000, e -> repaintFlipsFreshness());
+		flipsStaleTimer.setRepeats(true);
+		return bar;
+	}
+
+	private void repaintFlipsFreshness()
+	{
+		if (flipsUpdatedLabel == null || flipsUpdatedAtMs <= 0)
+		{
+			return;
+		}
+		long ageMs = System.currentTimeMillis() - flipsUpdatedAtMs;
+		java.time.LocalTime at = java.time.LocalDateTime.ofInstant(
+			java.time.Instant.ofEpochMilli(flipsUpdatedAtMs),
+			java.time.ZoneId.systemDefault()).toLocalTime();
+		flipsUpdatedLabel.setText(String.format("Updated %02d:%02d", at.getHour(), at.getMinute()));
+
+		boolean stale = ageMs >= FLIPS_STALE_AFTER_MS;
+		flipsUpdatedLabel.setForeground(stale ? new Color(0xE05C5C) : new Color(0x888888));
+		flipsUpdatedLabel.setToolTipText(stale
+			? "These prices are " + (ageMs / 60000L) + " minutes old"
+			: null);
+	}
+
 	private JPanel buildFlipsTab()
 	{
 		flipsFilterButton = pillButton("Filter");
@@ -3057,6 +3117,7 @@ public class O7FlipPanel extends PluginPanel
 		JPanel headerRow = new JPanel(new BorderLayout());
 		headerRow.setBackground(ColorScheme.DARKER_GRAY_COLOR);
 		headerRow.setBorder(new EmptyBorder(6, 10, 4, 8));
+		headerRow.add(buildFlipsFreshnessBar(), BorderLayout.WEST);
 		headerRow.add(flipsFilterButton, BorderLayout.EAST);
 
 		flipsChipBar = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 0));
@@ -4618,6 +4679,9 @@ public class O7FlipPanel extends PluginPanel
 	{
 		java.time.LocalTime now = java.time.LocalTime.now();
 		lastUpdatedLabel.setText(String.format("Updated %02d:%02d", now.getHour(), now.getMinute()));
+		long asOf = plugin != null ? plugin.flipsAsOfMs() : 0L;
+		flipsUpdatedAtMs = asOf > 0 ? asOf : System.currentTimeMillis();
+		repaintFlipsFreshness();
 	}
 
 	private void openUrl(String url)

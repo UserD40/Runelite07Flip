@@ -59,8 +59,7 @@ public class FlipItemPanel extends JPanel
 	{
 		Color bg = odd ? ODD_BG : ColorScheme.DARK_GRAY_COLOR;
 
-		final boolean isPremium = plugin != null && plugin.panel != null && plugin.panel.isPremium();
-		final boolean showRecPrices = isPremium;
+		final boolean showRecPrices = plugin != null && plugin.panel != null && plugin.panel.isPremium();
 
 		final boolean band = flip.isBand();
 
@@ -97,7 +96,7 @@ public class FlipItemPanel extends JPanel
 		}
 
 		JPanel nameRow = new JPanel(new BorderLayout(6, 0));
-		nameRow.setBackground(bg);
+		nameRow.setOpaque(false);
 		nameRow.add(nameLabel, BorderLayout.CENTER);
 		if (scoreLabel != null)
 		{
@@ -105,12 +104,7 @@ public class FlipItemPanel extends JPanel
 		}
 
 		final long buyShown = band ? flip.bandFloor : flip.buyPrice;
-		String buyHtml = "<html><b>Buy:</b>  " + formatGpCompact(buyShown);
-		if (!band && showRecPrices && flip.recBuyPrice != null)
-		{
-			buyHtml += "  <font color='#888888'>· Rec " + formatGpCompact(flip.recBuyPrice) + "</font>";
-		}
-		buyHtml += "</html>";
+		String buyHtml = "<html><b>Buy:</b>  " + formatGpCompact(buyShown) + "</html>";
 		JLabel buyLabel = new JLabel(buyHtml);
 		buyLabel.setFont(Fonts.SM);
 		buyLabel.setForeground(new Color(0xFF7070));
@@ -138,12 +132,7 @@ public class FlipItemPanel extends JPanel
 				? flip.recBuyPrice : flip.buyPrice);
 
 		final long sellShown = band ? flip.bandCeiling : flip.sellPrice;
-		String sellHtml = "<html><b>Sell:</b>  " + formatGpCompact(sellShown);
-		if (!band && showRecPrices && flip.recSellPrice != null)
-		{
-			sellHtml += "  <font color='#888888'>· Rec " + formatGpCompact(flip.recSellPrice) + "</font>";
-		}
-		sellHtml += "</html>";
+		String sellHtml = "<html><b>Sell:</b>  " + formatGpCompact(sellShown) + "</html>";
 		JLabel sellLabel = new JLabel(sellHtml);
 		sellLabel.setFont(Fonts.SM);
 		sellLabel.setForeground(GREEN);
@@ -237,8 +226,12 @@ public class FlipItemPanel extends JPanel
 		JPanel textPanel = new JPanel(new GridLayout(4, 1, 0, 2));
 		textPanel.setBackground(bg);
 		textPanel.add(nameRow);
-		textPanel.add(buyLabel);
-		textPanel.add(sellLabel);
+		Integer buyAge  = flip.buyAgeMinutes  != null ? flip.buyAgeMinutes
+			: (plugin != null ? plugin.flipBuyAge(flip.itemId)  : null);
+		Integer sellAge = flip.sellAgeMinutes != null ? flip.sellAgeMinutes
+			: (plugin != null ? plugin.flipSellAge(flip.itemId) : null);
+		textPanel.add(ageRow(buyLabel,  buyAge));
+		textPanel.add(ageRow(sellLabel, sellAge));
 		textPanel.add(profitLabel);
 
 		add(iconLabel, BorderLayout.WEST);
@@ -313,6 +306,24 @@ public class FlipItemPanel extends JPanel
 			img.addTo(lbl);
 		}
 		return lbl;
+	}
+
+	private static JPanel ageRow(JLabel priceLabel, Integer ageMinutes)
+	{
+		JPanel row = new JPanel(new BorderLayout(6, 0));
+		row.setOpaque(false);
+		row.add(priceLabel, BorderLayout.CENTER);
+
+		String age = InsightsPanel.ageSuffix(ageMinutes);
+		if (age != null)
+		{
+			JLabel ageLabel = new JLabel(age);
+			ageLabel.setFont(Fonts.SM);
+			ageLabel.setForeground(new Color(0x888888));
+			ageLabel.setToolTipText("Time since this price last traded");
+			row.add(ageLabel, BorderLayout.EAST);
+		}
+		return row;
 	}
 
 	public static String formatGp(long amount)

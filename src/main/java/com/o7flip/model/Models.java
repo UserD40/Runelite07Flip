@@ -182,6 +182,9 @@ public final class Models
 		public Integer hourlyVolume;
 		public Integer dailyVolume;
 
+		public Integer buyAgeMinutes;
+		public Integer sellAgeMinutes;
+
 		public Long bandProfit;
 		public Long bandMargin;
 		public Long bandFloor;
@@ -699,6 +702,24 @@ public final class Models
 		public boolean serverSynced;
 
 		public Integer totalQuantity;
+
+		public TradeRecord copy()
+		{
+			TradeRecord c = new TradeRecord();
+			c.itemId          = itemId;
+			c.name            = name;
+			c.isBuy           = isBuy;
+			c.quantity        = quantity;
+			c.priceEach       = priceEach;
+			c.totalGp         = totalGp;
+			c.timestamp       = timestamp;
+			c.partial         = partial;
+			c.tradeId         = tradeId;
+			c.offerInstanceId = offerInstanceId;
+			c.serverSynced    = serverSynced;
+			c.totalQuantity   = totalQuantity;
+			return c;
+		}
 
 		public String fingerprint()
 		{
