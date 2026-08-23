@@ -569,10 +569,11 @@ public interface O7FlipConfig extends Config
 
 	@ConfigItem(
 		keyName = "autoOpenItemTab",
-		name = "Open Item tab on offer setup",
-		description = "<html>When you pick an item on the GE offer setup screen — buying after a search, or "
-			+ "selling from your inventory — automatically open the plugin's Item tab showing that item's "
-			+ "full detail view.<br>Only happens while the 07Flip sidebar is open.</html>",
+		name = "Open Item tab on GE offers",
+		description = "<html>Automatically open the plugin's Item tab showing an item's full detail view "
+			+ "when you pick it on the GE offer setup screen — buying after a search, or selling from your "
+			+ "inventory — or when you open an offer that is already buying or selling."
+			+ "<br>Only happens while the 07Flip sidebar is open.</html>",
 		section = geSection,
 		position = 3
 	)

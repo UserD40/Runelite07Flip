@@ -104,6 +104,11 @@ public class O7FlipPlugin extends Plugin
 	@Inject
 	private O7FlipApiClient apiClient;
 
+	public long flipsAsOfMs()
+	{
+		return apiClient != null ? apiClient.flipsAsOfMs : 0L;
+	}
+
 	@Inject
 	private OverlayManager overlayManager;
 
@@ -139,6 +144,7 @@ public class O7FlipPlugin extends Plugin
 	private ScheduledExecutorService executor;
 	private ScheduledFuture<?> refreshTask;
 	private ScheduledFuture<?> authRefreshTask;
+	private ScheduledFuture<?> partialFlushTask;
 
 	volatile int    pendingGeBuyItemId = -1;
 	volatile long   pendingGeBuyPrice  = -1;
@@ -187,6 +193,13 @@ public class O7FlipPlugin extends Plugin
 		= java.util.concurrent.ConcurrentHashMap.newKeySet();
 
 	private static final long REC_PRICE_TTL_MS = 60_000L;
+
+	private static final long FLIP_AGE_TTL_MS = 300_000L;
+
+	private final java.util.concurrent.ConcurrentHashMap<Integer, long[]> flipAges
+		= new java.util.concurrent.ConcurrentHashMap<>();
+	private final java.util.Set<Integer> flipAgesInFlight
+		= java.util.concurrent.ConcurrentHashMap.newKeySet();
 	private static final long FETCH_FAIL_RETRY_MS = 8_000L;
 
 	private final java.util.concurrent.ConcurrentHashMap<Integer, com.o7flip.model.Models.ItemInsights> overlayInsightsCache
@@ -217,6 +230,12 @@ public class O7FlipPlugin extends Plugin
 	private final Map<Integer, long[]> slotFillClock = new java.util.concurrent.ConcurrentHashMap<>();
 
 	private final Set<Long> tradePostsInFlight = new HashSet<>();
+
+	private final Map<Integer, Long> slotPartialPostedAt = new java.util.concurrent.ConcurrentHashMap<>();
+
+	private final Set<Long> deferredTerminalPosts = new HashSet<>();
+
+	private static final long PARTIAL_POST_INTERVAL_MS = 60_000L;
 
 	public volatile List<TradeRecord> tradeHistory = Collections.emptyList();
 
@@ -961,6 +980,8 @@ public class O7FlipPlugin extends Plugin
 		fetchAuthStatus();
 		authRefreshTask = executor.scheduleAtFixedRate(
 			this::fetchAuthStatus, 15, 15, TimeUnit.MINUTES);
+		partialFlushTask = executor.scheduleAtFixedRate(
+			() -> clientThread.invoke(this::flushPendingPartialFills), 30, 30, TimeUnit.SECONDS);
 		executor.execute(() -> fetchAll(true));
 		executor.execute(this::doSyncTrackerHistory);
 		executor.execute(this::doBulkSyncToServer);
@@ -990,6 +1011,10 @@ public class O7FlipPlugin extends Plugin
 		if (authRefreshTask != null)
 		{
 			authRefreshTask.cancel(true);
+		}
+		if (partialFlushTask != null)
+		{
+			partialFlushTask.cancel(true);
 		}
 		if (sessionBackgroundPollTask != null)
 		{
@@ -1250,16 +1275,16 @@ public class O7FlipPlugin extends Plugin
 			return;
 		}
 
-		int itemId;
+		int itemId = -1;
 		if (setupOpen)
 		{
-			if (widgetTreeHasText(setup, "choose an item"))
+			if (!isSellSetupVisible(setup) && widgetTreeHasText(setup, "choose an item"))
 			{
 				return;
 			}
 			itemId = resolveItemIdFromSetupWidget();
 		}
-		else
+		if (itemId <= 0 && detailsOpen)
 		{
 			itemId = resolveOfferStatusItemId();
 		}
@@ -1299,10 +1324,6 @@ public class O7FlipPlugin extends Plugin
 			}
 		}
 
-		if (shown > 0 && slotItem > 0 && shown != slotItem)
-		{
-			return -1;
-		}
 		if (shown > 0)
 		{
 			return shown;
@@ -1509,11 +1530,6 @@ public class O7FlipPlugin extends Plugin
 
 	private void setPriceInput(long price)
 	{
-		if (panel != null && panel.isKnownFree())
-		{
-			log.debug("[07Flip] price auto-fill skipped — free account");
-			return;
-		}
 		Widget input = client.getWidget(ComponentID.CHATBOX_FULL_INPUT);
 		if (input == null)
 		{
@@ -2208,6 +2224,11 @@ public class O7FlipPlugin extends Plugin
 			recordIfNewFills(offer, slot);
 		}
 
+		if (state == GrandExchangeOfferState.BUYING)
+		{
+			maybePostPartialFill(slot);
+		}
+
 		if (state == GrandExchangeOfferState.BOUGHT
 			|| state == GrandExchangeOfferState.SOLD)
 		{
@@ -2222,6 +2243,7 @@ public class O7FlipPlugin extends Plugin
 		{
 			prevSlotStates.remove(slot);
 			slotRecordedFills.remove(slot);
+			slotPartialPostedAt.remove(slot);
 			saveSlotRecordedFills();
 		}
 		else
@@ -2256,6 +2278,7 @@ public class O7FlipPlugin extends Plugin
 			prevGp  = 0L;
 			firstObservation = true;
 			offerInstanceId = System.currentTimeMillis() * 10 + slot;
+			slotPartialPostedAt.remove(slot);
 		}
 
 		int  deltaQty = currentQty - (int) prevQty;
@@ -2317,7 +2340,8 @@ public class O7FlipPlugin extends Plugin
 				long existingGp  = existing.totalGp;
 				if (existingQty >= currentQty)
 				{
-					slotRecordedFills.put(slot, new long[]{existingQty, existingGp, offerInstanceId});
+					slotRecordedFills.put(slot,
+						new long[]{existingQty, existingGp, offerInstanceId, lastPostedFor(prev, offerInstanceId)});
 					saveSlotRecordedFills();
 					return;
 				}
@@ -2331,8 +2355,86 @@ public class O7FlipPlugin extends Plugin
 
 		recordTrade(offer, isBuy, partial, deltaQty, deltaGp, timestamp, offerInstanceId);
 
-		slotRecordedFills.put(slot, new long[]{currentQty, currentGp, offerInstanceId});
+		slotRecordedFills.put(slot,
+			new long[]{currentQty, currentGp, offerInstanceId, lastPostedFor(prev, offerInstanceId)});
 		saveSlotRecordedFills();
+	}
+
+	private static long lastPostedFor(long[] prev, long offerInstanceId)
+	{
+		return prev != null && prev.length >= 4 && prev[2] == offerInstanceId ? prev[3] : 0L;
+	}
+
+	private void flushPendingPartialFills()
+	{
+		for (Integer slot : new ArrayList<>(slotRecordedFills.keySet()))
+		{
+			maybePostPartialFill(slot);
+		}
+	}
+
+	private void maybePostPartialFill(int slot)
+	{
+		long[] v = slotRecordedFills.get(slot);
+		if (v == null || v.length < 4 || v[0] <= v[3])
+		{
+			return;
+		}
+		long offerInstanceId = v[2];
+		if (tradePostsInFlight.contains(offerInstanceId))
+		{
+			return;
+		}
+		Long lastAt = slotPartialPostedAt.get(slot);
+		long now = System.currentTimeMillis();
+		if (lastAt != null && now - lastAt < PARTIAL_POST_INTERVAL_MS)
+		{
+			return;
+		}
+		int idx = findMatchingOfferRow(tradeHistory, offerInstanceId);
+		if (idx < 0)
+		{
+			return;
+		}
+		TradeRecord row = tradeHistory.get(idx);
+		if (row.quantity <= 0 || row.serverSynced || !row.isBuy)
+		{
+			return;
+		}
+		slotPartialPostedAt.put(slot, now);
+		postTradeRow(row, false, slot);
+	}
+
+	private void notePartialPosted(Integer slot, long offerInstanceId, int postedQty)
+	{
+		if (slot == null)
+		{
+			return;
+		}
+		long[] v = slotRecordedFills.get(slot);
+		if (v != null && v.length >= 4 && v[2] == offerInstanceId && v[3] < postedQty)
+		{
+			v[3] = postedQty;
+			saveSlotRecordedFills();
+		}
+	}
+
+	private void drainDeferredTerminal(long offerInstanceId)
+	{
+		if (!deferredTerminalPosts.remove(offerInstanceId))
+		{
+			return;
+		}
+		int idx = findMatchingOfferRow(tradeHistory, offerInstanceId);
+		if (idx < 0)
+		{
+			return;
+		}
+		TradeRecord row = tradeHistory.get(idx);
+		if (!row.serverSynced && row.quantity > 0)
+		{
+			postTradeRow(row, true, null);
+		}
 	}
 
 	private void recordTrade(GrandExchangeOffer offer, boolean isBuy, boolean partial,
@@ -2348,17 +2450,11 @@ public class O7FlipPlugin extends Plugin
 		if (existingIdx >= 0)
 		{
 			TradeRecord existing = updated.get(existingIdx);
-			TradeRecord merged = new TradeRecord();
-			merged.itemId          = existing.itemId;
-			merged.name            = existing.name;
-			merged.isBuy           = existing.isBuy;
+			TradeRecord merged = existing.copy();
 			merged.quantity        = existing.quantity + deltaQty;
 			merged.totalGp         = existing.totalGp  + deltaGp;
 			merged.priceEach       = merged.quantity > 0 ? merged.totalGp / merged.quantity : existing.priceEach;
-			merged.timestamp       = existing.timestamp;
 			merged.partial         = partial;
-			merged.tradeId         = existing.tradeId;
-			merged.serverSynced    = existing.serverSynced;
 			merged.offerInstanceId = offerInstanceId;
 			merged.totalQuantity   = totalQty > 0 ? totalQty : existing.totalQuantity;
 			updated.set(existingIdx, merged);
@@ -2428,42 +2524,9 @@ public class O7FlipPlugin extends Plugin
 		boolean terminal = !partial
 			|| st == net.runelite.api.GrandExchangeOfferState.CANCELLED_BUY
 			|| st == net.runelite.api.GrandExchangeOfferState.CANCELLED_SELL;
-		if (terminal
-			&& posted.quantity > 0
-			&& !posted.serverSynced
-			&& (posted.offerInstanceId == null || !tradePostsInFlight.contains(posted.offerInstanceId))
-			&& config.shareTradeData()
-			&& config.apiKey() != null
-			&& !config.apiKey().trim().isEmpty())
+		if (terminal && posted.quantity > 0 && !posted.serverSynced)
 		{
-			TradeRecord rowForServer = new TradeRecord();
-			rowForServer.itemId          = posted.itemId;
-			rowForServer.name            = posted.name;
-			rowForServer.isBuy           = posted.isBuy;
-			rowForServer.quantity        = posted.quantity;
-			rowForServer.totalGp         = posted.totalGp;
-			rowForServer.priceEach       = posted.quantity > 0 ? posted.totalGp / posted.quantity : posted.priceEach;
-			rowForServer.timestamp       = posted.timestamp;
-			rowForServer.partial         = posted.partial;
-			rowForServer.totalQuantity   = posted.totalQuantity;
-			rowForServer.offerInstanceId = posted.offerInstanceId;
-			final Long postedOid = posted.offerInstanceId;
-			if (postedOid != null)
-			{
-				tradePostsInFlight.add(postedOid);
-			}
-			apiClient.postTradeRecord(rowForServer, (delivered, tradeId) ->
-				clientThread.invoke(() ->
-				{
-					if (postedOid != null)
-					{
-						tradePostsInFlight.remove(postedOid);
-						if (delivered)
-						{
-							markRowSynced(postedOid, tradeId);
-						}
-					}
-				}));
+			postOrDeferTerminal(posted);
 		}
 
 		if (!isBuy)
@@ -2513,19 +2576,8 @@ public class O7FlipPlugin extends Plugin
 			return;
 		}
 		List<TradeRecord> updated = new ArrayList<>(tradeHistory);
-		TradeRecord cleared = new TradeRecord();
-		cleared.itemId          = existing.itemId;
-		cleared.name            = existing.name;
-		cleared.isBuy           = existing.isBuy;
-		cleared.quantity        = existing.quantity;
-		cleared.totalGp         = existing.totalGp;
-		cleared.priceEach       = existing.priceEach;
-		cleared.timestamp       = existing.timestamp;
-		cleared.partial         = false;
-		cleared.tradeId         = existing.tradeId;
-		cleared.serverSynced    = existing.serverSynced;
-		cleared.offerInstanceId = existing.offerInstanceId;
-		cleared.totalQuantity   = existing.totalQuantity;
+		TradeRecord cleared = existing.copy();
+		cleared.partial = false;
 		updated.set(idx, cleared);
 		tradeHistory = Collections.unmodifiableList(updated);
 		saveTradeHistory();
@@ -2544,19 +2596,9 @@ public class O7FlipPlugin extends Plugin
 		{
 			return;
 		}
-		TradeRecord stamped = new TradeRecord();
-		stamped.itemId          = existing.itemId;
-		stamped.name            = existing.name;
-		stamped.isBuy           = existing.isBuy;
-		stamped.quantity        = existing.quantity;
-		stamped.totalGp         = existing.totalGp;
-		stamped.priceEach       = existing.priceEach;
-		stamped.timestamp       = existing.timestamp;
-		stamped.partial         = existing.partial;
-		stamped.tradeId         = stampId ? tradeId : existing.tradeId;
-		stamped.serverSynced    = true;
-		stamped.offerInstanceId = existing.offerInstanceId;
-		stamped.totalQuantity   = existing.totalQuantity;
+		TradeRecord stamped = existing.copy();
+		stamped.tradeId      = stampId ? tradeId : existing.tradeId;
+		stamped.serverSynced = true;
 		List<TradeRecord> updated = new ArrayList<>(tradeHistory);
 		updated.set(idx, stamped);
 		tradeHistory = Collections.unmodifiableList(updated);
@@ -2581,19 +2623,8 @@ public class O7FlipPlugin extends Plugin
 			|| terminalState == GrandExchangeOfferState.SOLD) && existing.partial;
 		if (shouldClearPartial)
 		{
-			TradeRecord cleared = new TradeRecord();
-			cleared.itemId          = existing.itemId;
-			cleared.name            = existing.name;
-			cleared.isBuy           = existing.isBuy;
-			cleared.quantity        = existing.quantity;
-			cleared.totalGp         = existing.totalGp;
-			cleared.priceEach       = existing.priceEach;
-			cleared.timestamp       = existing.timestamp;
-			cleared.partial         = false;
-			cleared.tradeId         = existing.tradeId;
-			cleared.serverSynced    = existing.serverSynced;
-			cleared.offerInstanceId = existing.offerInstanceId;
-			cleared.totalQuantity   = existing.totalQuantity;
+			TradeRecord cleared = existing.copy();
+			cleared.partial = false;
 			List<TradeRecord> updated = new ArrayList<>(tradeHistory);
 			updated.set(idx, cleared);
 			tradeHistory = Collections.unmodifiableList(updated);
@@ -2601,64 +2632,72 @@ public class O7FlipPlugin extends Plugin
 			toPost = cleared;
 		}
 
-		if (toPost.serverSynced
-			|| (toPost.offerInstanceId != null && tradePostsInFlight.contains(toPost.offerInstanceId)))
+		if (toPost.serverSynced)
 		{
 			return;
 		}
 
-		if (config.shareTradeData()
-			&& config.apiKey() != null
-			&& !config.apiKey().trim().isEmpty())
+		postOrDeferTerminal(toPost);
+	}
+
+	private void postOrDeferTerminal(TradeRecord row)
+	{
+		Long oid = row.offerInstanceId;
+		if (oid != null && tradePostsInFlight.contains(oid))
 		{
-			TradeRecord rowForServer = new TradeRecord();
-			rowForServer.itemId          = toPost.itemId;
-			rowForServer.name            = toPost.name;
-			rowForServer.isBuy           = toPost.isBuy;
-			rowForServer.quantity        = toPost.quantity;
-			rowForServer.totalGp         = toPost.totalGp;
-			rowForServer.priceEach       = toPost.priceEach;
-			rowForServer.timestamp       = toPost.timestamp;
-			rowForServer.partial         = toPost.partial;
-			rowForServer.totalQuantity   = toPost.totalQuantity;
-			rowForServer.offerInstanceId = toPost.offerInstanceId;
-			final Long postedOid = toPost.offerInstanceId;
-			if (postedOid != null)
-			{
-				tradePostsInFlight.add(postedOid);
-			}
-			apiClient.postTradeRecord(rowForServer, (delivered, tradeId) ->
-				clientThread.invoke(() ->
-				{
-					if (postedOid != null)
-					{
-						tradePostsInFlight.remove(postedOid);
-						if (delivered)
-						{
-							markRowSynced(postedOid, tradeId);
-						}
-					}
-				}));
+			deferredTerminalPosts.add(oid);
+			return;
 		}
+		postTradeRow(row, true, null);
+	}
+
+	private void postTradeRow(TradeRecord source, boolean terminal, Integer partialSlot)
+	{
+		if (!config.shareTradeData()
+			|| config.apiKey() == null
+			|| config.apiKey().trim().isEmpty())
+		{
+			return;
+		}
+		TradeRecord rowForServer = source.copy();
+		rowForServer.priceEach = rowForServer.quantity > 0
+			? Math.max(1L, rowForServer.totalGp / rowForServer.quantity)
+			: Math.max(1L, rowForServer.priceEach);
+		final Long postedOid = rowForServer.offerInstanceId;
+		final int postedQty = rowForServer.quantity;
+		if (postedOid != null)
+		{
+			tradePostsInFlight.add(postedOid);
+		}
+		apiClient.postTradeRecord(rowForServer, (delivered, tradeId) ->
+			clientThread.invoke(() ->
+			{
+				if (postedOid == null)
+				{
+					return;
+				}
+				tradePostsInFlight.remove(postedOid);
+				if (delivered)
+				{
+					if (terminal)
+					{
+						markRowSynced(postedOid, tradeId);
+					}
+					else
+					{
+						notePartialPosted(partialSlot, postedOid, postedQty);
+					}
+				}
+				drainDeferredTerminal(postedOid);
+			}));
 	}
 
 	private void stampLegacyWithOfferInstanceId(int idx, long offerInstanceId)
 	{
 		List<TradeRecord> updated = new ArrayList<>(tradeHistory);
 		TradeRecord legacy = updated.get(idx);
-		TradeRecord stamped = new TradeRecord();
-		stamped.itemId          = legacy.itemId;
-		stamped.name            = legacy.name;
-		stamped.isBuy           = legacy.isBuy;
-		stamped.quantity        = legacy.quantity;
-		stamped.totalGp         = legacy.totalGp;
-		stamped.priceEach       = legacy.priceEach;
-		stamped.timestamp       = legacy.timestamp;
-		stamped.partial         = legacy.partial;
-		stamped.tradeId         = legacy.tradeId;
-		stamped.serverSynced    = legacy.serverSynced;
+		TradeRecord stamped = legacy.copy();
 		stamped.offerInstanceId = offerInstanceId;
-		stamped.totalQuantity   = legacy.totalQuantity;
 		updated.set(idx, stamped);
 		tradeHistory = Collections.unmodifiableList(updated);
 		saveTradeHistory();
@@ -2841,6 +2880,8 @@ public class O7FlipPlugin extends Plugin
 		configManager.unsetConfiguration("o7flip", TRADE_HISTORY_KEY);
 		configManager.unsetConfiguration("o7flip", LAST_TRACKER_SYNC_KEY);
 		slotRecordedFills.clear();
+		slotPartialPostedAt.clear();
+		deferredTerminalPosts.clear();
 		configManager.unsetConfiguration("o7flip", SLOT_FILLS_KEY);
 		slotListedAt.clear();
 		configManager.unsetConfiguration("o7flip", SLOT_LISTED_KEY);
@@ -2943,7 +2984,9 @@ public class O7FlipPlugin extends Plugin
 			}
 			long[] v = entry.getValue();
 			long offerId = v.length >= 3 ? v[2] : System.currentTimeMillis();
-			sb.append(entry.getKey()).append(':').append(v[0]).append(':').append(v[1]).append(':').append(offerId);
+			long lastPosted = v.length >= 4 ? v[3] : 0L;
+			sb.append(entry.getKey()).append(':').append(v[0]).append(':').append(v[1])
+				.append(':').append(offerId).append(':').append(lastPosted);
 			first = false;
 		}
 		configManager.setConfiguration("o7flip", SLOT_FILLS_KEY, sb.toString());
@@ -2968,7 +3011,8 @@ public class O7FlipPlugin extends Plugin
 				long offerId = parts.length >= 4
 					? Long.parseLong(parts[3])
 					: System.currentTimeMillis() * 10 + slot;
-				slotRecordedFills.put(slot, new long[]{qty, gp, offerId});
+				long lastPosted = parts.length >= 5 ? Long.parseLong(parts[4]) : 0L;
+				slotRecordedFills.put(slot, new long[]{qty, gp, offerId, lastPosted});
 			}
 			catch (NumberFormatException ignored)
 			{
@@ -3187,6 +3231,89 @@ public class O7FlipPlugin extends Plugin
 			}));
 		}
 		return overlayInsightsCache.get(itemId);
+	}
+
+	private Integer flipAge(int itemId, boolean sell)
+	{
+		long[] v = flipAges.get(itemId);
+		if (v == null)
+		{
+			return null;
+		}
+		long stored = sell ? v[1] : v[0];
+		if (stored < 0)
+		{
+			return null;
+		}
+		long elapsedMin = (System.currentTimeMillis() - v[2]) / 60_000L;
+		return (int) (stored + elapsedMin);
+	}
+
+	public Integer flipBuyAge(int itemId)
+	{
+		return flipAge(itemId, false);
+	}
+
+	public Integer flipSellAge(int itemId)
+	{
+		return flipAge(itemId, true);
+	}
+
+	public void primeFlipAges(java.util.List<com.o7flip.model.Models.FlipItem> items)
+	{
+		if (items == null || items.isEmpty() || executor == null || executor.isShutdown())
+		{
+			return;
+		}
+		long now = System.currentTimeMillis();
+		java.util.List<Integer> wanted = new ArrayList<>();
+		for (com.o7flip.model.Models.FlipItem f : items)
+		{
+			if (f == null || f.itemId <= 0 || f.buyAgeMinutes != null)
+			{
+				continue;
+			}
+			long[] v = flipAges.get(f.itemId);
+			if (v != null && now - v[2] <= FLIP_AGE_TTL_MS)
+			{
+				continue;
+			}
+			if (flipAgesInFlight.add(f.itemId))
+			{
+				wanted.add(f.itemId);
+			}
+		}
+		if (wanted.isEmpty())
+		{
+			return;
+		}
+		final java.util.concurrent.atomic.AtomicInteger remaining
+			= new java.util.concurrent.atomic.AtomicInteger(wanted.size());
+		for (Integer id : wanted)
+		{
+			final int itemId = id;
+			executor.execute(() -> apiClient.fetchItemInsights(itemId, ins ->
+			{
+				try
+				{
+					if (ins != null && ins.current != null)
+					{
+						flipAges.put(itemId, new long[]{
+							ins.current.buyAgeMinutes  != null ? ins.current.buyAgeMinutes  : -1L,
+							ins.current.sellAgeMinutes != null ? ins.current.sellAgeMinutes : -1L,
+							System.currentTimeMillis()});
+					}
+				}
+				finally
+				{
+					flipAgesInFlight.remove(itemId);
+					if (remaining.decrementAndGet() == 0)
+					{
+						SwingUtilities.invokeLater(() -> panel.refreshFlipRows());
+					}
+				}
+			}));
+		}
 	}
 
 	private static final double OFFER_GREEN_TOL = 0.015;

@@ -1416,7 +1416,7 @@ public class InsightsPanel extends JPanel
 		return rowText(label, text, valueColor);
 	}
 
-	private static String ageSuffix(Integer ageMinutes)
+	static String ageSuffix(Integer ageMinutes)
 	{
 		if (ageMinutes == null)
 		{
@@ -1428,10 +1428,10 @@ public class InsightsPanel extends JPanel
 		}
 		if (ageMinutes < 60)
 		{
-			return ageMinutes + "m ago";
+			return ageMinutes + "m";
 		}
 		long h = ageMinutes / 60;
-		return h + "h ago";
+		return h + "h";
 	}
 
 	private static JLabel centeredLabel(String text, Color colour, java.awt.Font font)

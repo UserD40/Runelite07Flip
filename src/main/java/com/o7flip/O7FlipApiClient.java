@@ -65,6 +65,8 @@ public class O7FlipApiClient
 	private static final Logger log = LoggerFactory.getLogger(O7FlipApiClient.class);
 
 	private static final String    BASE_URL        = "https://07flip.com/api/runelite";
+
+	public volatile long flipsAsOfMs;
 	private static final String    USER_AGENT      = "07Flip-RuneLite/1.0";
 	private static final int       PAGE_LIMIT      = 10;
 	private static final MediaType MEDIA_TYPE_JSON = MediaType.get("application/json; charset=utf-8");
@@ -2205,6 +2207,7 @@ public class O7FlipApiClient
 					if (onFlips != null && root.has("flips"))
 					{
 						JsonObject sec = root.getAsJsonObject("flips");
+						rememberFlipsAsOf(sec);
 						List<FlipItem> items = parseArray(sec, "flips", O7FlipApiClient.this::parseFlipItem);
 						onFlips.accept(items, getInt(sec, "total", items.size()));
 					}
@@ -2365,6 +2368,10 @@ public class O7FlipApiClient
 		try
 		{
 			JsonObject json = gson.fromJson(response.body().string(), JsonObject.class);
+			if ("flips".equals(arrayKey))
+			{
+				rememberFlipsAsOf(json);
+			}
 			List<T> items = parseArray(json, arrayKey, mapper);
 			int total = getInt(json, "total", items.size());
 			callback.accept(items, total);
@@ -2473,6 +2480,22 @@ public class O7FlipApiClient
 		{
 			log.warn("[07Flip] Parse error for '{}': {}", arrayKey, e.getMessage());
 			return new ArrayList<>();
+		}
+	}
+
+	private void rememberFlipsAsOf(JsonObject json)
+	{
+		String iso = getString(json, "as_of", getString(json, "updated_at", null));
+		if (iso == null || iso.isEmpty())
+		{
+			return;
+		}
+		try
+		{
+			flipsAsOfMs = java.time.Instant.parse(iso).toEpochMilli();
+		}
+		catch (Exception ignored)
+		{
 		}
 	}
 
