@@ -303,6 +303,8 @@ public class O7FlipPanel extends PluginPanel
 	private JPanel decantListPanel;
 	private JPanel favouritesListPanel;
 	private JPanel optimizerListPanel;
+	private JPanel flipsSyncNotice;
+	private JPanel planSyncNotice;
 	private com.o7flip.model.Models.OptimizeResult lastOptimize;
 	private int     optSlots         = 8;
 	private String  optRisk          = "medium";
@@ -1197,7 +1199,7 @@ public class O7FlipPanel extends PluginPanel
 		favouritesListPanel.repaint();
 	}
 
-	private JPanel buildTrackerCta()
+	private JPanel noticeCard(String title, String bodyHtml, int maxHeight, JComponent... actions)
 	{
 		JPanel card = new JPanel(new BorderLayout(0, 4));
 		card.setBackground(new Color(0x1F1F1F));
@@ -1205,19 +1207,30 @@ public class O7FlipPanel extends PluginPanel
 			javax.swing.BorderFactory.createLineBorder(new Color(0x3A3A3A), 1),
 			new EmptyBorder(8, 10, 8, 10)));
 		card.setAlignmentX(Component.LEFT_ALIGNMENT);
-		card.setMaximumSize(new Dimension(Integer.MAX_VALUE, 84));
+		card.setMaximumSize(new Dimension(Integer.MAX_VALUE, maxHeight));
 
-		JLabel title = new JLabel("Sync your trades across devices");
-		title.setFont(com.o7flip.util.Fonts.SM_BOLD);
-		title.setForeground(new Color(0xFFAA00));
+		JLabel titleLabel = new JLabel(title);
+		titleLabel.setFont(com.o7flip.util.Fonts.SM_BOLD);
+		titleLabel.setForeground(new Color(0xFFAA00));
 
-		JLabel body = new JLabel("<html><font color='#A0A0A0'>"
-			+ "Local recording works as-is. Sign up at <b>07flip.com</b> with Discord, "
-			+ "paste your API key into config, and your completed flips sync to your "
-			+ "Tracker page so you can browse them from any device."
-			+ "</font></html>");
+		JLabel body = new JLabel(bodyHtml);
 		body.setFont(com.o7flip.util.Fonts.SM);
 
+		JPanel buttonRow = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 4, 0));
+		buttonRow.setBackground(card.getBackground());
+		for (JComponent action : actions)
+		{
+			buttonRow.add(action);
+		}
+
+		card.add(titleLabel, BorderLayout.NORTH);
+		card.add(body,       BorderLayout.CENTER);
+		card.add(buttonRow,  BorderLayout.SOUTH);
+		return card;
+	}
+
+	private JPanel buildTrackerCta()
+	{
 		JButton signUp = new JButton("Open 07flip.com");
 		signUp.setFont(com.o7flip.util.Fonts.SM_BOLD);
 		signUp.setBackground(new Color(0xFFAA00));
@@ -1227,14 +1240,88 @@ public class O7FlipPanel extends PluginPanel
 		signUp.setBorderPainted(false);
 		signUp.addActionListener(e -> net.runelite.client.util.LinkBrowser.browse("https://07flip.com"));
 
-		JPanel buttonRow = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 0, 0));
-		buttonRow.setBackground(card.getBackground());
-		buttonRow.add(signUp);
+		return noticeCard("Sync your trades across devices",
+			"<html><font color='#A0A0A0'>"
+				+ "Local recording works as-is. Sign up at <b>07flip.com</b> with Discord and "
+				+ "paste your API key into config — your completed flips then sync to your "
+				+ "Tracker page automatically, so you can browse them from any device."
+				+ "</font></html>",
+			84, signUp);
+	}
 
-		card.add(title,     BorderLayout.NORTH);
-		card.add(body,      BorderLayout.CENTER);
-		card.add(buttonRow, BorderLayout.SOUTH);
+	private JPanel buildSyncNotice()
+	{
+		JButton enable = pillButton("Yes, sync");
+		enable.setBackground(ORANGE);
+		enable.setForeground(Color.BLACK);
+		enable.setToolTipText("Turns on \"Sync trade data with 07flip.com\" and uploads the trades "
+			+ "already recorded on this machine.");
+		enable.addActionListener(e ->
+		{
+			if (plugin != null)
+			{
+				plugin.enableTradeSync();
+			}
+		});
+
+		JButton dismiss = pillButton("Don't ask again");
+		dismiss.setBackground(new Color(0x3E3E3E));
+		dismiss.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
+		dismiss.setToolTipText("Keeps every trade on this machine and stops this prompt appearing again. "
+			+ "You can turn syncing on later in the plugin settings.");
+		dismiss.addActionListener(e ->
+		{
+			if (plugin != null)
+			{
+				plugin.dismissSyncPrompt();
+			}
+		});
+
+		JPanel card = noticeCard("Your trades are not syncing",
+			"<html><font color='#A0A0A0'>"
+				+ "<b>Sync trade data with 07flip.com</b> is switched off, so your completed trades are "
+				+ "saved on this machine only and your Tracker page stays empty. Turn it on and they "
+				+ "sync automatically, with non-plan flips added for you.<br><br>"
+				+ "Only item, quantity and price are sent — never your account name."
+				+ "</font></html>",
+			Integer.MAX_VALUE, enable, dismiss);
+		card.setBorder(new javax.swing.border.CompoundBorder(
+			new EmptyBorder(6, 6, 0, 6), card.getBorder()));
+		card.setVisible(false);
 		return card;
+	}
+
+	public void refreshSyncNotice()
+	{
+		boolean show = false;
+		if (plugin != null && plugin.getConfig() != null)
+		{
+			String key = plugin.getConfig().apiKey();
+			show = key != null && !key.trim().isEmpty()
+				&& !plugin.getConfig().shareTradeData()
+				&& !plugin.isSyncPromptDismissed();
+		}
+		for (JPanel notice : new JPanel[]{flipsSyncNotice, planSyncNotice})
+		{
+			if (notice != null && notice.isVisible() != show)
+			{
+				notice.setVisible(show);
+				notice.revalidate();
+				notice.repaint();
+			}
+		}
+	}
+
+	private JPanel northWithNotice(JPanel topBar, JPanel notice)
+	{
+		JPanel north = new JPanel(new BorderLayout());
+		north.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+		if (topBar != null)
+		{
+			north.add(topBar, BorderLayout.NORTH);
+		}
+		north.add(notice, BorderLayout.CENTER);
+		return north;
 	}
 
 	private void renderMyFlips()
@@ -2344,6 +2431,9 @@ public class O7FlipPanel extends PluginPanel
 		tabs.setFont(Fonts.SM);
 		applyStaticOrderUI(tabs);
 
+		flipsSyncNotice = null;
+		planSyncNotice  = null;
+
 		JPanel flipsContent    = buildFlipsTab();
 		JPanel dumpsContent    = buildDumpsTab();
 		JPanel insightsContent = buildInsightsTab();
@@ -2359,6 +2449,7 @@ public class O7FlipPanel extends PluginPanel
 			decantContent    = buildPremiumGateTab("Decant", PITCH_DECANT);
 			planContent      = buildPremiumGateTab("Plan",   PITCH_PLAN);
 			insightsContent  = buildPremiumGateTab("Item",   PITCH_ITEM);
+			planSyncNotice   = null;
 		}
 
 		JPanel otherContent      = buildOtherTab(dipsContent,
@@ -2428,6 +2519,7 @@ public class O7FlipPanel extends PluginPanel
 			}
 		});
 
+		refreshSyncNotice();
 		return tabs;
 	}
 
@@ -2807,6 +2899,18 @@ public class O7FlipPanel extends PluginPanel
 	private void attachClearPopup(JPanel listPanel)
 	{
 		JPopupMenu menu = new JPopupMenu();
+		JMenuItem syncItem = new JMenuItem("Sync missed trades");
+		syncItem.setToolTipText("Re-send every locally recorded trade that 07flip.com has not stored yet.");
+		syncItem.addActionListener(e ->
+		{
+			if (plugin != null)
+			{
+				plugin.syncMissedTrades();
+			}
+		});
+		menu.add(syncItem);
+		menu.addSeparator();
+
 		JMenuItem clearItem = new JMenuItem("Clear local trade history…");
 		clearItem.setToolTipText("Erase the local trade history stored on this machine. Server data is not affected.");
 		clearItem.addActionListener(e ->
@@ -3156,7 +3260,9 @@ public class O7FlipPanel extends PluginPanel
 
 		rebuildFlipsChipBar();
 
-		return assembleTab(topBar, flipsListPanel, buildPageBar(flipsPageLabel, flipsPrev, flipsNext));
+		flipsSyncNotice = buildSyncNotice();
+		return assembleTab(northWithNotice(topBar, flipsSyncNotice), flipsListPanel,
+			buildPageBar(flipsPageLabel, flipsPrev, flipsNext));
 	}
 
 	private JPanel buildFlipsFilterPanel()
@@ -3747,7 +3853,8 @@ public class O7FlipPanel extends PluginPanel
 		optInputsHost.setBackground(ColorScheme.DARKER_GRAY_COLOR);
 		applyOptimizerFormVisibility();
 
-		return assembleTab(optInputsHost, optimizerListPanel, null);
+		planSyncNotice = buildSyncNotice();
+		return assembleTab(northWithNotice(optInputsHost, planSyncNotice), optimizerListPanel, null);
 	}
 
 	private JPanel buildOptimizerCollapsedPill()

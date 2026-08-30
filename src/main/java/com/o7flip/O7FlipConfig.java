@@ -97,7 +97,7 @@ public interface O7FlipConfig extends Config
 	@ConfigItem(
 		keyName = "apiKey",
 		name = "API key",
-		description = "Your 07flip.com API key. To get it: sign up at 07flip.com, then visit 07flip.com/account and copy your API key. Paste it here to connect your account. No player data is sent to external servers.",
+		description = "Your 07flip.com API key. To get it: sign up at 07flip.com, then visit 07flip.com/account and copy your API key. Paste it here to connect your account. Your completed Grand Exchange trades are then synced to your Tracker page; no account name or other player data is ever sent. Untick \"Sync trade data with 07flip.com\" under Trade tracker to keep your trades on this machine only.",
 		secret = true,
 		section = generalSection,
 		position = 0
@@ -722,16 +722,17 @@ public interface O7FlipConfig extends Config
 
 	@ConfigItem(
 		keyName = "shareTradeData",
-		name = "Share trade data with 07flip.com",
+		name = "Sync trade data with 07flip.com",
 		description = "<html>Send your completed GE trades to 07flip.com so you can view your history<br>"
-			+ "on the website under the Tracker feature. Requires an API key.<br>"
+			+ "on the website under the Tracker feature. Nothing leaves this machine unless you<br>"
+			+ "have pasted an API key — untick this to keep your trades local only.<br>"
 			+ "<b>Only item ID, quantity, and price are sent — your account name is never included.</b></html>",
 		section = trackerSection,
 		position = 0
 	)
 	default boolean shareTradeData()
 	{
-		return false;
+		return true;
 	}
 
 	@ConfigItem(
