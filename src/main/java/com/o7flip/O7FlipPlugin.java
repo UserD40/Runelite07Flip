@@ -145,6 +145,7 @@ public class O7FlipPlugin extends Plugin
 	private ScheduledFuture<?> refreshTask;
 	private ScheduledFuture<?> authRefreshTask;
 	private ScheduledFuture<?> partialFlushTask;
+	private ScheduledFuture<?> tradeRetryTask;
 
 	volatile int    pendingGeBuyItemId = -1;
 	volatile long   pendingGeBuyPrice  = -1;
@@ -236,6 +237,9 @@ public class O7FlipPlugin extends Plugin
 	private final Set<Long> deferredTerminalPosts = new HashSet<>();
 
 	private static final long PARTIAL_POST_INTERVAL_MS = 60_000L;
+	private static final long TRADE_RETRY_INTERVAL_MIN = 5L;
+	private static final long UNAUTHORIZED_NOTICE_INTERVAL_MS = 15L * 60_000L;
+	private volatile long lastUnauthorizedNoticeAt = 0L;
 
 	public volatile List<TradeRecord> tradeHistory = Collections.emptyList();
 
@@ -297,6 +301,8 @@ public class O7FlipPlugin extends Plugin
 	private static final String BOND_LEDGER_COUNT_KEY = "bondLedgerCount";
 	private static final String BOND_LEDGER_MIGRATED_KEY = "bondLedgerMigrated";
 	private static final String MEMBERSHIP_HIDDEN_KEY = "membershipCostHidden";
+	private static final String SHARE_TRADE_DATA_KEY = "shareTradeData";
+	private static final String SYNC_PROMPT_DISMISSED_KEY = "syncPromptDismissed";
 	private static final String TRADE_HISTORY_HEALED_KEY = "tradeHistoryHealed";
 	private static final String SCRUB_VERSION_KEY = "tradeHistoryScrubVersion";
 	private static final String SCRUB_VERSION_CURRENT = "3";
@@ -971,8 +977,7 @@ public class O7FlipPlugin extends Plugin
 		restoreFreezesFromServer();
 		applyCachedAuthStatus();
 
-		apiClient.setOnFavouritesUnauthorized(() -> SwingUtilities.invokeLater(() ->
-			notifier.notify("Your 07Flip API key was rejected. Open the plugin config and paste it again.")));
+		apiClient.setOnFavouritesUnauthorized(this::notifyApiKeyRejected);
 
 		hydrateCachedTabs();
 
@@ -982,6 +987,8 @@ public class O7FlipPlugin extends Plugin
 			this::fetchAuthStatus, 15, 15, TimeUnit.MINUTES);
 		partialFlushTask = executor.scheduleAtFixedRate(
 			() -> clientThread.invoke(this::flushPendingPartialFills), 30, 30, TimeUnit.SECONDS);
+		tradeRetryTask = executor.scheduleAtFixedRate(
+			this::doBulkSyncToServer, TRADE_RETRY_INTERVAL_MIN, TRADE_RETRY_INTERVAL_MIN, TimeUnit.MINUTES);
 		executor.execute(() -> fetchAll(true));
 		executor.execute(this::doSyncTrackerHistory);
 		executor.execute(this::doBulkSyncToServer);
@@ -1015,6 +1022,10 @@ public class O7FlipPlugin extends Plugin
 		if (partialFlushTask != null)
 		{
 			partialFlushTask.cancel(true);
+		}
+		if (tradeRetryTask != null)
+		{
+			tradeRetryTask.cancel(true);
 		}
 		if (sessionBackgroundPollTask != null)
 		{
@@ -1681,7 +1692,28 @@ public class O7FlipPlugin extends Plugin
 
 		if ("apiKey".equals(key))
 		{
+			lastUnauthorizedNoticeAt = 0L;
 			executor.execute(this::fetchAuthStatus);
+			syncMissedTrades();
+			SwingUtilities.invokeLater(panel::refreshSyncNotice);
+			return;
+		}
+		if (SHARE_TRADE_DATA_KEY.equals(key))
+		{
+			if (config.shareTradeData())
+			{
+				syncMissedTrades();
+			}
+			else
+			{
+				trackerStats = null;
+			}
+			final List<TradeRecord> snap = tradeHistory;
+			SwingUtilities.invokeLater(() ->
+			{
+				panel.updateMyFlips(snap);
+				panel.refreshSyncNotice();
+			});
 			return;
 		}
 		if (key.startsWith("itemTab"))
@@ -2285,13 +2317,9 @@ public class O7FlipPlugin extends Plugin
 		long deltaGp  = currentGp  - prevGp;
 		if (deltaQty <= 0)
 		{
-			GrandExchangeOfferState terminalState = offer.getState();
-			if (terminalState == GrandExchangeOfferState.BOUGHT
-				|| terminalState == GrandExchangeOfferState.SOLD
-				|| terminalState == GrandExchangeOfferState.CANCELLED_BUY
-				|| terminalState == GrandExchangeOfferState.CANCELLED_SELL)
+			if (isTerminalOfferState(offer.getState()))
 			{
-				finaliseAndPostExistingRow(offerInstanceId, terminalState);
+				finaliseAndPostExistingRow(offerInstanceId);
 			}
 			return;
 		}
@@ -2301,9 +2329,7 @@ public class O7FlipPlugin extends Plugin
 			|| state == GrandExchangeOfferState.BOUGHT
 			|| state == GrandExchangeOfferState.CANCELLED_BUY;
 		boolean partial = state == GrandExchangeOfferState.BUYING
-			|| state == GrandExchangeOfferState.SELLING
-			|| state == GrandExchangeOfferState.CANCELLED_BUY
-			|| state == GrandExchangeOfferState.CANCELLED_SELL;
+			|| state == GrandExchangeOfferState.SELLING;
 
 		if (firstObservation)
 		{
@@ -2315,11 +2341,7 @@ public class O7FlipPlugin extends Plugin
 				existingIdx = findReObservableActiveOfferRow(tradeHistory,
 					offer.getItemId(), isBuy, totalQtyForLookup, slot, currentQty, currentGp);
 			}
-			if (existingIdx < 0
-				&& (state == GrandExchangeOfferState.BOUGHT
-					|| state == GrandExchangeOfferState.SOLD
-					|| state == GrandExchangeOfferState.CANCELLED_BUY
-					|| state == GrandExchangeOfferState.CANCELLED_SELL))
+			if (existingIdx < 0 && isTerminalOfferState(state))
 			{
 				existingIdx = findRecordedTerminalOfferRow(tradeHistory,
 					offer.getItemId(), isBuy, totalQtyForLookup, slot, currentQty, currentGp);
@@ -2343,6 +2365,10 @@ public class O7FlipPlugin extends Plugin
 					slotRecordedFills.put(slot,
 						new long[]{existingQty, existingGp, offerInstanceId, lastPostedFor(prev, offerInstanceId)});
 					saveSlotRecordedFills();
+					if (isTerminalOfferState(state))
+					{
+						finaliseAndPostExistingRow(offerInstanceId);
+					}
 					return;
 				}
 				deltaQty = currentQty - existingQty;
@@ -2520,11 +2546,7 @@ public class O7FlipPlugin extends Plugin
 			gpDropOverlay.queue(profit);
 		}
 
-		net.runelite.api.GrandExchangeOfferState st = offer.getState();
-		boolean terminal = !partial
-			|| st == net.runelite.api.GrandExchangeOfferState.CANCELLED_BUY
-			|| st == net.runelite.api.GrandExchangeOfferState.CANCELLED_SELL;
-		if (terminal && posted.quantity > 0 && !posted.serverSynced)
+		if (!partial && posted.quantity > 0 && !posted.serverSynced)
 		{
 			postOrDeferTerminal(posted);
 		}
@@ -2605,7 +2627,15 @@ public class O7FlipPlugin extends Plugin
 		saveTradeHistory();
 	}
 
-	private void finaliseAndPostExistingRow(long offerInstanceId, GrandExchangeOfferState terminalState)
+	private static boolean isTerminalOfferState(GrandExchangeOfferState state)
+	{
+		return state == GrandExchangeOfferState.BOUGHT
+			|| state == GrandExchangeOfferState.SOLD
+			|| state == GrandExchangeOfferState.CANCELLED_BUY
+			|| state == GrandExchangeOfferState.CANCELLED_SELL;
+	}
+
+	private void finaliseAndPostExistingRow(long offerInstanceId)
 	{
 		int idx = findMatchingOfferRow(tradeHistory, offerInstanceId);
 		if (idx < 0)
@@ -2619,9 +2649,7 @@ public class O7FlipPlugin extends Plugin
 		}
 
 		TradeRecord toPost = existing;
-		boolean shouldClearPartial = (terminalState == GrandExchangeOfferState.BOUGHT
-			|| terminalState == GrandExchangeOfferState.SOLD) && existing.partial;
-		if (shouldClearPartial)
+		if (existing.partial)
 		{
 			TradeRecord cleared = existing.copy();
 			cleared.partial = false;
@@ -2638,6 +2666,30 @@ public class O7FlipPlugin extends Plugin
 		}
 
 		postOrDeferTerminal(toPost);
+	}
+
+	private synchronized void notifyApiKeyRejected()
+	{
+		long now = System.currentTimeMillis();
+		if (now - lastUnauthorizedNoticeAt < UNAUTHORIZED_NOTICE_INTERVAL_MS)
+		{
+			return;
+		}
+		lastUnauthorizedNoticeAt = now;
+		SwingUtilities.invokeLater(() ->
+			notifier.notify("Your 07Flip API key was rejected. Your trades are still recorded locally — "
+				+ "open the plugin config, paste a fresh key from 07flip.com/account, and they will sync."));
+	}
+
+	public void syncMissedTrades()
+	{
+		if (executor == null || executor.isShutdown())
+		{
+			return;
+		}
+		executor.execute(this::doBulkSyncToServer);
+		executor.execute(this::doSyncTrackerHistory);
+		executor.execute(this::doFetchTrackerStats);
 	}
 
 	private void postOrDeferTerminal(TradeRecord row)
@@ -2938,6 +2990,22 @@ public class O7FlipPlugin extends Plugin
 		configManager.setConfiguration("o7flip", BOND_LEDGER_MIGRATED_KEY, "true");
 		final List<TradeRecord> snapshot = tradeHistory;
 		SwingUtilities.invokeLater(() -> panel.updateMyFlips(snapshot));
+	}
+
+	public boolean isSyncPromptDismissed()
+	{
+		return "true".equals(configManager.getConfiguration("o7flip", SYNC_PROMPT_DISMISSED_KEY));
+	}
+
+	public void dismissSyncPrompt()
+	{
+		configManager.setConfiguration("o7flip", SYNC_PROMPT_DISMISSED_KEY, "true");
+		SwingUtilities.invokeLater(panel::refreshSyncNotice);
+	}
+
+	public void enableTradeSync()
+	{
+		configManager.setConfiguration("o7flip", SHARE_TRADE_DATA_KEY, "true");
 	}
 
 	public boolean isMembershipCostHidden()

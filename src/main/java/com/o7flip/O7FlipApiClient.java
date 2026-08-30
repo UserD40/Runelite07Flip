@@ -67,7 +67,8 @@ public class O7FlipApiClient
 	private static final String    BASE_URL        = "https://07flip.com/api/runelite";
 
 	public volatile long flipsAsOfMs;
-	private static final String    USER_AGENT      = "07Flip-RuneLite/1.0";
+	private static final String    PLUGIN_VERSION  = "1.1.0";
+	private static final String    USER_AGENT      = "07Flip-RuneLite/" + PLUGIN_VERSION;
 	private static final int       PAGE_LIMIT      = 10;
 	private static final MediaType MEDIA_TYPE_JSON = MediaType.get("application/json; charset=utf-8");
 
@@ -361,6 +362,7 @@ public class O7FlipApiClient
 				try
 				{
 					if (response.code() == 429) markRateLimited(response);
+					if (response.code() == 401) signalUnauthorized();
 					if (!response.isSuccessful() || response.body() == null)
 					{
 						log.warn("[07Flip] postTradeRecordsBulk HTTP {}", response.code());
@@ -493,6 +495,7 @@ public class O7FlipApiClient
 				try
 				{
 					if (response.code() == 429) markRateLimited(response);
+					if (response.code() == 401) signalUnauthorized();
 					if (!response.isSuccessful() || response.body() == null)
 					{
 						log.warn("[07Flip] postTradeRecord HTTP {}", response.code());
@@ -1250,9 +1253,9 @@ public class O7FlipApiClient
 			public void onResponse(Call call, Response response) throws IOException
 			{
 				int code = response.code();
-				if (code == 401 && onUnauthorized != null)
+				if (code == 401)
 				{
-					try { onUnauthorized.run(); } catch (Exception ignored) {}
+					signalUnauthorized();
 					response.close();
 					callback.accept(new ArrayList<>());
 					return;
@@ -1302,6 +1305,22 @@ public class O7FlipApiClient
 	}
 
 	private volatile Runnable onUnauthorized;
+
+	private void signalUnauthorized()
+	{
+		Runnable handler = onUnauthorized;
+		if (handler == null)
+		{
+			return;
+		}
+		try
+		{
+			handler.run();
+		}
+		catch (Exception ignored)
+		{
+		}
+	}
 
 	public void setOnFavouritesUnauthorized(Runnable handler)
 	{
@@ -1364,9 +1383,9 @@ public class O7FlipApiClient
 				if (!ok)
 				{
 					log.warn("[07Flip] {} /favourites HTTP {}", method, code);
-					if (code == 401 && onUnauthorized != null)
+					if (code == 401)
 					{
-						try { onUnauthorized.run(); } catch (Exception ignored) {}
+						signalUnauthorized();
 					}
 				}
 				response.close();
