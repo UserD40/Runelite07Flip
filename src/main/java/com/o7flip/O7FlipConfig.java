@@ -168,16 +168,16 @@ public interface O7FlipConfig extends Config
 	}
 
 	@ConfigItem(
-		keyName = "capitalLocked",
-		name = "",
-		description = "",
-		hidden = true,
+		keyName = "capitalFilterDisabled",
+		name = "Disable capital filter",
+		description = "<html>Permanently turn off the sidebar Capital filter. While checked, every flip is shown "
+			+ "regardless of your capital and the sidebar On/Off toggle cannot re-enable it.</html>",
 		section = generalSection,
-		position = 6
+		position = 3
 	)
-	default boolean capitalLocked()
+	default boolean capitalFilterDisabled()
 	{
-		return true;
+		return false;
 	}
 
 	@ConfigItem(

@@ -33,7 +33,7 @@ import com.o7flip.ui.DecantItemPanel;
 import com.o7flip.ui.DipItemPanel;
 import com.o7flip.ui.DumpItemPanel;
 import com.o7flip.ui.FlipItemPanel;
-import com.o7flip.ui.SearchResultPanel;
+import com.o7flip.ui.ClickRouter;
 import com.o7flip.ui.TradeRecordPanel;
 import com.o7flip.ui.VectorIcon;
 import com.o7flip.util.Fonts;
@@ -323,6 +323,8 @@ public class O7FlipPanel extends PluginPanel
 	private com.o7flip.ui.InsightsPanel insightsPanel;
 	private JPanel searchResultsPanel;
 	private JScrollPane searchScrollPane;
+	private List<SearchResultItem> lastSearchItems;
+	private String lastSearchQuery = "";
 
 	private JButton[] dumpsSortBtns;
 	private JButton[] dumpsTierBtns;
@@ -693,11 +695,17 @@ public class O7FlipPanel extends PluginPanel
 		}
 	}
 
-	public void refreshFlipRows()
+	public void refreshAgeRows()
 	{
+		String q = filtered();
 		if (allFlips != null && !allFlips.isEmpty())
 		{
-			renderFlips(filtered());
+			renderFlips(q);
+		}
+		renderFavourites(q);
+		if (lastSearchItems != null)
+		{
+			showSearchResults(lastSearchItems, lastSearchQuery);
 		}
 	}
 
@@ -757,6 +765,10 @@ public class O7FlipPanel extends PluginPanel
 	{
 		allFavourites = items;
 		renderFavourites(filtered());
+		if (plugin != null)
+		{
+			plugin.primeFlipAges(fFavourites(filtered()));
+		}
 		if (insightsPanel != null)
 		{
 			insightsPanel.refreshFavouriteState();
@@ -1756,6 +1768,8 @@ public class O7FlipPanel extends PluginPanel
 		{
 			return;
 		}
+		lastSearchItems = items;
+		lastSearchQuery = query;
 
 		searchResultsPanel.removeAll();
 
@@ -1771,14 +1785,32 @@ public class O7FlipPanel extends PluginPanel
 		else
 		{
 			int shown = isPremium ? items.size() : Math.min(FREE_SEARCH_ROWS, items.size());
+			List<FlipItem> primeable = new ArrayList<>();
 			for (int i = 0; i < shown; i++)
 			{
-				searchResultsPanel.add(new SearchResultPanel(items.get(i), itemManager, i % 2 != 0, plugin));
+				SearchResultItem s = items.get(i);
+				if (s.buyPrice != null && s.sellPrice != null)
+				{
+					FlipItem f = toFlipItem(s);
+					if (primeable.size() < 10)
+					{
+						primeable.add(f);
+					}
+					searchResultsPanel.add(new FlipItemPanel(f, itemManager, i % 2 != 0, plugin, true));
+				}
+				else
+				{
+					searchResultsPanel.add(noPriceRow(s, i % 2 != 0));
+				}
 				searchResultsPanel.add(sep());
 			}
 			if (shown < items.size())
 			{
 				searchResultsPanel.add(lockedCard("Search", PITCH_SEARCH));
+			}
+			if (plugin != null)
+			{
+				plugin.primeFlipAges(primeable);
 			}
 		}
 
@@ -1786,6 +1818,52 @@ public class O7FlipPanel extends PluginPanel
 		searchResultsPanel.repaint();
 		searchScrollPane.revalidate();
 		searchScrollPane.repaint();
+	}
+
+	private static FlipItem toFlipItem(SearchResultItem s)
+	{
+		FlipItem f = new FlipItem();
+		f.itemId       = s.itemId;
+		f.name         = s.name;
+		f.buyPrice     = s.buyPrice;
+		f.sellPrice    = s.sellPrice;
+		f.profit       = s.profit != null ? s.profit : 0L;
+		f.roiPct       = s.roi != null ? s.roi : 0.0;
+		f.buyLimit     = s.buyLimit;
+		f.members      = s.members;
+		f.recBuyPrice  = s.recBuyPrice;
+		f.recSellPrice = s.recSellPrice;
+		f.recProfit    = s.recProfit;
+		f.hourlyVolume   = s.hourlyVolume;
+		f.dailyVolume    = s.dailyVolume;
+		f.buyAgeMinutes  = s.buyAgeMinutes;
+		f.sellAgeMinutes = s.sellAgeMinutes;
+		f.etaBuyMinutes  = s.etaBuyMinutes;
+		f.etaSellMinutes = s.etaSellMinutes;
+		return f;
+	}
+
+	private JPanel noPriceRow(SearchResultItem s, boolean odd)
+	{
+		JPanel row = new JPanel(new BorderLayout(8, 0));
+		row.setBackground(odd ? new Color(0x272727) : ColorScheme.DARK_GRAY_COLOR);
+		row.setBorder(new EmptyBorder(8, 10, 8, 10));
+		row.setAlignmentX(Component.LEFT_ALIGNMENT);
+		row.add(FlipItemPanel.buildIcon(s.itemId, itemManager), BorderLayout.WEST);
+		JPanel text = new JPanel(new GridLayout(2, 1, 0, 2));
+		text.setOpaque(false);
+		JLabel name = new JLabel(s.name);
+		name.setFont(Fonts.BOLD);
+		name.setForeground(Color.WHITE);
+		JLabel sub = new JLabel("No recent price data");
+		sub.setFont(Fonts.SM);
+		sub.setForeground(new Color(0x555555));
+		text.add(name);
+		text.add(sub);
+		row.add(text, BorderLayout.CENTER);
+		row.setMaximumSize(new Dimension(Integer.MAX_VALUE, row.getPreferredSize().height));
+		ClickRouter.attach(row, plugin, s.itemId, s.name);
+		return row;
 	}
 
 	private void renderLocked(JPanel panel, String title, String sub)
@@ -2121,9 +2199,17 @@ public class O7FlipPanel extends PluginPanel
 		JButton capitalToggle = pillButton(filterOn ? "On" : "Off");
 		capitalToggle.setBackground(filterOn ? new Color(0x00C27A) : new Color(0x3A3A3A));
 		capitalToggle.setForeground(filterOn ? Color.BLACK : new Color(0xCCCCCC));
-		capitalToggle.setToolTipText(filterOn
-			? "Capital filter ON — flips show items priced at or below your capital. Click to turn off."
-			: "Capital filter OFF — every flip is shown. Click to filter by your capital.");
+		if (config != null && config.capitalFilterDisabled())
+		{
+			capitalToggle.setEnabled(false);
+			capitalToggle.setToolTipText("Capital filter disabled in plugin settings.");
+		}
+		else
+		{
+			capitalToggle.setToolTipText(filterOn
+				? "Capital filter ON — flips show items priced at or below your capital. Click to turn off."
+				: "Capital filter OFF — every flip is shown. Click to filter by your capital.");
+		}
 		capitalToggle.addActionListener(e ->
 		{
 			if (plugin != null)
@@ -2137,7 +2223,7 @@ public class O7FlipPanel extends PluginPanel
 			renderCapitalRow();
 		});
 
-		capitalField = new JTextField(formatCapital(displayedCapital()));
+		capitalField = new JTextField(formatCapital(editableCapital()));
 		capitalField.setBackground(new Color(0x1E1E1E));
 		capitalField.setForeground(Color.WHITE);
 		capitalField.setCaretColor(Color.WHITE);
@@ -2220,7 +2306,13 @@ public class O7FlipPanel extends PluginPanel
 
 	private O7FlipConfig.CapitalMode currentCapitalMode()
 	{
-		return config != null ? config.capitalMode() : O7FlipConfig.CapitalMode.OFF;
+		return config != null && !config.capitalFilterDisabled()
+			? config.capitalMode() : O7FlipConfig.CapitalMode.OFF;
+	}
+
+	private long editableCapital()
+	{
+		return config != null ? Math.max(0L, config.capitalManual()) : 0L;
 	}
 
 	private void focusCapitalFieldIfEditable()
@@ -2245,15 +2337,11 @@ public class O7FlipPanel extends PluginPanel
 		long parsed = parseCapital(capitalField.getText());
 		if (parsed < 0)
 		{
-			capitalField.setText(formatCapital(displayedCapital()));
+			capitalField.setText(formatCapital(editableCapital()));
 			return;
 		}
 		if (plugin != null)
 		{
-			if (currentCapitalMode() != O7FlipConfig.CapitalMode.MANUAL)
-			{
-				plugin.persistCapitalMode(O7FlipConfig.CapitalMode.MANUAL);
-			}
 			plugin.persistCapitalManual(parsed);
 		}
 		capitalField.setText(formatCapital(parsed));
@@ -2266,9 +2354,9 @@ public class O7FlipPanel extends PluginPanel
 
 	public void onCapitalAutoAdjusted()
 	{
-		if (capitalField != null && currentCapitalMode() != O7FlipConfig.CapitalMode.OFF)
+		if (capitalField != null)
 		{
-			capitalField.setText(formatCapital(displayedCapital()));
+			capitalField.setText(formatCapital(editableCapital()));
 		}
 		updateCapitalReadout();
 		if (!capitalExpanded)
@@ -3823,6 +3911,10 @@ public class O7FlipPanel extends PluginPanel
 			{
 				favouritesSortIdx = i;
 				renderFavourites(filtered());
+				if (plugin != null)
+				{
+					plugin.primeFlipAges(fFavourites(filtered()));
+				}
 			},
 			false);
 

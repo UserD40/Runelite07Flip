@@ -1721,7 +1721,7 @@ public class O7FlipPlugin extends Plugin
 			SwingUtilities.invokeLater(() -> panel.refreshInsightsSections());
 			return;
 		}
-		if ("narrowByPendingOffers".equals(key))
+		if ("narrowByPendingOffers".equals(key) || "capitalFilterDisabled".equals(key))
 		{
 			lastPendingFilterCeiling = Long.MIN_VALUE;
 			onCapitalChanged();
@@ -3327,9 +3327,34 @@ public class O7FlipPlugin extends Plugin
 		return flipAge(itemId, true);
 	}
 
+	private Integer flipEta(int itemId, boolean sell)
+	{
+		long[] v = flipAges.get(itemId);
+		if (v == null || v.length < 5)
+		{
+			return null;
+		}
+		long stored = sell ? v[4] : v[3];
+		return stored < 0 ? null : (int) stored;
+	}
+
+	public Integer flipEtaBuy(int itemId)
+	{
+		return flipEta(itemId, false);
+	}
+
+	public Integer flipEtaSell(int itemId)
+	{
+		return flipEta(itemId, true);
+	}
+
+	private static final int  PRIME_BATCH_MAX  = 8;
+	private static final long PRIME_SPACING_MS = 400L;
+
 	public void primeFlipAges(java.util.List<com.o7flip.model.Models.FlipItem> items)
 	{
-		if (items == null || items.isEmpty() || executor == null || executor.isShutdown())
+		if (items == null || items.isEmpty() || executor == null || executor.isShutdown()
+			|| apiClient.isRateLimited())
 		{
 			return;
 		}
@@ -3337,6 +3362,10 @@ public class O7FlipPlugin extends Plugin
 		java.util.List<Integer> wanted = new ArrayList<>();
 		for (com.o7flip.model.Models.FlipItem f : items)
 		{
+			if (wanted.size() >= PRIME_BATCH_MAX)
+			{
+				break;
+			}
 			if (f == null || f.itemId <= 0 || f.buyAgeMinutes != null)
 			{
 				continue;
@@ -3357,19 +3386,27 @@ public class O7FlipPlugin extends Plugin
 		}
 		final java.util.concurrent.atomic.AtomicInteger remaining
 			= new java.util.concurrent.atomic.AtomicInteger(wanted.size());
-		for (Integer id : wanted)
+		for (int i = 0; i < wanted.size(); i++)
 		{
-			final int itemId = id;
-			executor.execute(() -> apiClient.fetchItemInsights(itemId, ins ->
+			final int itemId = wanted.get(i);
+			executor.schedule(() -> apiClient.fetchItemInsights(itemId, ins ->
 			{
 				try
 				{
 					if (ins != null && ins.current != null)
 					{
+						com.o7flip.model.Models.ItemInsights.Liquidity liq = ins.liquidity;
 						flipAges.put(itemId, new long[]{
 							ins.current.buyAgeMinutes  != null ? ins.current.buyAgeMinutes  : -1L,
 							ins.current.sellAgeMinutes != null ? ins.current.sellAgeMinutes : -1L,
-							System.currentTimeMillis()});
+							System.currentTimeMillis(),
+							liq != null && liq.etaBuyMinutes  != null ? liq.etaBuyMinutes  : -1L,
+							liq != null && liq.etaSellMinutes != null ? liq.etaSellMinutes : -1L});
+					}
+					else
+					{
+						flipAges.putIfAbsent(itemId, new long[]{-1L, -1L,
+							System.currentTimeMillis() - FLIP_AGE_TTL_MS + FETCH_FAIL_RETRY_MS, -1L, -1L});
 					}
 				}
 				finally
@@ -3377,10 +3414,10 @@ public class O7FlipPlugin extends Plugin
 					flipAgesInFlight.remove(itemId);
 					if (remaining.decrementAndGet() == 0)
 					{
-						SwingUtilities.invokeLater(() -> panel.refreshFlipRows());
+						SwingUtilities.invokeLater(() -> panel.refreshAgeRows());
 					}
 				}
-			}));
+			}), (long) i * PRIME_SPACING_MS, TimeUnit.MILLISECONDS);
 		}
 	}
 
@@ -3875,10 +3912,14 @@ public class O7FlipPlugin extends Plugin
 		return bucketed;
 	}
 
+	private O7FlipConfig.CapitalMode activeCapitalMode()
+	{
+		return config.capitalFilterDisabled() ? O7FlipConfig.CapitalMode.OFF : config.capitalMode();
+	}
+
 	public long freeCapital()
 	{
-		O7FlipConfig.CapitalMode mode = config.capitalMode();
-		switch (mode)
+		switch (activeCapitalMode())
 		{
 			case MANUAL:
 				return Math.max(0L, config.capitalManual() - deployedCapital());
@@ -3890,8 +3931,7 @@ public class O7FlipPlugin extends Plugin
 
 	public long totalCapital()
 	{
-		O7FlipConfig.CapitalMode mode = config.capitalMode();
-		switch (mode)
+		switch (activeCapitalMode())
 		{
 			case MANUAL:
 				return Math.max(0L, config.capitalManual());
@@ -3933,7 +3973,7 @@ public class O7FlipPlugin extends Plugin
 
 	private void refreshForPendingCapitalChange()
 	{
-		if (!config.narrowByPendingOffers() || config.capitalMode() != O7FlipConfig.CapitalMode.MANUAL)
+		if (!config.narrowByPendingOffers() || activeCapitalMode() != O7FlipConfig.CapitalMode.MANUAL)
 		{
 			return;
 		}
@@ -3950,15 +3990,14 @@ public class O7FlipPlugin extends Plugin
 		}
 	}
 
-	public void persistCapitalMode(O7FlipConfig.CapitalMode mode)
-	{
-		configManager.setConfiguration("o7flip", "capitalMode", mode);
-	}
-
 	public void setCapitalFilterEnabled(boolean enabled)
 	{
 		if (enabled)
 		{
+			if (config.capitalFilterDisabled())
+			{
+				return;
+			}
 			configManager.setConfiguration("o7flip", "capitalMode", O7FlipConfig.CapitalMode.MANUAL);
 		}
 		else
@@ -3980,7 +4019,7 @@ public class O7FlipPlugin extends Plugin
 
 	private void adjustCapitalForTrade(int itemId, boolean isBuy, int deltaQty, long deltaGp)
 	{
-		if (config.capitalMode() != O7FlipConfig.CapitalMode.MANUAL || deltaQty <= 0)
+		if (activeCapitalMode() != O7FlipConfig.CapitalMode.MANUAL || deltaQty <= 0)
 		{
 			return;
 		}
