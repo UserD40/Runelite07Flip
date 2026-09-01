@@ -185,6 +185,9 @@ public final class Models
 		public Integer buyAgeMinutes;
 		public Integer sellAgeMinutes;
 
+		public Integer etaBuyMinutes;
+		public Integer etaSellMinutes;
+
 		public Long bandProfit;
 		public Long bandMargin;
 		public Long bandFloor;
@@ -324,6 +327,8 @@ public final class Models
 			public Double  volumeImbalancePct;
 			public Integer crossedHours24h;
 			public Double  estHoursToFillLimit;
+			public Integer etaBuyMinutes;
+			public Integer etaSellMinutes;
 		}
 
 	}
@@ -564,6 +569,8 @@ public final class Models
 		public double netMarginPct;
 		public long   cutLossMarginEach;
 		public int    etaMinutes;
+		public Integer etaCurrentMinutes;
+		public Long   assumedResalePrice;
 		public String status;
 		public Long   costBasis;
 		public String costBasisSource;
@@ -586,6 +593,10 @@ public final class Models
 		public boolean members;
 		public Integer highAlch;
 		public String  lastUpdated = "";
+		public Integer buyAgeMinutes;
+		public Integer sellAgeMinutes;
+		public Integer etaBuyMinutes;
+		public Integer etaSellMinutes;
 	}
 	public static class SlotFill
 	{

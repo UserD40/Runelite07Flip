@@ -420,19 +420,20 @@ public class GeQuickLookOverlay extends Overlay
 			panel.getChildren().add(pb);
 		}
 
-		panel.getChildren().add(line("Buy",  FlipItemPanel.formatGp(c.buyPrice) + " gp",  INFO));
-		panel.getChildren().add(line("Sell", FlipItemPanel.formatGp(c.sellPrice) + " gp", INFO));
-		panel.getChildren().add(line("Your price", FlipItemPanel.formatGp(snap.price) + " gp", Color.WHITE));
+		Integer age = snap.isBuy() ? c.buyAgeMinutes : c.sellAgeMinutes;
+		panel.getChildren().add(line("Market",
+			FlipItemPanel.formatGpCompact(c.buyPrice) + " > " + FlipItemPanel.formatGpCompact(c.sellPrice)
+				+ (age != null ? " · " + ageCompact(age) : ""), INFO));
+		panel.getChildren().add(line("Yours", FlipItemPanel.formatGp(snap.price) + " gp", Color.WHITE));
 		panel.getChildren().add(line(snap.isBuy() ? "07Flip buy" : "07Flip sell",
 			FlipItemPanel.formatGp(v.benchmark) + " gp", v.tier == 0 ? INFO : HEADER));
-		Integer age = snap.isBuy() ? c.buyAgeMinutes : c.sellAgeMinutes;
-		if (age != null)
-		{
-			panel.getChildren().add(line("Updated", ageText(age), INFO));
-		}
 
 		com.o7flip.model.Models.RepriceResult rp = plugin.getReprice(snap.itemId, snap.isBuy(),
 			Math.max(1, snap.totalQuantity - snap.quantitySold), snap.price, plugin.offerHeldMinutes(snap.slot));
+		if (rp != null && rp.etaCurrentMinutes != null && rp.etaCurrentMinutes > 0)
+		{
+			panel.getChildren().add(line("Est. fill", "~" + ageCompact(rp.etaCurrentMinutes), INFO));
+		}
 		boolean repriceShown = rp != null && addRepriceSection(snap, rp);
 		if (!repriceShown)
 		{
@@ -485,24 +486,44 @@ public class GeQuickLookOverlay extends Overlay
 		{
 			return false;
 		}
+		final boolean isBuy = snap.isBuy();
 		switch (rp.status)
 		{
 			case "clears_with_profit":
-				panel.getChildren().add(line(snap.isBuy() ? "Re-bid at" : "Re-list at",
+				panel.getChildren().add(line(isBuy ? "Re-bid at" : "Re-list at",
 					FlipItemPanel.formatGp(rp.suggestedPrice) + " gp", HEADER));
 				panel.getChildren().add(TitleComponent.builder()
-					.text("+" + FlipItemPanel.formatGp(rp.netMarginEach) + "/ea  ~" + rp.etaMinutes + "m")
+					.text("then +" + FlipItemPanel.formatGp(rp.netMarginEach) + "/ea"
+						+ (rp.etaMinutes > 0 ? " · ~" + rp.etaMinutes + "m" : ""))
 					.color(config.geBorderGood())
 					.build());
 				return true;
 			case "break_even_only":
-				panel.getChildren().add(line("Break-even", FlipItemPanel.formatGp(rp.breakEvenPrice) + " gp", HEADER));
+				panel.getChildren().add(line(isBuy ? "Max buy" : "Break-even sell",
+					FlipItemPanel.formatGp(rp.breakEvenPrice) + " gp", HEADER));
 				panel.getChildren().add(TitleComponent.builder()
-					.text("Hold - margin should recover")
+					.text(isBuy ? "Hold - thin margin" : "Hold - margin should recover")
 					.color(HEADER)
 					.build());
 				return true;
 			case "underwater":
+				if (isBuy)
+				{
+					if (rp.assumedResalePrice != null && rp.assumedResalePrice > 0)
+					{
+						panel.getChildren().add(line("Resells at", FlipItemPanel.formatGp(rp.assumedResalePrice) + " gp", INFO));
+					}
+					panel.getChildren().add(line("Fills near", FlipItemPanel.formatGp(rp.clearingPrice) + " gp", config.geBorderBad()));
+					panel.getChildren().add(TitleComponent.builder()
+						.text(FlipItemPanel.formatGp(rp.cutLossMarginEach) + "/ea if you chase")
+						.color(config.geBorderBad())
+						.build());
+					return true;
+				}
+				if (rp.costBasis != null && rp.costBasis > 0)
+				{
+					panel.getChildren().add(line("Paid", FlipItemPanel.formatGp(rp.costBasis) + " gp", INFO));
+				}
 				panel.getChildren().add(line("Cut loss at", FlipItemPanel.formatGp(rp.clearingPrice) + " gp", config.geBorderBad()));
 				panel.getChildren().add(TitleComponent.builder()
 					.text(FlipItemPanel.formatGp(rp.cutLossMarginEach) + "/ea to exit now")
@@ -636,19 +657,6 @@ public class GeQuickLookOverlay extends Overlay
 			.right(right)
 			.rightColor(rightColor)
 			.build();
-	}
-
-	private static String ageText(int minutes)
-	{
-		if (minutes < 1)
-		{
-			return "now";
-		}
-		if (minutes < 60)
-		{
-			return minutes + "m ago";
-		}
-		return (minutes / 60) + "h ago";
 	}
 
 	private static String truncate(String s, int max)

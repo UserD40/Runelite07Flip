@@ -881,6 +881,8 @@ public class O7FlipApiClient
 		r.netMarginPct      = getDouble(root, "net_margin_pct", 0.0);
 		r.cutLossMarginEach = getLong(root, "cut_loss_margin_each", 0L);
 		r.etaMinutes        = getInt(root, "eta_minutes", 0);
+		r.etaCurrentMinutes = getIntOrNull(root, "eta_current_minutes");
+		r.assumedResalePrice = getLongOrNull(root, "assumed_resale_price");
 		r.status            = getString(root, "status", "");
 		r.costBasis         = getLongOrNull(root, "cost_basis");
 		r.costBasisSource   = getString(root, "cost_basis_source", "");
@@ -972,6 +974,8 @@ public class O7FlipApiClient
 			l.volumeImbalancePct  = getDoubleOrNull(liq, "volume_imbalance_pct");
 			l.crossedHours24h     = getIntOrNull(liq, "crossed_hours_24h");
 			l.estHoursToFillLimit = getDoubleOrNull(liq, "est_hours_to_fill_limit");
+			l.etaBuyMinutes       = getIntOrNull(liq, "eta_buy_minutes");
+			l.etaSellMinutes      = getIntOrNull(liq, "eta_sell_minutes");
 			out.liquidity = l;
 		}
 

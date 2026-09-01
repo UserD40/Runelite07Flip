@@ -1021,6 +1021,24 @@ public class InsightsPanel extends JPanel
 			panel.add(rowText("Est. limit fill", "~" + formatHours(l.estHoursToFillLimit), Color.WHITE));
 			any = true;
 		}
+		if (l.etaBuyMinutes != null || l.etaSellMinutes != null)
+		{
+			StringBuilder v = new StringBuilder();
+			if (l.etaBuyMinutes != null)
+			{
+				v.append("buy ~").append(FlipItemPanel.formatMinutes(l.etaBuyMinutes));
+			}
+			if (l.etaSellMinutes != null)
+			{
+				if (v.length() > 0)
+				{
+					v.append(" · ");
+				}
+				v.append("sell ~").append(FlipItemPanel.formatMinutes(l.etaSellMinutes));
+			}
+			panel.add(rowText("Est. fill", v.toString(), Color.WHITE));
+			any = true;
+		}
 		if (!any)
 		{
 			panel.add(row("No liquidity data", "—"));

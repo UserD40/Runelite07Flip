@@ -232,7 +232,24 @@ public class FlipItemPanel extends JPanel
 			: (plugin != null ? plugin.flipSellAge(flip.itemId) : null);
 		textPanel.add(ageRow(buyLabel,  buyAge));
 		textPanel.add(ageRow(sellLabel, sellAge));
-		textPanel.add(profitLabel);
+		JPanel profitRow = new JPanel(new BorderLayout(6, 0));
+		profitRow.setOpaque(false);
+		profitRow.add(profitLabel, BorderLayout.CENTER);
+		Integer etaBuy  = flip.etaBuyMinutes  != null ? flip.etaBuyMinutes
+			: (plugin != null ? plugin.flipEtaBuy(flip.itemId)  : null);
+		Integer etaSell = flip.etaSellMinutes != null ? flip.etaSellMinutes
+			: (plugin != null ? plugin.flipEtaSell(flip.itemId) : null);
+		if (etaBuy != null && etaSell != null && etaBuy + etaSell > 0)
+		{
+			JLabel etaLabel = new JLabel("~" + formatMinutes(etaBuy + etaSell));
+			etaLabel.setFont(Fonts.SM);
+			etaLabel.setForeground(new Color(0x888888));
+			etaLabel.setToolTipText("<html>Est. flip time at 07Flip prices — buy fills ~"
+				+ formatMinutes(etaBuy) + ", sell fills ~" + formatMinutes(etaSell)
+				+ ".<br><font color='#888888'>Coarse estimate from hourly volume.</font></html>");
+			profitRow.add(etaLabel, BorderLayout.EAST);
+		}
+		textPanel.add(profitRow);
 
 		add(iconLabel, BorderLayout.WEST);
 		add(textPanel, BorderLayout.CENTER);
@@ -329,6 +346,17 @@ public class FlipItemPanel extends JPanel
 	public static String formatGp(long amount)
 	{
 		return String.format("%,d", amount);
+	}
+
+	public static String formatMinutes(int minutes)
+	{
+		if (minutes < 60)
+		{
+			return minutes + "m";
+		}
+		int h = minutes / 60;
+		int m = minutes % 60;
+		return m == 0 ? h + "h" : h + "h" + m + "m";
 	}
 
 	public static String formatGpCompact(long amount)
