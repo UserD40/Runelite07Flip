@@ -73,51 +73,7 @@ public final class ClickRouter
 			return;
 		}
 		applyTooltip(component);
-
-		final Timer[] pendingSingle = new Timer[]{ null };
-
-		component.addMouseListener(new MouseAdapter()
-		{
-			@Override
-			public void mouseClicked(MouseEvent e)
-			{
-				if (e.isShiftDown())
-				{
-					if (pendingSingle[0] != null)
-					{
-						pendingSingle[0].stop();
-						pendingSingle[0] = null;
-					}
-					net.runelite.client.util.LinkBrowser.browse("https://07flip.com/item/" + itemId);
-					return;
-				}
-				if (!SwingUtilities.isLeftMouseButton(e))
-				{
-					return;
-				}
-				if (e.getClickCount() == 1)
-				{
-					if (pendingSingle[0] != null)
-					{
-						pendingSingle[0].stop();
-					}
-					Timer t = new Timer(DOUBLE_CLICK_DELAY_MS, ev ->
-						plugin.openInsights(itemId, fallbackName));
-					t.setRepeats(false);
-					pendingSingle[0] = t;
-					t.start();
-				}
-				else if (e.getClickCount() == 2)
-				{
-					if (pendingSingle[0] != null)
-					{
-						pendingSingle[0].stop();
-						pendingSingle[0] = null;
-					}
-					net.runelite.client.util.LinkBrowser.browse("https://07flip.com/item/" + itemId);
-				}
-			}
-		});
+		attachClickOnly(component, plugin, itemId, fallbackName);
 	}
 
 	public static void attachClickOnly(Component component, O7FlipPlugin plugin, int itemId, String fallbackName)
@@ -126,49 +82,65 @@ public final class ClickRouter
 		{
 			return;
 		}
-		final Timer[] pendingSingle = new Timer[]{ null };
-		component.addMouseListener(new MouseAdapter()
+		for (java.awt.event.MouseListener l : component.getMouseListeners())
 		{
-			@Override
-			public void mouseClicked(MouseEvent e)
+			if (l instanceof Route)
 			{
-				if (e.isShiftDown())
-				{
-					if (pendingSingle[0] != null)
-					{
-						pendingSingle[0].stop();
-						pendingSingle[0] = null;
-					}
-					net.runelite.client.util.LinkBrowser.browse("https://07flip.com/item/" + itemId);
-					return;
-				}
-				if (!SwingUtilities.isLeftMouseButton(e))
-				{
-					return;
-				}
-				if (e.getClickCount() == 1)
-				{
-					if (pendingSingle[0] != null)
-					{
-						pendingSingle[0].stop();
-					}
-					Timer t = new Timer(DOUBLE_CLICK_DELAY_MS, ev ->
-						plugin.openInsights(itemId, fallbackName));
-					t.setRepeats(false);
-					pendingSingle[0] = t;
-					t.start();
-				}
-				else if (e.getClickCount() == 2)
-				{
-					if (pendingSingle[0] != null)
-					{
-						pendingSingle[0].stop();
-						pendingSingle[0] = null;
-					}
-					net.runelite.client.util.LinkBrowser.browse("https://07flip.com/item/" + itemId);
-				}
+				component.removeMouseListener(l);
 			}
-		});
+		}
+		component.addMouseListener(new Route(plugin, itemId, fallbackName));
+	}
+
+	private static final class Route extends MouseAdapter
+	{
+		private final O7FlipPlugin plugin;
+		private final int itemId;
+		private final String fallbackName;
+		private Timer pendingSingle;
+
+		Route(O7FlipPlugin plugin, int itemId, String fallbackName)
+		{
+			this.plugin = plugin;
+			this.itemId = itemId;
+			this.fallbackName = fallbackName;
+		}
+
+		@Override
+		public void mouseClicked(MouseEvent e)
+		{
+			if (e.isShiftDown())
+			{
+				cancelSingle();
+				net.runelite.client.util.LinkBrowser.browse("https://07flip.com/item/" + itemId);
+				return;
+			}
+			if (!SwingUtilities.isLeftMouseButton(e))
+			{
+				return;
+			}
+			if (e.getClickCount() == 1)
+			{
+				cancelSingle();
+				pendingSingle = new Timer(DOUBLE_CLICK_DELAY_MS, ev -> plugin.openInsights(itemId, fallbackName));
+				pendingSingle.setRepeats(false);
+				pendingSingle.start();
+			}
+			else if (e.getClickCount() == 2)
+			{
+				cancelSingle();
+				net.runelite.client.util.LinkBrowser.browse("https://07flip.com/item/" + itemId);
+			}
+		}
+
+		private void cancelSingle()
+		{
+			if (pendingSingle != null)
+			{
+				pendingSingle.stop();
+				pendingSingle = null;
+			}
+		}
 	}
 
 	private static final String NO_ROUTE_PROP = "o7flip.noRoute";
