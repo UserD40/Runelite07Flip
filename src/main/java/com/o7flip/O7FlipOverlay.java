@@ -42,6 +42,9 @@ public class O7FlipOverlay extends Overlay
 	private static final Color HIGHLIGHT_FILL   = new Color(255, 215, 0, 80);
 	private static final Color HIGHLIGHT_BORDER = new Color(255, 215, 0, 200);
 
+	private static final Color CONFIRM_MATCH    = new Color(0, 194, 122, 128);
+	private static final Color CONFIRM_MISMATCH = new Color(232, 80, 80, 128);
+
 	private static final Color QUEUE_HINT_FILL   = new Color(0, 200, 255, 60);
 	private static final Color QUEUE_HINT_BORDER = new Color(0, 200, 255, 200);
 
@@ -76,48 +79,34 @@ public class O7FlipOverlay extends Overlay
 			renderEnterPriceHighlight(graphics);
 		}
 
-		if (plugin.confirmHighlightUntilMs > System.currentTimeMillis()
-			&& plugin.getConfig().showGePriceHint())
-		{
-			renderConfirmHighlight(graphics);
-		}
-
-		return null;
-	}
-
-	private void renderConfirmHighlight(Graphics2D graphics)
-	{
 		Widget geSetup = client.getWidget(InterfaceID.GeOffers.SETUP);
 		if (geSetup == null || geSetup.isHidden())
 		{
 			plugin.confirmHighlightUntilMs = 0L;
-			return;
+			return null;
 		}
-		Widget[] children = geSetup.getDynamicChildren();
-		if (children == null)
+		Widget confirm = client.getWidget(InterfaceID.GeOffers.SETUP_CONFIRM);
+		if (confirm == null || confirm.isHidden())
 		{
-			return;
+			return null;
 		}
-		for (Widget w : children)
+		Boolean matches = plugin.getConfig().tintGeConfirm() ? plugin.geOfferPriceMatchesPlan() : null;
+		if (matches != null)
 		{
-			String[] actions = w.getActions();
-			if (actions == null)
-			{
-				continue;
-			}
-			for (String action : actions)
-			{
-				if (action != null && action.toLowerCase().contains("confirm"))
-				{
-					Rectangle bounds = w.getBounds();
-					graphics.setColor(HIGHLIGHT_FILL);
-					graphics.fill(bounds);
-					graphics.setColor(HIGHLIGHT_BORDER);
-					graphics.draw(bounds);
-					return;
-				}
-			}
+			graphics.setColor(matches ? CONFIRM_MATCH : CONFIRM_MISMATCH);
+			graphics.fill(confirm.getBounds());
 		}
+		else if (plugin.confirmHighlightUntilMs > System.currentTimeMillis()
+			&& plugin.getConfig().showGePriceHint())
+		{
+			Rectangle bounds = confirm.getBounds();
+			graphics.setColor(HIGHLIGHT_FILL);
+			graphics.fill(bounds);
+			graphics.setColor(HIGHLIGHT_BORDER);
+			graphics.draw(bounds);
+		}
+
+		return null;
 	}
 
 	private void renderEnterPriceHighlight(Graphics2D graphics)

@@ -161,6 +161,9 @@ public class O7FlipPlugin extends Plugin
 	private boolean gePriceInputFilled  = false;
 
 	public volatile long confirmHighlightUntilMs = 0L;
+	private long confirmCheckKey = Long.MIN_VALUE;
+	private long confirmCheckAtMs = 0L;
+	private Boolean confirmCheckResult;
 
 	private int sellSetupArmedItemId = -1;
 
@@ -1592,6 +1595,46 @@ public class O7FlipPlugin extends Plugin
 	public boolean isGeSellSetup()
 	{
 		return isSellSetupVisible(client.getWidget(InterfaceID.GeOffers.SETUP));
+	}
+
+	public Boolean geOfferPriceMatchesPlan()
+	{
+		int itemId = currentGeSetupItemId();
+		if (itemId <= 0)
+		{
+			return null;
+		}
+		boolean sell = isGeSellSetup();
+		long entered = client.getVarbitValue(VarbitID.GE_NEWOFFER_PRICE);
+		long key = ((long) itemId << 33) | (sell ? 1L << 32 : 0L) | entered;
+		long now = System.currentTimeMillis();
+		if (key != confirmCheckKey || now - confirmCheckAtMs > 1000L)
+		{
+			confirmCheckKey = key;
+			confirmCheckAtMs = now;
+			confirmCheckResult = priceMatchesPlan(itemId, sell, entered);
+		}
+		return confirmCheckResult;
+	}
+
+	private Boolean priceMatchesPlan(int itemId, boolean sell, long entered)
+	{
+		if (ladderPrice(itemId, sell, O7FlipConfig.GePriceDefault.SEVEN_FLIP) <= 0)
+		{
+			return null;
+		}
+		if (entered <= 0)
+		{
+			return false;
+		}
+		for (O7FlipConfig.GePriceDefault which : O7FlipConfig.GePriceDefault.values())
+		{
+			if (entered == ladderPrice(itemId, sell, which))
+			{
+				return true;
+			}
+		}
+		return entered == (sell ? computeAutoSellPrice(itemId) : computeAutoBuyPrice(itemId));
 	}
 
 	public boolean isGePriceEntryOpen()

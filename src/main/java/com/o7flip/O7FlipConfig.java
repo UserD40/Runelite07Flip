@@ -310,6 +310,19 @@ public interface O7FlipConfig extends Config
 	}
 
 	@ConfigItem(
+		keyName = "tintGeConfirm",
+		name = "Colour the Confirm button",
+		description = "On the GE offer setup, tint Confirm red while the entered price is not one of the plugin's "
+			+ "suggested prices, and green once it is.",
+		section = geSection,
+		position = 7
+	)
+	default boolean tintGeConfirm()
+	{
+		return true;
+	}
+
+	@ConfigItem(
 		keyName = "showInventoryTooltip",
 		name = "Show cost basis tooltip",
 		description = "Hover an item in inventory to see your cost basis and 07Flip's recommended sell price.",
