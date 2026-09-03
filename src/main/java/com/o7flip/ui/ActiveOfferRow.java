@@ -33,11 +33,13 @@ import net.runelite.client.ui.ColorScheme;
 import javax.swing.BoxLayout;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
+import javax.swing.SwingUtilities;
 import javax.swing.border.EmptyBorder;
 import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Component;
 import java.awt.Dimension;
+import java.awt.FlowLayout;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.RenderingHints;
@@ -50,11 +52,15 @@ public class ActiveOfferRow extends JPanel
 	private static final Color BUY_COL   = new Color(0x5B9BD5);
 	private static final Color SELL_COL  = new Color(0x00C27A);
 	private static final Color BAR_TRACK  = new Color(0x1F1F1F);
+	private static final Color MARKET_COL = new Color(0xA9B7C6);
 
 	private final ActiveOfferSnapshot offer;
 	private final O7FlipPlugin plugin;
 	private final Color baseBg;
 	private final ProgressBar bar;
+	private final JLabel yourLabel;
+	private final JLabel liveLabel;
+	private final JLabel marketAgeLabel;
 	private int lastTier = -1;
 
 	public ActiveOfferRow(ActiveOfferSnapshot offer, ItemManager itemManager, boolean odd, O7FlipPlugin plugin)
@@ -78,14 +84,22 @@ public class ActiveOfferRow extends JPanel
 		nameLabel.setForeground(Color.WHITE);
 		nameLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
 
-		String typeWord = isBuy ? "Buy" : "Sell";
-		JLabel typeLabel = new JLabel(typeWord + " · " + FlipItemPanel.formatGpCompact(offer.price) + " gp ea");
-		typeLabel.setFont(Fonts.SM);
-		typeLabel.setForeground(sideCol);
-		typeLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
-
 		boolean fullyFilled = offer.totalQuantity > 0 && offer.quantitySold >= offer.totalQuantity;
 		Color barCol = fullyFilled ? SELL_COL : sideCol;
+
+		yourLabel      = smallLabel(FlipItemPanel.formatGpCompact(offer.price), barCol);
+		liveLabel      = smallLabel("", MARKET_COL);
+		marketAgeLabel = smallLabel("", MARKET_COL);
+		JPanel priceLeft = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
+		priceLeft.setOpaque(false);
+		priceLeft.add(yourLabel);
+		priceLeft.add(liveLabel);
+		JPanel priceRow = new JPanel(new BorderLayout());
+		priceRow.setOpaque(false);
+		priceRow.setAlignmentX(Component.LEFT_ALIGNMENT);
+		priceRow.add(priceLeft,      BorderLayout.WEST);
+		priceRow.add(marketAgeLabel, BorderLayout.EAST);
+		priceRow.setMaximumSize(new Dimension(Integer.MAX_VALUE, priceRow.getPreferredSize().height));
 
 		O7FlipConfig cfg = plugin != null ? plugin.getConfig() : null;
 		bar = new ProgressBar(offer.quantitySold, offer.totalQuantity, barCol,
@@ -98,11 +112,20 @@ public class ActiveOfferRow extends JPanel
 		textCol.setAlignmentX(Component.LEFT_ALIGNMENT);
 		textCol.add(nameLabel);
 		textCol.add(javax.swing.Box.createVerticalStrut(2));
-		textCol.add(typeLabel);
+		textCol.add(priceRow);
 		textCol.add(javax.swing.Box.createVerticalStrut(4));
 		textCol.add(bar);
 
-		add(iconLabel, BorderLayout.WEST);
+		JLabel sideLabel = smallLabel(isBuy ? "Buy" : "Sell", sideCol);
+		JPanel west = new JPanel();
+		west.setLayout(new BoxLayout(west, BoxLayout.Y_AXIS));
+		west.setOpaque(false);
+		iconLabel.setAlignmentX(Component.CENTER_ALIGNMENT);
+		sideLabel.setAlignmentX(Component.CENTER_ALIGNMENT);
+		west.add(iconLabel);
+		west.add(sideLabel);
+
+		add(west, BorderLayout.WEST);
 		add(textCol,   BorderLayout.CENTER);
 
 		ClickRouter.attachInsightsOnly(this, plugin, offer.itemId, offer.name);
@@ -119,31 +142,71 @@ public class ActiveOfferRow extends JPanel
 			? offer.quantitySold + "/" + offer.totalQuantity
 			: "";
 		boolean done = offer.totalQuantity > 0 && offer.quantitySold >= offer.totalQuantity;
-		String right = done || (cfg != null && !cfg.activeLastFillAge()) ? "" : lastFillText();
-		bar.setLabels(counter, right);
+		boolean showAge = plugin != null && (cfg == null || cfg.activeLastFillAge());
+		String own = showAge && !done && offer.quantitySold > 0 ? plugin.offerLastFillText(offer.slot) : null;
+		bar.setLabels(counter, own);
+		com.o7flip.model.Models.ItemInsights.Current c = current();
+		long live = c == null ? 0L : (offer.isBuy() ? c.buyPrice : c.sellPrice);
+		String liveCompact = FlipItemPanel.formatGpCompact(live);
+		liveLabel.setText(live <= 0 ? ""
+			: live == offer.price ? " · same"
+			: liveCompact.equals(yourLabel.getText()) ? " · " + FlipItemPanel.formatGp(live)
+			: " · " + liveCompact);
+		Integer mins = c == null ? null : (offer.isBuy() ? c.buyAgeMinutes : c.sellAgeMinutes);
+		marketAgeLabel.setText(showAge && mins != null && mins >= 0
+			? (offer.isBuy() ? "Last buy " : "Last sale ") + O7FlipPlugin.ageFromMinutes(mins)
+			: "");
 	}
 
-	private String lastFillText()
+	private com.o7flip.model.Models.ItemInsights.Current current()
 	{
-		if (plugin == null)
+		com.o7flip.model.Models.ItemInsights ins = plugin != null ? plugin.getOverlayInsights(offer.itemId) : null;
+		return ins == null ? null : ins.current;
+	}
+
+	private static JLabel smallLabel(String text, Color col)
+	{
+		JLabel l = new JLabel(text);
+		l.setFont(Fonts.SM);
+		l.setForeground(col);
+		return l;
+	}
+
+	private boolean under(Component c, java.awt.Point p)
+	{
+		return c.getWidth() > 0 && c.contains(SwingUtilities.convertPoint(this, p, c));
+	}
+
+	private String partTip(java.awt.Point p)
+	{
+		boolean isBuy = offer.isBuy();
+		if (under(yourLabel, p))
 		{
-			return "";
+			return "<html>Your " + (isBuy ? "buy" : "sell") + " offer: "
+				+ FlipItemPanel.formatGp(offer.price) + " gp each</html>";
 		}
-		if (offer.quantitySold > 0)
+		if (under(liveLabel, p))
 		{
-			String age = plugin.offerLastFillText(offer.slot);
-			if (age != null)
-			{
-				return age;
-			}
+			com.o7flip.model.Models.ItemInsights.Current c = current();
+			long live = c == null ? 0L : (isBuy ? c.buyPrice : c.sellPrice);
+			return "<html>Live market " + (isBuy ? "buy" : "sell") + " price right now: "
+				+ FlipItemPanel.formatGp(live) + " gp.<br>"
+				+ "Compare it with your offer to see if you're still competitive.</html>";
 		}
-		com.o7flip.model.Models.ItemInsights ins = plugin.getOverlayInsights(offer.itemId);
-		if (ins == null || ins.current == null)
+		if (under(marketAgeLabel, p))
 		{
-			return "";
+			return "<html>How long since anyone last " + (isBuy ? "bought" : "sold")
+				+ " this item on the Grand Exchange.<br>Market-wide, not your offer.</html>";
 		}
-		Integer mins = offer.isBuy() ? ins.current.buyAgeMinutes : ins.current.sellAgeMinutes;
-		return mins == null || mins < 0 ? "" : O7FlipPlugin.ageFromMinutes(mins);
+		if (under(bar, p))
+		{
+			String own = plugin != null ? plugin.offerLastFillText(offer.slot) : null;
+			String tail = offer.quantitySold <= 0 ? "Nothing has filled yet."
+				: own == null ? "Last fill happened before the plugin was watching."
+				: "Your last unit " + (isBuy ? "bought" : "sold") + ": " + own + " ago.";
+			return "<html>Filled " + offer.quantitySold + " of " + offer.totalQuantity + ".<br>" + tail + "</html>";
+		}
+		return null;
 	}
 
 	@Override
@@ -166,6 +229,11 @@ public class ActiveOfferRow extends JPanel
 	@Override
 	public String getToolTipText(java.awt.event.MouseEvent event)
 	{
+		String part = partTip(event.getPoint());
+		if (part != null)
+		{
+			return part;
+		}
 		if (lastTier < 0 || plugin == null)
 		{
 			return ClickRouter.CLICK_HINT;

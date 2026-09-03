@@ -274,17 +274,10 @@ public class GeQuickLookOverlay extends Overlay
 			: "";
 
 		String age = "";
-		if (config.activeLastFillAge())
+		if (config.activeLastFillAge() && snap.quantitySold > 0 && snap.quantitySold < snap.totalQuantity)
 		{
-			ItemInsights ins = plugin.getOverlayInsights(snap.itemId);
-			if (ins != null && ins.current != null)
-			{
-				Integer minutes = snap.isBuy() ? ins.current.buyAgeMinutes : ins.current.sellAgeMinutes;
-				if (minutes != null && minutes >= 0)
-				{
-					age = ageCompact(minutes);
-				}
-			}
+			String own = plugin.offerLastFillText(snap.slot);
+			age = own != null ? own : "";
 		}
 
 		graphics.setFont(FontManager.getRunescapeSmallFont());

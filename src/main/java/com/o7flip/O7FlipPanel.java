@@ -1459,21 +1459,23 @@ public class O7FlipPanel extends PluginPanel
 			{
 				activeColorTimer = new javax.swing.Timer(5000, e ->
 				{
-					if (myFlipsSortIdx == 0 && myFlipsListPanel != null && myFlipsListPanel.isShowing())
-					{
-						for (java.awt.Component c : myFlipsListPanel.getComponents())
-						{
-							if (c instanceof com.o7flip.ui.ActiveOfferRow)
-							{
-								((com.o7flip.ui.ActiveOfferRow) c).refreshCaption();
-							}
-						}
-						myFlipsListPanel.repaint();
-					}
-					else if (activeColorTimer != null)
+					if (myFlipsSortIdx != 0 || myFlipsListPanel == null)
 					{
 						activeColorTimer.stop();
+						return;
 					}
+					if (!myFlipsListPanel.isShowing())
+					{
+						return;
+					}
+					for (java.awt.Component c : myFlipsListPanel.getComponents())
+					{
+						if (c instanceof com.o7flip.ui.ActiveOfferRow)
+						{
+							((com.o7flip.ui.ActiveOfferRow) c).refreshCaption();
+						}
+					}
+					myFlipsListPanel.repaint();
 				});
 				activeColorTimer.setRepeats(true);
 			}
