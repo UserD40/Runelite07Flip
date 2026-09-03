@@ -785,7 +785,7 @@ public interface O7FlipConfig extends Config
 	)
 	default Color lastFillColour()
 	{
-		return new Color(255, 212, 0, 200);
+		return new Color(255, 255, 255, 230);
 	}
 
 	@ConfigItem(

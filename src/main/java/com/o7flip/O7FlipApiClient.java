@@ -917,6 +917,8 @@ public class O7FlipApiClient
 			c.recProfit      = getLongOrNull(cur, "rec_profit");
 			c.buyAgeMinutes  = getIntOrNull(cur, "buy_age_minutes");
 			c.sellAgeMinutes = getIntOrNull(cur, "sell_age_minutes");
+			c.buyTime        = getLongOrNull(cur, "buy_time");
+			c.sellTime       = getLongOrNull(cur, "sell_time");
 			out.current = c;
 		}
 

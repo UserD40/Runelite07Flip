@@ -59,6 +59,7 @@ public class GeQuickLookOverlay extends Overlay
 	private static final Color NEUTRAL    = new Color(0xC0A050);
 	private static final Color HEADER     = new Color(0xFFD700);
 	private static final Color INFO       = new Color(0xC0C0C0);
+	private static final Color TEXT_SHADOW = new Color(0, 0, 0, 170);
 	private static final int   ICON_FILL_ALPHA  = 50;
 	private static final int   ICON_FRAME_ALPHA = 210;
 	private static final int   CHART_W    = 172;
@@ -302,17 +303,24 @@ public class GeQuickLookOverlay extends Overlay
 			return;
 		}
 
-		graphics.setColor(config.lastFillColour());
 		if (counterW > 0 && ageW > 0)
 		{
-			graphics.drawString(counter, bar.x + pad, y);
-			graphics.drawString(age, bar.x + bar.width - pad - ageW, y);
+			drawShadowed(graphics, counter, bar.x + pad, y);
+			drawShadowed(graphics, age, bar.x + bar.width - pad - ageW, y);
 		}
 		else
 		{
 			String only = counterW > 0 ? counter : age;
-			graphics.drawString(only, bar.x + (bar.width - counterW - ageW) / 2, y);
+			drawShadowed(graphics, only, bar.x + (bar.width - counterW - ageW) / 2, y);
 		}
+	}
+
+	private void drawShadowed(Graphics2D g, String s, int x, int y)
+	{
+		g.setColor(TEXT_SHADOW);
+		g.drawString(s, x + 1, y + 1);
+		g.setColor(config.lastFillColour());
+		g.drawString(s, x, y);
 	}
 
 	private static String ageCompact(int minutes)
@@ -413,7 +421,7 @@ public class GeQuickLookOverlay extends Overlay
 			panel.getChildren().add(pb);
 		}
 
-		Integer age = snap.isBuy() ? c.buyAgeMinutes : c.sellAgeMinutes;
+		Integer age = plugin.marketAgeMinutes(snap.itemId, snap.isBuy());
 		panel.getChildren().add(line("Market",
 			FlipItemPanel.formatGpCompact(c.buyPrice) + " > " + FlipItemPanel.formatGpCompact(c.sellPrice)
 				+ (age != null ? " · " + ageCompact(age) : ""), INFO));
