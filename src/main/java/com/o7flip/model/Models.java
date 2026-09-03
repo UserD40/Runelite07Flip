@@ -253,6 +253,8 @@ public final class Models
 			public Long   recProfit;
 			public Integer buyAgeMinutes;
 			public Integer sellAgeMinutes;
+			public Long    buyTime;
+			public Long    sellTime;
 		}
 
 		public static class Volume

@@ -152,8 +152,13 @@ public class ActiveOfferRow extends JPanel
 			: live == offer.price ? " · same"
 			: liveCompact.equals(yourLabel.getText()) ? " · " + FlipItemPanel.formatGp(live)
 			: " · " + liveCompact);
-		Integer mins = c == null ? null : (offer.isBuy() ? c.buyAgeMinutes : c.sellAgeMinutes);
-		marketAgeLabel.setText(showAge && mins != null && mins >= 0
+		Integer mins = plugin != null ? plugin.marketAgeMinutes(offer.itemId, offer.isBuy()) : null;
+		long ownMins = plugin != null ? plugin.offerLastFillAgeMinutes(offer.slot) : -1L;
+		if (mins != null && ownMins >= 0 && ownMins < mins)
+		{
+			mins = (int) ownMins;
+		}
+		marketAgeLabel.setText(showAge && mins != null
 			? (offer.isBuy() ? "Last buy " : "Last sale ") + O7FlipPlugin.ageFromMinutes(mins)
 			: "");
 	}

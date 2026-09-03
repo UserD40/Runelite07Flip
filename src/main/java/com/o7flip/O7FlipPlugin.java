@@ -3547,6 +3547,34 @@ public class O7FlipPlugin extends Plugin
 		return ageText(offerLastFillAtMs(slot));
 	}
 
+	public long offerLastFillAgeMinutes(int slot)
+	{
+		long at = offerLastFillAtMs(slot);
+		return at <= 0 ? -1L : Math.max(0L, (System.currentTimeMillis() - at) / 60_000L);
+	}
+
+	public Integer marketAgeMinutes(int itemId, boolean buySide)
+	{
+		com.o7flip.model.Models.ItemInsights ins = getOverlayInsights(itemId);
+		if (ins == null || ins.current == null)
+		{
+			return null;
+		}
+		Long at = buySide ? ins.current.buyTime : ins.current.sellTime;
+		if (at != null && at > 0)
+		{
+			return (int) Math.max(0L, (System.currentTimeMillis() / 1000L - at) / 60L);
+		}
+		Integer mins = buySide ? ins.current.buyAgeMinutes : ins.current.sellAgeMinutes;
+		if (mins == null || mins < 0)
+		{
+			return null;
+		}
+		Long fetched = overlayInsightsFetchedAt.get(itemId);
+		long extra = fetched == null ? 0L : Math.max(0L, (System.currentTimeMillis() - fetched) / 60_000L);
+		return (int) (mins + extra);
+	}
+
 	private static String ageText(long sinceMs)
 	{
 		if (sinceMs <= 0)
@@ -3560,7 +3588,7 @@ public class O7FlipPlugin extends Plugin
 	{
 		if (minutes < 1)
 		{
-			return ">1m";
+			return "<1m";
 		}
 		if (minutes < 60)
 		{
