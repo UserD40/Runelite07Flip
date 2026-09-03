@@ -764,8 +764,8 @@ public interface O7FlipConfig extends Config
 	@ConfigItem(
 		keyName = "activeLastFillAge",
 		name = "Time since last buy / sale",
-		description = "Show how long ago the last unit bought or sold (e.g. Last sale: 5m) on the Grand Exchange "
-			+ "progress bar and on the Trades tab.",
+		description = "Show how long since your own offer last filled a unit inside the progress bar (Grand Exchange "
+			+ "and Trades tab), plus how long since the market's last buy / sale next to the price on the Trades tab.",
 		section = geSlotsSection,
 		position = 10
 	)
@@ -778,7 +778,7 @@ public interface O7FlipConfig extends Config
 	@ConfigItem(
 		keyName = "lastFillColour",
 		name = "Progress bar text colour",
-		description = "Colour of the fill counter and time-since-last-buy/sale text drawn on the Grand Exchange "
+		description = "Colour of the fill counter and time-since-your-last-fill text drawn on the Grand Exchange "
 			+ "offer progress bars and on the Trades tab rows. Lower the opacity to keep it subtle.",
 		section = geSlotsSection,
 		position = 11

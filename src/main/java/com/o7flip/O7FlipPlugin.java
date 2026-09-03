@@ -2249,7 +2249,7 @@ public class O7FlipPlugin extends Plugin
 		if (state == GrandExchangeOfferState.EMPTY)
 		{
 			next.remove(slot);
-			if (slotFillClock.remove(slot) != null)
+			if (client.getGameState() == GameState.LOGGED_IN && slotFillClock.remove(slot) != null)
 			{
 				saveSlotFillClock();
 			}
