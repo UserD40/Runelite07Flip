@@ -153,6 +153,8 @@ public class O7FlipPanel extends PluginPanel
 		{"buyPriceDesc",    "Buy price (high → low)"},
 		{"sellPrice",       "Sell price (low → high)"},
 		{"sellPriceDesc",   "Sell price (high → low)"},
+		{"bandProfit",      "Bulk profit"},
+		{"bandMarginPct",   "Bulk margin %"},
 	};
 
 	private static final long[]   MIN_PROFITS       = {0, 100_000, 500_000, 1_000_000};
@@ -606,9 +608,16 @@ public class O7FlipPanel extends PluginPanel
 
 	public String getFlipsSortKey()
 	{
-		if ("bandFlip".equals(getSelectedPreset())) return "bandProfit";
 		int idx = Math.max(0, Math.min(flipsSortIdx, FLIPS_SORTS.length - 1));
 		return FLIPS_SORTS[idx][0];
+	}
+
+	private boolean syncBulkSort()
+	{
+		boolean bulk = "bandFlip".equals(getSelectedPreset());
+		if (flipsSortCombo == null || bulk == getFlipsSortKey().startsWith("band")) return false;
+		flipsSortCombo.setSelectedIndex(bulk ? FLIPS_SORTS.length - 2 : 0);
+		return true;
 	}
 
 	public boolean dumpsUsesBotEndpoint()
@@ -1036,11 +1045,6 @@ public class O7FlipPanel extends PluginPanel
 		}
 	}
 
-	private List<DumpItem> sortDumps(List<DumpItem> items)
-	{
-		return items;
-	}
-
 	private void renderFlips(String q)
 	{
 		fillListPaged(flipsListPanel, fFlips(q), flipsPage, flipsTotal,
@@ -1057,7 +1061,7 @@ public class O7FlipPanel extends PluginPanel
 		}
 		hiliteFilter(dumpsSortBtns, dumpsSortIdx);
 
-		List<DumpItem> items = sortDumps(fDumps(q));
+		List<DumpItem> items = fDumps(q);
 		dumpsListPanel.removeAll();
 
 		int total = Math.max(dumpsTotal, items.size());
@@ -3397,6 +3401,7 @@ public class O7FlipPanel extends PluginPanel
 			applyAccountStyle();
 			flipsPage = 0;
 			rebuildFlipsChipBar();
+			if (syncBulkSort()) return;
 			if (plugin != null)
 			{
 				plugin.onFlipsFilterChanged();
@@ -3412,6 +3417,7 @@ public class O7FlipPanel extends PluginPanel
 			applyAccountStyle();
 			flipsPage = 0;
 			rebuildFlipsChipBar();
+			if (syncBulkSort()) return;
 			if (plugin != null)
 			{
 				plugin.onFlipsFilterChanged();
@@ -3446,6 +3452,7 @@ public class O7FlipPanel extends PluginPanel
 			flipsCategoryIdx = categoryCombo.getSelectedIndex();
 			flipsPage = 0;
 			rebuildFlipsChipBar();
+			if (syncBulkSort()) return;
 			if (plugin != null) plugin.onFlipsFilterChanged();
 		});
 
@@ -3566,6 +3573,7 @@ public class O7FlipPanel extends PluginPanel
 			{
 				flipsF2pOnly = false;
 				applyAccountStyle();
+				syncBulkSort();
 			}));
 		}
 		flipsChipBar.setVisible(flipsChipBar.getComponentCount() > 0);
