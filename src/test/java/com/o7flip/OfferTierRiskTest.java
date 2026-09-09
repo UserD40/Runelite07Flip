@@ -25,6 +25,8 @@
 package com.o7flip;
 
 import com.o7flip.model.Models.ItemInsights;
+import com.o7flip.model.Models.TradeRecord;
+import java.util.Collections;
 import com.o7flip.util.ProfitCalculator;
 import org.junit.Test;
 import static org.junit.Assert.assertEquals;
@@ -71,6 +73,55 @@ public class OfferTierRiskTest
 	{
 		assertFalse(underwater(9_867_783L));
 		assertTrue(underwater(9_867_782L));
+	}
+
+	private static O7FlipPlugin pluginHolding(int itemId, int qty, long totalGp)
+	{
+		TradeRecord t = new TradeRecord();
+		t.itemId = itemId;
+		t.name = "held";
+		t.isBuy = true;
+		t.quantity = qty;
+		t.totalGp = totalGp;
+		t.priceEach = totalGp / qty;
+		t.timestamp = 1L;
+		O7FlipPlugin p = new O7FlipPlugin();
+		p.tradeHistory = Collections.singletonList(t);
+		return p;
+	}
+
+	@Test
+	public void aGreenPricedOfferTurnsRedWhenTheLedgerSaysItLoses()
+	{
+		O7FlipPlugin p = pluginHolding(BLOWPIPE, 1, PAID);
+		ItemInsights ins = insights(9_480_000L, 9_500_000L, 9_694_052L);
+		assertTrue(p.sellIsUnderwater(BLOWPIPE, 9_699_999L));
+		assertEquals(2, p.offerTier(ins, BLOWPIPE, false, 9_699_999L));
+	}
+
+	@Test
+	public void anOfferAboveBreakEvenKeepsItsPriceDistanceTier()
+	{
+		O7FlipPlugin p = pluginHolding(BLOWPIPE, 1, PAID);
+		ItemInsights ins = insights(9_480_000L, 9_500_000L, 9_694_052L);
+		assertFalse(p.sellIsUnderwater(BLOWPIPE, 9_867_783L));
+		assertEquals(1, p.offerTier(ins, BLOWPIPE, false, 9_867_783L));
+	}
+
+	@Test
+	public void aBuyOfferIsNeverJudgedByTheSellLedger()
+	{
+		O7FlipPlugin p = pluginHolding(BLOWPIPE, 1, PAID);
+		ItemInsights ins = insights(9_480_000L, 9_500_000L, 9_694_052L);
+		assertEquals(0, p.offerTier(ins, BLOWPIPE, true, 9_480_000L));
+	}
+
+	@Test
+	public void holdingNothingLeavesTheColourAlone()
+	{
+		O7FlipPlugin p = new O7FlipPlugin();
+		assertFalse(p.sellIsUnderwater(BLOWPIPE, 1L));
+		assertEquals(0, p.offerTier(insights(9_480_000L, 9_500_000L, 9_694_052L), BLOWPIPE, false, 9_699_999L));
 	}
 
 	@Test
