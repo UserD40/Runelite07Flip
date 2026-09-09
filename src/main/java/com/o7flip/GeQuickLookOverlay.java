@@ -588,23 +588,12 @@ public class GeQuickLookOverlay extends Overlay
 			return null;
 		}
 		ItemInsights ins = plugin.getOverlayInsights(snap.itemId);
-		if (ins == null || ins.current == null)
+		long benchmark = O7FlipPlugin.offerBenchmark(ins, snap.isBuy());
+		int tier = plugin.offerTier(ins, snap.itemId, snap.isBuy(), snap.price);
+		if (benchmark <= 0 || tier < 0)
 		{
 			return null;
 		}
-		ItemInsights.Current c = ins.current;
-		boolean isBuy = snap.isBuy();
-		Long rec = isBuy ? c.recBuy : c.recSell;
-		long live = isBuy ? c.buyPrice : c.sellPrice;
-		long benchmark = (rec != null && rec > 0) ? rec : live;
-		if (benchmark <= 0)
-		{
-			return null;
-		}
-		double wrongness = isBuy
-			? (benchmark - snap.price) / (double) benchmark
-			: (snap.price - benchmark) / (double) benchmark;
-		int tier = O7FlipPlugin.competitiveTier(wrongness);
 		return new Verdict(benchmark, tier, ins);
 	}
 

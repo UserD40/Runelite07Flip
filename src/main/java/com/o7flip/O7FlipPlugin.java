@@ -3472,29 +3472,37 @@ public class O7FlipPlugin extends Plugin
 		return wrongness <= OFFER_GREEN_TOL ? 0 : (wrongness <= OFFER_MID_TOL ? 1 : 2);
 	}
 
-	public int offerCompetitiveTier(int itemId, boolean isBuy, long yourPrice)
+	public static long offerBenchmark(com.o7flip.model.Models.ItemInsights ins, boolean isBuy)
 	{
-		if (itemId <= 0 || yourPrice <= 0)
-		{
-			return -1;
-		}
-		com.o7flip.model.Models.ItemInsights ins = getOverlayInsights(itemId);
 		if (ins == null || ins.current == null)
 		{
-			return -1;
+			return -1L;
 		}
 		com.o7flip.model.Models.ItemInsights.Current c = ins.current;
 		Long rec = isBuy ? c.recBuy : c.recSell;
 		long live = isBuy ? c.buyPrice : c.sellPrice;
 		long benchmark = (rec != null && rec > 0) ? rec : live;
-		if (benchmark <= 0)
+		return benchmark > 0 ? benchmark : -1L;
+	}
+
+	public int offerTier(com.o7flip.model.Models.ItemInsights ins, int itemId, boolean isBuy, long yourPrice)
+	{
+		long benchmark = offerBenchmark(ins, isBuy);
+		int risk = repriceRiskTier(itemId, isBuy);
+		if (benchmark <= 0 || yourPrice <= 0)
 		{
-			return -1;
+			return risk;
 		}
 		double wrongness = isBuy
 			? (benchmark - yourPrice) / (double) benchmark
 			: (yourPrice - benchmark) / (double) benchmark;
-		return competitiveTier(wrongness);
+		int tier = competitiveTier(wrongness);
+		return risk > tier ? risk : tier;
+	}
+
+	public int offerCompetitiveTier(int itemId, boolean isBuy, long yourPrice)
+	{
+		return itemId <= 0 ? -1 : offerTier(getOverlayInsights(itemId), itemId, isBuy, yourPrice);
 	}
 
 	public java.awt.Color offerTierColor(int tier)
@@ -3506,15 +3514,36 @@ public class O7FlipPlugin extends Plugin
 		return tier == 0 ? config.geBorderGood() : (tier == 1 ? config.geBorderMid() : config.geBorderBad());
 	}
 
+	private static int repriceKey(int itemId, boolean isBuy)
+	{
+		return itemId * 2 + (isBuy ? 1 : 0);
+	}
+
+	public int repriceRiskTier(int itemId, boolean isBuy)
+	{
+		com.o7flip.model.Models.RepriceResult rp = itemId <= 0 ? null : repriceCache.get(repriceKey(itemId, isBuy));
+		if (rp == null || rp.status == null)
+		{
+			return -1;
+		}
+		switch (rp.status)
+		{
+			case "underwater":      return 2;
+			case "break_even_only": return 1;
+			default:                return -1;
+		}
+	}
+
 	public com.o7flip.model.Models.RepriceResult getReprice(int itemId, boolean isBuy, int qty, long currentPrice, int holdMinutes)
 	{
 		if (itemId <= 0 || panel == null || !panel.isPremium() || !config.shareTradeData())
 		{
 			return null;
 		}
-		Long fetched = repriceFetchedAt.get(itemId);
+		final int key = repriceKey(itemId, isBuy);
+		Long fetched = repriceFetchedAt.get(key);
 		boolean stale = fetched == null || (System.currentTimeMillis() - fetched) > REPRICE_TTL_MS;
-		if (stale && executor != null && !executor.isShutdown() && repriceInFlight.add(itemId))
+		if (stale && executor != null && !executor.isShutdown() && repriceInFlight.add(key))
 		{
 			final Long buyPrice = getFrozenBuy(itemId);
 			executor.execute(() -> apiClient.fetchReprice(itemId, isBuy, buyPrice, qty, currentPrice, holdMinutes, res ->
@@ -3523,17 +3552,17 @@ public class O7FlipPlugin extends Plugin
 				{
 					if (res != null)
 					{
-						repriceCache.put(itemId, res);
+						repriceCache.put(key, res);
 					}
-					repriceFetchedAt.put(itemId, fetchStamp(res != null, REPRICE_TTL_MS));
+					repriceFetchedAt.put(key, fetchStamp(res != null, REPRICE_TTL_MS));
 				}
 				finally
 				{
-					repriceInFlight.remove(itemId);
+					repriceInFlight.remove(key);
 				}
 			}));
 		}
-		return repriceCache.get(itemId);
+		return repriceCache.get(key);
 	}
 
 	private long offerLastFillAtMs(int slot)
