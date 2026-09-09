@@ -245,7 +245,7 @@ public class ActiveOfferRow extends JPanel
 		}
 		boolean isBuy = offer.isBuy();
 		StringBuilder sb = new StringBuilder("<html><b>");
-		sb.append(verdictText(lastTier, plugin.repriceRiskTier(offer.itemId, isBuy), isBuy)).append("</b><br>");
+		sb.append(verdictText(lastTier, plugin.offerRiskTier(offer.itemId, isBuy, offer.price), isBuy)).append("</b><br>");
 		sb.append("Your ").append(isBuy ? "buy" : "sell").append(": ")
 			.append(FlipItemPanel.formatGp(offer.price)).append(" gp");
 		com.o7flip.model.Models.ItemInsights ins = plugin.getOverlayInsights(offer.itemId);

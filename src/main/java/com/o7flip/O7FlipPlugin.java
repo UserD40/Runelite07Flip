@@ -245,6 +245,7 @@ public class O7FlipPlugin extends Plugin
 	private volatile long lastUnauthorizedNoticeAt = 0L;
 
 	public volatile List<TradeRecord> tradeHistory = Collections.emptyList();
+	private volatile java.util.Map.Entry<List<TradeRecord>, com.o7flip.util.ProfitCalculator.Result> positionsCache;
 
 	public volatile com.o7flip.util.BondLedger bondLedger = com.o7flip.util.BondLedger.EMPTY;
 
@@ -564,9 +565,22 @@ public class O7FlipPlugin extends Plugin
 		return frozenBuyByItemId.get(itemId);
 	}
 
+	private com.o7flip.util.ProfitCalculator.Result positions()
+	{
+		List<TradeRecord> snap = tradeHistory;
+		java.util.Map.Entry<List<TradeRecord>, com.o7flip.util.ProfitCalculator.Result> cached = positionsCache;
+		if (cached != null && cached.getKey() == snap)
+		{
+			return cached.getValue();
+		}
+		com.o7flip.util.ProfitCalculator.Result fresh = com.o7flip.util.ProfitCalculator.compute(snap);
+		positionsCache = new java.util.AbstractMap.SimpleImmutableEntry<>(snap, fresh);
+		return fresh;
+	}
+
 	private Long openPositionAvgCost(int itemId)
 	{
-		com.o7flip.util.ProfitCalculator.Result r = com.o7flip.util.ProfitCalculator.compute(tradeHistory);
+		com.o7flip.util.ProfitCalculator.Result r = positions();
 		com.o7flip.util.ProfitCalculator.OpenPosition pos = r.openPositions.get(itemId);
 		if (pos == null || pos.remainingQty <= 0 || pos.remainingCostBasis <= 0)
 		{
@@ -848,7 +862,7 @@ public class O7FlipPlugin extends Plugin
 
 	private long breakEvenSellPrice(int itemId)
 	{
-		com.o7flip.util.ProfitCalculator.Result r = com.o7flip.util.ProfitCalculator.compute(tradeHistory);
+		com.o7flip.util.ProfitCalculator.Result r = positions();
 		com.o7flip.util.ProfitCalculator.OpenPosition pos = r.openPositions.get(itemId);
 		if (pos == null || pos.remainingQty <= 0 || pos.remainingCostBasis <= 0)
 		{
@@ -3488,7 +3502,7 @@ public class O7FlipPlugin extends Plugin
 	public int offerTier(com.o7flip.model.Models.ItemInsights ins, int itemId, boolean isBuy, long yourPrice)
 	{
 		long benchmark = offerBenchmark(ins, isBuy);
-		int risk = repriceRiskTier(itemId, isBuy);
+		int risk = offerRiskTier(itemId, isBuy, yourPrice);
 		if (benchmark <= 0 || yourPrice <= 0)
 		{
 			return risk;
@@ -3517,6 +3531,23 @@ public class O7FlipPlugin extends Plugin
 	private static int repriceKey(int itemId, boolean isBuy)
 	{
 		return itemId * 2 + (isBuy ? 1 : 0);
+	}
+
+	public boolean sellIsUnderwater(int itemId, long yourPrice)
+	{
+		if (itemId <= 0 || yourPrice <= 0)
+		{
+			return false;
+		}
+		Long avgCost = openPositionAvgCost(itemId);
+		return avgCost != null && avgCost > 0
+			&& yourPrice - com.o7flip.util.ProfitCalculator.geTaxFor(itemId, yourPrice, 1) < avgCost;
+	}
+
+	public int offerRiskTier(int itemId, boolean isBuy, long yourPrice)
+	{
+		int risk = repriceRiskTier(itemId, isBuy);
+		return (risk < 2 && !isBuy && sellIsUnderwater(itemId, yourPrice)) ? 2 : risk;
 	}
 
 	public int repriceRiskTier(int itemId, boolean isBuy)
