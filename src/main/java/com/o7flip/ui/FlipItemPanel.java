@@ -30,6 +30,7 @@ import com.o7flip.util.Fonts;
 import net.runelite.client.game.ItemManager;
 import net.runelite.client.ui.ColorScheme;
 import net.runelite.client.util.AsyncBufferedImage;
+import javax.swing.JComponent;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.SwingConstants;
@@ -40,6 +41,7 @@ import java.awt.Color;
 import java.awt.Component;
 import java.awt.Cursor;
 import java.awt.Dimension;
+import java.awt.FlowLayout;
 import java.awt.GridLayout;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
@@ -57,17 +59,11 @@ public class FlipItemPanel extends JPanel
 
 	public FlipItemPanel(FlipItem flip, ItemManager itemManager, boolean odd, O7FlipPlugin plugin, boolean favouritesRow)
 	{
-		Color bg = odd ? ODD_BG : ColorScheme.DARK_GRAY_COLOR;
+		Color bg = frame(this, odd);
 
 		final boolean showRecPrices = plugin != null && plugin.panel != null && plugin.panel.isPremium();
 
 		final boolean band = flip.isBand();
-
-		setLayout(new BorderLayout(8, 0));
-		setBackground(bg);
-		setBorder(new EmptyBorder(8, 10, 8, 10));
-		setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
-		setAlignmentX(Component.LEFT_ALIGNMENT);
 
 		JLabel iconLabel = buildIcon(flip.itemId, itemManager);
 
@@ -98,10 +94,17 @@ public class FlipItemPanel extends JPanel
 		JPanel nameRow = new JPanel(new BorderLayout(6, 0));
 		nameRow.setOpaque(false);
 		nameRow.add(nameLabel, BorderLayout.CENTER);
+		JPanel tags = new JPanel(new FlowLayout(FlowLayout.RIGHT, 6, 0));
+		tags.setOpaque(false);
+		if (flip.badge != null)
+		{
+			tags.add(badge(flip.badge, "#FF981F"));
+		}
 		if (scoreLabel != null)
 		{
-			nameRow.add(scoreLabel, BorderLayout.EAST);
+			tags.add(scoreLabel);
 		}
+		nameRow.add(tags, BorderLayout.EAST);
 
 		final long buyShown = band ? flip.bandFloor : flip.buyPrice;
 		String buyHtml = "<html><b>Buy:</b>  " + formatGpCompact(buyShown) + "</html>";
@@ -223,7 +226,13 @@ public class FlipItemPanel extends JPanel
 		tip.append("</html>");
 		profitLabel.setToolTipText(tip.toString());
 
-		JPanel textPanel = new JPanel(new GridLayout(4, 1, 0, 2));
+		String signal = flip.signal;
+		if (flip.buyHourUtc != null && flip.sellHourUtc != null)
+		{
+			signal = "Buy " + localHour(flip.buyHourUtc) + " → sell " + localHour(flip.sellHourUtc)
+				+ (Boolean.TRUE.equals(flip.sellNextDay) ? " next day" : "");
+		}
+		JPanel textPanel = new JPanel(new GridLayout(signal != null ? 5 : 4, 1, 0, 2));
 		textPanel.setBackground(bg);
 		textPanel.add(nameRow);
 		Integer buyAge  = flip.buyAgeMinutes  != null ? flip.buyAgeMinutes
@@ -250,66 +259,99 @@ public class FlipItemPanel extends JPanel
 			profitRow.add(etaLabel, BorderLayout.EAST);
 		}
 		textPanel.add(profitRow);
+		if (signal != null)
+		{
+			JLabel signalLabel = new JLabel(signal);
+			signalLabel.setFont(Fonts.SM);
+			signalLabel.setForeground(new Color(0xFFE07A));
+			textPanel.add(signalLabel);
+		}
 
 		add(iconLabel, BorderLayout.WEST);
 		add(textPanel, BorderLayout.CENTER);
 
 		ClickRouter.attach(this, plugin, flip.itemId, flip.name);
-
-		ClickRouter.attachClickOnly(buyLabel,    plugin, flip.itemId, flip.name);
-		ClickRouter.attachClickOnly(sellLabel,   plugin, flip.itemId, flip.name);
-		ClickRouter.attachClickOnly(profitLabel, plugin, flip.itemId, flip.name);
-		ClickRouter.attachClickOnly(nameLabel,   plugin, flip.itemId, flip.name);
+		routeLabels(plugin, flip.itemId, buyTarget, flip.name, buyLabel, sellLabel, profitLabel, nameLabel);
 		if (scoreLabel != null)
 		{
-			ClickRouter.attachClickOnly(scoreLabel, plugin, flip.itemId, flip.name);
+			routeLabels(plugin, flip.itemId, buyTarget, flip.name, scoreLabel);
 		}
+		hoverAndQueueBuy(this, textPanel, bg, plugin, flip.itemId, buyTarget, flip.name);
+	}
 
-		MouseAdapter rightClickQueueBuy = new MouseAdapter()
+	static void routeLabels(O7FlipPlugin plugin, int itemId, long buyTarget, String name, JComponent... labels)
+	{
+		MouseAdapter queueBuy = new MouseAdapter()
 		{
 			@Override
 			public void mousePressed(MouseEvent e)
 			{
-				if (SwingUtilities.isRightMouseButton(e) && !e.isShiftDown() && plugin != null)
+				if (SwingUtilities.isRightMouseButton(e) && !e.isShiftDown() && plugin != null && itemId > 0)
 				{
-					plugin.queueGeBuy(flip.itemId, buyTarget, flip.name);
+					plugin.queueGeBuy(itemId, buyTarget, name);
 					e.consume();
 				}
 			}
 		};
-		buyLabel.addMouseListener(rightClickQueueBuy);
-		sellLabel.addMouseListener(rightClickQueueBuy);
-		profitLabel.addMouseListener(rightClickQueueBuy);
-		nameLabel.addMouseListener(rightClickQueueBuy);
-		if (scoreLabel != null)
+		for (JComponent label : labels)
 		{
-			scoreLabel.addMouseListener(rightClickQueueBuy);
+			ClickRouter.attachClickOnly(label, plugin, itemId, name);
+			label.addMouseListener(queueBuy);
 		}
+	}
 
-		addMouseListener(new MouseAdapter()
+	static Color frame(JPanel row, boolean odd)
+	{
+		Color bg = odd ? ODD_BG : ColorScheme.DARK_GRAY_COLOR;
+		row.setLayout(new BorderLayout(8, 0));
+		row.setBackground(bg);
+		row.setBorder(new EmptyBorder(8, 10, 8, 10));
+		row.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+		row.setAlignmentX(Component.LEFT_ALIGNMENT);
+		return bg;
+	}
+
+	static void hoverAndQueueBuy(JPanel row, JPanel textPanel, Color bg, O7FlipPlugin plugin,
+		int itemId, long buyTarget, String name)
+	{
+		row.addMouseListener(new MouseAdapter()
 		{
 			@Override
 			public void mouseEntered(MouseEvent e)
 			{
-				setBackground(HOVER_BG);
+				row.setBackground(HOVER_BG);
 				textPanel.setBackground(HOVER_BG);
 			}
 			@Override
 			public void mouseExited(MouseEvent e)
 			{
-				setBackground(bg);
+				row.setBackground(bg);
 				textPanel.setBackground(bg);
 			}
 			@Override
 			public void mousePressed(MouseEvent e)
 			{
-				if (SwingUtilities.isRightMouseButton(e) && !e.isShiftDown() && plugin != null)
+				if (SwingUtilities.isRightMouseButton(e) && !e.isShiftDown() && plugin != null && itemId > 0)
 				{
-					plugin.queueGeBuy(flip.itemId, buyTarget, flip.name);
+					plugin.queueGeBuy(itemId, buyTarget, name);
 				}
 			}
 		});
-		setMaximumSize(new Dimension(Integer.MAX_VALUE, getPreferredSize().height));
+		row.setMaximumSize(new Dimension(Integer.MAX_VALUE, row.getPreferredSize().height));
+	}
+
+	private static String localHour(int utcHour)
+	{
+		return java.time.ZonedDateTime.now(java.time.ZoneOffset.UTC).withHour(utcHour).withMinute(0)
+			.withZoneSameInstant(java.time.ZoneId.systemDefault())
+			.format(java.time.format.DateTimeFormatter.ofPattern("HH:mm"));
+	}
+
+	static JLabel badge(String text, String colorHex)
+	{
+		JLabel badge = new JLabel("<html><font color='" + colorHex + "'>" + escapeHtml(text) + "</font></html>");
+		badge.setFont(Fonts.BOLD);
+		return badge;
 	}
 
 	public static JLabel buildIcon(int itemId, ItemManager itemManager)

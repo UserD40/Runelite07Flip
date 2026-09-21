@@ -25,10 +25,10 @@
 package com.o7flip;
 
 import com.google.gson.Gson;
-import com.google.gson.JsonObject;
 import com.google.inject.Provides;
-import com.o7flip.model.Models.DumpItem;
+import com.o7flip.model.Models.Row;
 import com.o7flip.model.Models.FlipItem;
+import com.o7flip.model.Models.OfferEvent;
 import com.o7flip.model.Models.TrackedItemData;
 import com.o7flip.model.Models.TradeRecord;
 import net.runelite.api.Client;
@@ -183,7 +183,7 @@ public class O7FlipPlugin extends Plugin
 	private volatile long   overlayQueueExpiresAt = 0L;
 
 	List<FlipItem>  lastFlips  = Collections.emptyList();
-	private List<DumpItem>  lastDumps  = Collections.emptyList();
+	private List<? extends Row> lastOther = Collections.emptyList();
 
 	public volatile Map<Integer, TrackedItemData> trackedItems = Collections.emptyMap();
 
@@ -229,7 +229,15 @@ public class O7FlipPlugin extends Plugin
 
 	private final Map<Integer, long[]> slotRecordedFills = new java.util.concurrent.ConcurrentHashMap<>();
 
-	private final Map<Integer, long[]> slotListedAt = new java.util.concurrent.ConcurrentHashMap<>();
+	private final Map<Integer, SlotOffer> slotOffers = new java.util.concurrent.ConcurrentHashMap<>();
+
+	private final List<OfferEvent> offerQueue = new ArrayList<>();
+
+	private boolean offerFlushScheduled;
+
+	private boolean offerPostInFlight;
+
+	private boolean loginResyncPending;
 
 	private final Map<Integer, long[]> slotFillClock = new java.util.concurrent.ConcurrentHashMap<>();
 
@@ -239,12 +247,60 @@ public class O7FlipPlugin extends Plugin
 
 	private final Set<Long> deferredTerminalPosts = new HashSet<>();
 
+	private int lastLoginTick = -1;
+
+	static final class SlotOffer
+	{
+		long listedAt;
+		boolean placedKnown;
+		int itemId;
+		int totalQty;
+		boolean isBuy;
+		long price;
+		int filled;
+		long oid;
+		int phase;
+		int sentFilled;
+		long sentAt;
+
+		String toCsv(int slot)
+		{
+			return slot + ":" + listedAt + ":" + itemId + ":" + totalQty + ":" + (placedKnown ? 1 : 0)
+				+ ":" + oid + ":" + (isBuy ? 1 : 0) + ":" + price + ":" + filled + ":" + phase + ":" + sentFilled;
+		}
+
+		static SlotOffer fromParts(String[] p)
+		{
+			SlotOffer o = new SlotOffer();
+			o.listedAt    = Long.parseLong(p[1]);
+			o.itemId      = Integer.parseInt(p[2]);
+			o.totalQty    = Integer.parseInt(p[3]);
+			o.placedKnown = p.length > 4 && "1".equals(p[4]);
+			if (p.length > 10)
+			{
+				o.oid        = Long.parseLong(p[5]);
+				o.isBuy      = "1".equals(p[6]);
+				o.price      = Long.parseLong(p[7]);
+				o.filled     = Integer.parseInt(p[8]);
+				o.phase      = Integer.parseInt(p[9]);
+				o.sentFilled = Integer.parseInt(p[10]);
+			}
+			return o;
+		}
+	}
+
+	private static final String OFFER_SOURCE_EVENT  = "event";
+	private static final String OFFER_SOURCE_RESYNC = "login_resync";
+	private static final int    OFFER_QUEUE_CAP     = 500;
+	private static final int    OFFER_BATCH_MAX     = 200;
+
 	private static final long PARTIAL_POST_INTERVAL_MS = 60_000L;
 	private static final long TRADE_RETRY_INTERVAL_MIN = 5L;
 	private static final long UNAUTHORIZED_NOTICE_INTERVAL_MS = 15L * 60_000L;
 	private volatile long lastUnauthorizedNoticeAt = 0L;
 
 	public volatile List<TradeRecord> tradeHistory = Collections.emptyList();
+	private volatile java.util.Map.Entry<List<TradeRecord>, com.o7flip.util.ProfitCalculator.Result> positionsCache;
 
 	public volatile com.o7flip.util.BondLedger bondLedger = com.o7flip.util.BondLedger.EMPTY;
 
@@ -298,6 +354,7 @@ public class O7FlipPlugin extends Plugin
 	private static final String BLOCKLIST_KEY = "blocklistItemIds";
 	private static final String SLOT_FILLS_KEY = "slotRecordedFills";
 	private static final String SLOT_LISTED_KEY = "slotListedAt";
+	private static final String OFFER_QUEUE_KEY = "offerEventQueue";
 	private static final String SLOT_FILL_CLOCK_KEY = "slotFillClock";
 	private static final String AUTH_CACHE_KEY = "authStatusCache";
 	private static final String BOND_LEDGER_SPEND_KEY = "bondLedgerSpend";
@@ -564,9 +621,22 @@ public class O7FlipPlugin extends Plugin
 		return frozenBuyByItemId.get(itemId);
 	}
 
+	private com.o7flip.util.ProfitCalculator.Result positions()
+	{
+		List<TradeRecord> snap = tradeHistory;
+		java.util.Map.Entry<List<TradeRecord>, com.o7flip.util.ProfitCalculator.Result> cached = positionsCache;
+		if (cached != null && cached.getKey() == snap)
+		{
+			return cached.getValue();
+		}
+		com.o7flip.util.ProfitCalculator.Result fresh = com.o7flip.util.ProfitCalculator.compute(snap);
+		positionsCache = new java.util.AbstractMap.SimpleImmutableEntry<>(snap, fresh);
+		return fresh;
+	}
+
 	private Long openPositionAvgCost(int itemId)
 	{
-		com.o7flip.util.ProfitCalculator.Result r = com.o7flip.util.ProfitCalculator.compute(tradeHistory);
+		com.o7flip.util.ProfitCalculator.Result r = positions();
 		com.o7flip.util.ProfitCalculator.OpenPosition pos = r.openPositions.get(itemId);
 		if (pos == null || pos.remainingQty <= 0 || pos.remainingCostBasis <= 0)
 		{
@@ -848,7 +918,7 @@ public class O7FlipPlugin extends Plugin
 
 	private long breakEvenSellPrice(int itemId)
 	{
-		com.o7flip.util.ProfitCalculator.Result r = com.o7flip.util.ProfitCalculator.compute(tradeHistory);
+		com.o7flip.util.ProfitCalculator.Result r = positions();
 		com.o7flip.util.ProfitCalculator.OpenPosition pos = r.openPositions.get(itemId);
 		if (pos == null || pos.remainingQty <= 0 || pos.remainingCostBasis <= 0)
 		{
@@ -975,8 +1045,10 @@ public class O7FlipPlugin extends Plugin
 		loadBondLedger();
 		loadBlocklist();
 		loadSlotRecordedFills();
-		loadSlotListedAt();
+		loadSlotOffers();
+		loadOfferQueue();
 		loadSlotFillClock();
+		loginResyncPending = true;
 		restoreFreezesFromServer();
 		applyCachedAuthStatus();
 
@@ -989,7 +1061,12 @@ public class O7FlipPlugin extends Plugin
 		authRefreshTask = executor.scheduleAtFixedRate(
 			this::fetchAuthStatus, 15, 15, TimeUnit.MINUTES);
 		partialFlushTask = executor.scheduleAtFixedRate(
-			() -> clientThread.invoke(this::flushPendingPartialFills), 30, 30, TimeUnit.SECONDS);
+			() -> clientThread.invoke(() ->
+			{
+				flushPendingPartialFills();
+				flushPendingOfferUpdates();
+				flushOfferEvents();
+			}), 30, 30, TimeUnit.SECONDS);
 		tradeRetryTask = executor.scheduleAtFixedRate(
 			this::doBulkSyncToServer, TRADE_RETRY_INTERVAL_MIN, TRADE_RETRY_INTERVAL_MIN, TimeUnit.MINUTES);
 		executor.execute(() -> fetchAll(true));
@@ -1052,9 +1129,19 @@ public class O7FlipPlugin extends Plugin
 	@Subscribe
 	public void onGameStateChanged(GameStateChanged event)
 	{
-		if (event.getGameState() == GameState.LOGGED_IN)
+		switch (event.getGameState())
 		{
-			offlineReconcileArmed = true;
+			case LOGGED_IN:
+				offlineReconcileArmed = true;
+				loginResyncPending = true;
+				break;
+			case LOGGING_IN:
+			case HOPPING:
+			case CONNECTION_LOST:
+				lastLoginTick = client.getTickCount();
+				break;
+			default:
+				break;
 		}
 	}
 
@@ -1062,6 +1149,12 @@ public class O7FlipPlugin extends Plugin
 	public void onGameTick(GameTick event)
 	{
 		syncActiveOffersFromClient();
+
+		if (loginResyncPending && !inLoginWindow())
+		{
+			loginResyncPending = false;
+			resyncOffersAfterLogin();
+		}
 
 		if (config.showGeSlotTimer())
 		{
@@ -1788,10 +1881,8 @@ public class O7FlipPlugin extends Plugin
 		switch (key)
 		{
 			case "showFlips":
-			case "showDumps":
+			case "showOther":
 			case "showItem":
-			case "showDips":
-			case "showDecant":
 			case "showFavourites":
 			case "showMyFlips":
 				return true;
@@ -1864,68 +1955,23 @@ public class O7FlipPlugin extends Plugin
 
 		SwingUtilities.invokeLater(() -> panel.setLoading(true));
 
-		JsonObject sections = new JsonObject();
+		final int flipsPage = panel.getFlipsPage();
 
-		if (config.showDumps() && !panel.dumpsUsesBotEndpoint())
+		apiClient.fetchBundle(connectUrl ->
 		{
-			JsonObject p = new JsonObject();
-			String sort = panel.getDumpsSortKey();
-			if (sort != null && !sort.isEmpty())
-			{
-				p.addProperty("sort", sort);
-			}
-			long minProfit = panel.getDumpsMinProfit();
-			if (minProfit > 0)
-			{
-				p.addProperty("minProfit", minProfit);
-			}
-			long priceMin = panel.getDumpsPriceMin();
-			if (priceMin > 0)
-			{
-				p.addProperty("priceMin", priceMin);
-			}
-			long priceMax = panel.getDumpsPriceMax();
-			if (priceMax < Long.MAX_VALUE)
-			{
-				p.addProperty("priceMax", priceMax);
-			}
-			p.addProperty("page", panel.getDumpsPage());
-			sections.add("dumps", p);
-		}
-
-		final int flipsPage   = panel.getFlipsPage();
-		final int dumpsPage   = panel.getDumpsPage();
-
-		apiClient.fetchBundle(
-			sections,
-			null,
-			null,
-			connectUrl ->
-			{
-				String key = config.apiKey();
-				boolean hasKey = key != null && !key.trim().isEmpty();
-				SwingUtilities.invokeLater(() -> panel.updateInvalidKeyWarning(hasKey ? connectUrl : null));
-			}
-		);
+			String key = config.apiKey();
+			boolean hasKey = key != null && !key.trim().isEmpty();
+			SwingUtilities.invokeLater(() -> panel.updateInvalidKeyWarning(hasKey ? connectUrl : null));
+		});
 
 		if (config.showFlips())
 		{
 			fetchFlipsAtPage(flipsPage);
 		}
 
-		if (config.showDips())
+		if (config.showOther() && panel.isPremium())
 		{
-			fetchDipsAtPage(panel.getDipsSortKey(), panel.getDipsPage());
-		}
-
-		if (config.showDecant())
-		{
-			fetchDecantingNow();
-		}
-
-		if (config.showDumps() && !panel.dumpsUsesBotEndpoint())
-		{
-			fetchDumpsAtPage(panel.getDumpsSortKey(), panel.getDumpsPage());
+			fetchOtherAtPage(panel.getOtherPage());
 		}
 
 		if (config.showFavourites() && hasApiKey())
@@ -1935,21 +1981,6 @@ public class O7FlipPlugin extends Plugin
 				if (items != null && !items.isEmpty()) saveCache("favourites", items);
 				pushFavouritesToPanel(items);
 			});
-		}
-		if (config.showDumps() && panel.dumpsUsesBotEndpoint())
-		{
-			final int botDumpsPage = panel.getDumpsPage();
-			apiClient.fetchBotDumps(
-				panel.getDumpsSortKey(),
-				panel.getDumpsMinProfit(), panel.getDumpsPriceMin(), panel.getDumpsPriceMax(),
-				panel.getDumpsMinScore(), panel.getDumpsActiveOnly(), panel.getDumpsTier(),
-				botDumpsPage,
-				resp ->
-				{
-					lastDumps = resp.items;
-					rebuildTrackedItems();
-					SwingUtilities.invokeLater(() -> panel.updateDumps(resp, botDumpsPage));
-				});
 		}
 	}
 
@@ -2010,26 +2041,12 @@ public class O7FlipPlugin extends Plugin
 	{
 		if (panel == null) return;
 
-		com.o7flip.model.Models.DumpItem.Response cd = loadCache("dumps", com.o7flip.model.Models.DumpItem.Response.class);
-		if (cd != null && cd.items != null && !cd.items.isEmpty())
+		final String preset = panel.getOtherPreset();
+		final List<? extends Row> other = loadListCache("other_" + preset, panel.getOtherPresetClass());
+		if (other != null && !other.isEmpty())
 		{
-			lastDumps = cd.items;
-			final com.o7flip.model.Models.DumpItem.Response snap = cd;
-			SwingUtilities.invokeLater(() -> panel.updateDumps(snap, 0));
-		}
-
-		List<com.o7flip.model.Models.DipItem> cdips = loadListCache("dips", com.o7flip.model.Models.DipItem.class);
-		if (cdips != null && !cdips.isEmpty())
-		{
-			final List<com.o7flip.model.Models.DipItem> snap = cdips;
-			SwingUtilities.invokeLater(() -> panel.updateDips(snap, snap.size(), 0));
-		}
-
-		List<com.o7flip.model.Models.DecantItem> cdec = loadListCache("decant", com.o7flip.model.Models.DecantItem.class);
-		if (cdec != null && !cdec.isEmpty())
-		{
-			final List<com.o7flip.model.Models.DecantItem> snap = cdec;
-			SwingUtilities.invokeLater(() -> panel.updateDecanting(snap));
+			lastOther = other;
+			SwingUtilities.invokeLater(() -> panel.updateOther(preset, other, other.size(), 0));
 		}
 
 		loadBuyLimitState();
@@ -2059,17 +2076,18 @@ public class O7FlipPlugin extends Plugin
 			d.flipSellPrice = f.sellPrice;
 		}
 
-		for (DumpItem du : lastDumps)
+		for (Row r : lastOther)
 		{
-			TrackedItemData d = map.computeIfAbsent(du.itemId, id ->
+			if (r.buyPrice <= 0) continue;
+			TrackedItemData d = map.computeIfAbsent(r.itemId, id ->
 			{
 				TrackedItemData t = new TrackedItemData();
 				t.itemId = id;
-				t.name = du.name;
+				t.name = r.name;
 				return t;
 			});
-			d.dumpBuyPrice  = du.buyPrice;
-			d.dumpSellPrice = du.sellPrice;
+			if (d.flipBuyPrice == null) d.flipBuyPrice = r.buyPrice;
+			if (d.flipSellPrice == null && r.sellPrice > 0) d.flipSellPrice = r.sellPrice;
 		}
 
 		trackedItems = Collections.unmodifiableMap(map);
@@ -2095,7 +2113,7 @@ public class O7FlipPlugin extends Plugin
 				continue;
 			}
 			next.put(slot, snapshot(slot, o));
-			updateSlotListedAt(slot, o);
+			ensureSlotOffer(slot, o, false);
 			trackFillClock(slot, o);
 			if (o.getState() == GrandExchangeOfferState.BUYING
 				|| o.getState() == GrandExchangeOfferState.SELLING)
@@ -2111,9 +2129,15 @@ public class O7FlipPlugin extends Plugin
 			hash = hash * 31 + o.getState().ordinal();
 		}
 
-		if (slotListedAt.keySet().retainAll(next.keySet()))
+		if (!inLoginWindow())
 		{
-			saveSlotListedAt();
+			for (Integer slot : new ArrayList<>(slotOffers.keySet()))
+			{
+				if (!next.containsKey(slot))
+				{
+					dropSlotOffer(slot);
+				}
+			}
 		}
 		if (slotFillClock.keySet().retainAll(next.keySet()))
 		{
@@ -2207,20 +2231,295 @@ public class O7FlipPlugin extends Plugin
 		return null;
 	}
 
-	private void updateSlotListedAt(int slot, GrandExchangeOffer o)
+	private boolean inLoginWindow()
 	{
-		long[] prev = slotListedAt.get(slot);
-		if (prev == null || prev[1] != o.getItemId() || prev[2] != o.getTotalQuantity())
+		return client.getTickCount() <= lastLoginTick + 1;
+	}
+
+	private SlotOffer ensureSlotOffer(int slot, GrandExchangeOffer o, boolean live)
+	{
+		long now = System.currentTimeMillis();
+		SlotOffer prev = slotOffers.get(slot);
+		boolean same = prev != null && prev.itemId == o.getItemId() && prev.totalQty == o.getTotalQuantity()
+			&& o.getQuantitySold() >= prev.filled
+			&& (prev.phase < 2 || isTerminalOfferState(o.getState()));
+		SlotOffer cur = same ? prev : new SlotOffer();
+		boolean changed = !same;
+		if (!same)
 		{
-			slotListedAt.put(slot, new long[]{System.currentTimeMillis(), o.getItemId(), o.getTotalQuantity()});
-			saveSlotListedAt();
+			cur.listedAt    = now;
+			cur.itemId      = o.getItemId();
+			cur.totalQty    = o.getTotalQuantity();
+			cur.placedKnown = live;
+			slotOffers.put(slot, cur);
 		}
+		else if (live && !cur.placedKnown && now - cur.listedAt <= 1_200L)
+		{
+			cur.placedKnown = true;
+			changed = true;
+		}
+		if (cur.oid == 0L)
+		{
+			long[] fills = slotRecordedFills.get(slot);
+			cur.oid = fills != null && fills.length >= 3 ? fills[2] : now * 10 + slot;
+			changed = true;
+		}
+		if (cur.filled != o.getQuantitySold() || cur.price != o.getPrice())
+		{
+			cur.filled = o.getQuantitySold();
+			cur.price  = o.getPrice();
+			changed = true;
+		}
+		cur.isBuy = isBuyState(o.getState());
+		if (changed)
+		{
+			saveSlotOffers();
+		}
+		return cur;
+	}
+
+	private static boolean isBuyState(GrandExchangeOfferState state)
+	{
+		return state == GrandExchangeOfferState.BUYING
+			|| state == GrandExchangeOfferState.BOUGHT
+			|| state == GrandExchangeOfferState.CANCELLED_BUY;
+	}
+
+	private long slotOfferId(int slot)
+	{
+		SlotOffer so = slotOffers.get(slot);
+		return so != null ? so.oid : System.currentTimeMillis() * 10 + slot;
+	}
+
+	private long renewSlotOfferId(int slot, long staleOid)
+	{
+		SlotOffer so = slotOffers.get(slot);
+		if (so != null && so.oid == staleOid)
+		{
+			so.oid        = System.currentTimeMillis() * 10 + slot;
+			so.phase      = 0;
+			so.sentFilled = 0;
+			saveSlotOffers();
+		}
+		return slotOfferId(slot);
+	}
+
+	private void adoptOfferId(int slot, long oid)
+	{
+		SlotOffer so = slotOffers.get(slot);
+		if (so != null && so.oid != oid)
+		{
+			so.oid = oid;
+			saveSlotOffers();
+		}
+	}
+
+	private Long knownPlacedAt(int slot)
+	{
+		SlotOffer so = slotOffers.get(slot);
+		return so != null && so.placedKnown ? so.listedAt : null;
 	}
 
 	public long offerListedAtMs(int slot)
 	{
-		long[] v = slotListedAt.get(slot);
-		return (v != null && v.length >= 1) ? v[0] : -1L;
+		SlotOffer so = slotOffers.get(slot);
+		return so != null ? so.listedAt : -1L;
+	}
+
+	static String dueOfferEvent(SlotOffer so, GrandExchangeOfferState state, boolean resync, long now)
+	{
+		if (isTerminalOfferState(state))
+		{
+			return so.phase >= 2 ? null : "closed";
+		}
+		if (so.phase == 0)
+		{
+			return "placed";
+		}
+		if (resync || (so.filled > so.sentFilled && now - so.sentAt >= PARTIAL_POST_INTERVAL_MS))
+		{
+			return "updated";
+		}
+		return null;
+	}
+
+	private void reportOfferState(int slot, GrandExchangeOfferState state, boolean resync)
+	{
+		SlotOffer so = slotOffers.get(slot);
+		if (so == null)
+		{
+			return;
+		}
+		long now = System.currentTimeMillis();
+		String event = dueOfferEvent(so, state, resync, now);
+		if (event == null)
+		{
+			return;
+		}
+		String outcome = null;
+		if ("closed".equals(event))
+		{
+			so.phase = 2;
+			outcome = state == GrandExchangeOfferState.BOUGHT || state == GrandExchangeOfferState.SOLD
+				? "completed" : "cancelled";
+		}
+		else
+		{
+			so.phase = 1;
+			so.sentAt = "updated".equals(event) ? now : 0L;
+		}
+		so.sentFilled = so.filled;
+		saveSlotOffers();
+		queueOfferEvent(offerEvent(so, event, outcome, resync ? OFFER_SOURCE_RESYNC : OFFER_SOURCE_EVENT));
+	}
+
+	private void flushPendingOfferUpdates()
+	{
+		for (Map.Entry<Integer, SlotOffer> e : slotOffers.entrySet())
+		{
+			SlotOffer so = e.getValue();
+			if (so.phase == 1 && so.filled > so.sentFilled)
+			{
+				reportOfferState(e.getKey(), so.isBuy ? GrandExchangeOfferState.BUYING : GrandExchangeOfferState.SELLING, false);
+			}
+		}
+	}
+
+	private void dropSlotOffer(int slot)
+	{
+		SlotOffer so = slotOffers.remove(slot);
+		if (so == null)
+		{
+			return;
+		}
+		saveSlotOffers();
+		queueOfferEvent(offerEvent(so, "collected", null, OFFER_SOURCE_EVENT));
+	}
+
+	private void resyncOffersAfterLogin()
+	{
+		GrandExchangeOffer[] offers = client.getGrandExchangeOffers();
+		if (offers == null)
+		{
+			return;
+		}
+		for (int slot = 0; slot < offers.length; slot++)
+		{
+			GrandExchangeOffer o = offers[slot];
+			if (o == null || o.getState() == GrandExchangeOfferState.EMPTY)
+			{
+				continue;
+			}
+			ensureSlotOffer(slot, o, false);
+			recordIfNewFills(o, slot);
+			if (!isTerminalOfferState(o.getState()))
+			{
+				maybePostPartialFill(slot);
+			}
+			reportOfferState(slot, o.getState(), true);
+		}
+	}
+
+	private OfferEvent offerEvent(SlotOffer so, String event, String outcome, String source)
+	{
+		OfferEvent e = new OfferEvent();
+		e.event           = event;
+		e.offerInstanceId = so.oid;
+		e.isBuy           = so.isBuy;
+		e.itemId          = so.itemId;
+		e.name            = client.getItemDefinition(so.itemId).getName();
+		e.priceEach       = so.price;
+		e.offerQuantity   = so.totalQty;
+		e.filledQuantity  = so.filled;
+		e.timestamp       = System.currentTimeMillis();
+		e.placedAt        = so.placedKnown ? so.listedAt : null;
+		e.outcome         = outcome;
+		e.source          = source;
+		return e;
+	}
+
+	private void queueOfferEvent(OfferEvent ev)
+	{
+		if (!config.shareTradeData() || config.apiKey() == null || config.apiKey().trim().isEmpty())
+		{
+			return;
+		}
+		offerQueue.add(ev);
+		if (offerQueue.size() > OFFER_QUEUE_CAP)
+		{
+			offerQueue.subList(0, offerQueue.size() - OFFER_QUEUE_CAP).clear();
+		}
+		saveOfferQueue();
+		if (!offerFlushScheduled && executor != null && !executor.isShutdown())
+		{
+			offerFlushScheduled = true;
+			executor.schedule(() -> clientThread.invoke(this::flushOfferEvents), 5, TimeUnit.SECONDS);
+		}
+	}
+
+	private void flushOfferEvents()
+	{
+		offerFlushScheduled = false;
+		if (offerQueue.isEmpty() || offerPostInFlight)
+		{
+			return;
+		}
+		if (!config.shareTradeData() || config.apiKey() == null || config.apiKey().trim().isEmpty())
+		{
+			offerQueue.clear();
+			saveOfferQueue();
+			return;
+		}
+		final List<OfferEvent> batch = new ArrayList<>(offerQueue.subList(0, Math.min(OFFER_BATCH_MAX, offerQueue.size())));
+		offerPostInFlight = true;
+		apiClient.postOfferEvents(batch, ok -> clientThread.invoke(() ->
+		{
+			offerPostInFlight = false;
+			if (!ok)
+			{
+				return;
+			}
+			offerQueue.subList(0, Math.min(batch.size(), offerQueue.size())).clear();
+			saveOfferQueue();
+			if (!offerQueue.isEmpty())
+			{
+				flushOfferEvents();
+			}
+		}));
+	}
+
+	private void saveOfferQueue()
+	{
+		if (offerQueue.isEmpty())
+		{
+			configManager.unsetConfiguration("o7flip", OFFER_QUEUE_KEY);
+			return;
+		}
+		configManager.setConfiguration("o7flip", OFFER_QUEUE_KEY, gson.toJson(offerQueue));
+	}
+
+	private void loadOfferQueue()
+	{
+		offerQueue.clear();
+		offerFlushScheduled = false;
+		offerPostInFlight   = false;
+		String json = configManager.getConfiguration("o7flip", OFFER_QUEUE_KEY);
+		if (json == null || json.trim().isEmpty())
+		{
+			return;
+		}
+		try
+		{
+			OfferEvent[] events = gson.fromJson(json, OfferEvent[].class);
+			if (events != null)
+			{
+				Collections.addAll(offerQueue, events);
+			}
+		}
+		catch (Exception e)
+		{
+			log.warn("[07Flip] Failed to load offer event queue: {}", e.getMessage());
+		}
 	}
 
 	private com.o7flip.model.Models.ActiveOfferSnapshot snapshot(int slot, GrandExchangeOffer offer)
@@ -2289,6 +2588,13 @@ public class O7FlipPlugin extends Plugin
 			freezeAtPlacement(offer.getItemId(), offer.getPrice());
 		}
 
+		boolean loginWindow = inLoginWindow();
+		if (state != GrandExchangeOfferState.EMPTY)
+		{
+			ensureSlotOffer(slot, offer, !loginWindow
+				&& (state == GrandExchangeOfferState.BUYING || state == GrandExchangeOfferState.SELLING));
+		}
+
 		if (state == GrandExchangeOfferState.BUYING
 			|| state == GrandExchangeOfferState.SELLING
 			|| state == GrandExchangeOfferState.BOUGHT
@@ -2299,9 +2605,15 @@ public class O7FlipPlugin extends Plugin
 			recordIfNewFills(offer, slot);
 		}
 
-		if (state == GrandExchangeOfferState.BUYING)
+		if (state == GrandExchangeOfferState.BUYING
+			|| state == GrandExchangeOfferState.SELLING)
 		{
 			maybePostPartialFill(slot);
+		}
+
+		if (!loginWindow && state != GrandExchangeOfferState.EMPTY)
+		{
+			reportOfferState(slot, state, false);
 		}
 
 		if (state == GrandExchangeOfferState.BOUGHT
@@ -2320,6 +2632,10 @@ public class O7FlipPlugin extends Plugin
 			slotRecordedFills.remove(slot);
 			slotPartialPostedAt.remove(slot);
 			saveSlotRecordedFills();
+			if (client.getGameState() == GameState.LOGGED_IN && !loginWindow)
+			{
+				dropSlotOffer(slot);
+			}
 		}
 		else
 		{
@@ -2337,7 +2653,7 @@ public class O7FlipPlugin extends Plugin
 		long prevGp  = prev != null ? prev[1] : 0L;
 		long offerInstanceId = prev != null && prev.length >= 3
 			? prev[2]
-			: System.currentTimeMillis() * 10 + slot;
+			: slotOfferId(slot);
 
 		boolean cumulativeDropped = currentQty < prevQty;
 		boolean identityChanged = false;
@@ -2352,7 +2668,7 @@ public class O7FlipPlugin extends Plugin
 			prevQty = 0L;
 			prevGp  = 0L;
 			firstObservation = true;
-			offerInstanceId = System.currentTimeMillis() * 10 + slot;
+			offerInstanceId = renewSlotOfferId(slot, offerInstanceId);
 			slotPartialPostedAt.remove(slot);
 		}
 
@@ -2395,6 +2711,7 @@ public class O7FlipPlugin extends Plugin
 				if (existing.offerInstanceId != null)
 				{
 					offerInstanceId = existing.offerInstanceId;
+					adoptOfferId(slot, offerInstanceId);
 				}
 				else
 				{
@@ -2422,7 +2739,7 @@ public class O7FlipPlugin extends Plugin
 
 		long timestamp = System.currentTimeMillis();
 
-		recordTrade(offer, isBuy, partial, deltaQty, deltaGp, timestamp, offerInstanceId);
+		recordTrade(offer, isBuy, partial, deltaQty, deltaGp, timestamp, offerInstanceId, knownPlacedAt(slot));
 
 		slotRecordedFills.put(slot,
 			new long[]{currentQty, currentGp, offerInstanceId, lastPostedFor(prev, offerInstanceId)});
@@ -2466,7 +2783,7 @@ public class O7FlipPlugin extends Plugin
 			return;
 		}
 		TradeRecord row = tradeHistory.get(idx);
-		if (row.quantity <= 0 || row.serverSynced || !row.isBuy)
+		if (row.quantity <= 0 || row.serverSynced)
 		{
 			return;
 		}
@@ -2507,7 +2824,7 @@ public class O7FlipPlugin extends Plugin
 	}
 
 	private void recordTrade(GrandExchangeOffer offer, boolean isBuy, boolean partial,
-		int deltaQty, long deltaGp, long timestamp, long offerInstanceId)
+		int deltaQty, long deltaGp, long timestamp, long offerInstanceId, Long placedAt)
 	{
 		String itemName = client.getItemDefinition(offer.getItemId()).getName();
 		long fallbackPriceEach = deltaQty > 0 ? deltaGp / deltaQty : offer.getPrice();
@@ -2525,6 +2842,7 @@ public class O7FlipPlugin extends Plugin
 			merged.priceEach       = merged.quantity > 0 ? merged.totalGp / merged.quantity : existing.priceEach;
 			merged.partial         = partial;
 			merged.offerInstanceId = offerInstanceId;
+			merged.placedAt        = existing.placedAt != null ? existing.placedAt : placedAt;
 			merged.totalQuantity   = totalQty > 0 ? totalQty : existing.totalQuantity;
 			updated.set(existingIdx, merged);
 			posted = merged;
@@ -2541,6 +2859,7 @@ public class O7FlipPlugin extends Plugin
 			trade.timestamp       = offerInstanceId / 10L;
 			trade.partial         = partial;
 			trade.offerInstanceId = offerInstanceId;
+			trade.placedAt        = placedAt;
 			trade.totalQuantity   = totalQty > 0 ? totalQty : null;
 			updated.add(trade);
 			posted = trade;
@@ -2978,8 +3297,10 @@ public class O7FlipPlugin extends Plugin
 		slotPartialPostedAt.clear();
 		deferredTerminalPosts.clear();
 		configManager.unsetConfiguration("o7flip", SLOT_FILLS_KEY);
-		slotListedAt.clear();
+		slotOffers.clear();
 		configManager.unsetConfiguration("o7flip", SLOT_LISTED_KEY);
+		offerQueue.clear();
+		configManager.unsetConfiguration("o7flip", OFFER_QUEUE_KEY);
 		slotFillClock.clear();
 		configManager.unsetConfiguration("o7flip", SLOT_FILL_CLOCK_KEY);
 		SwingUtilities.invokeLater(() -> panel.updateMyFlips(Collections.emptyList()));
@@ -3131,29 +3452,26 @@ public class O7FlipPlugin extends Plugin
 		}
 	}
 
-	private void saveSlotListedAt()
+	private void saveSlotOffers()
 	{
-		if (slotListedAt.isEmpty())
+		if (slotOffers.isEmpty())
 		{
 			configManager.unsetConfiguration("o7flip", SLOT_LISTED_KEY);
 			return;
 		}
 		StringBuilder sb = new StringBuilder();
-		boolean first = true;
-		for (Map.Entry<Integer, long[]> entry : slotListedAt.entrySet())
+		for (Map.Entry<Integer, SlotOffer> entry : slotOffers.entrySet())
 		{
-			if (!first)
+			if (sb.length() > 0)
 			{
 				sb.append(',');
 			}
-			long[] v = entry.getValue();
-			sb.append(entry.getKey()).append(':').append(v[0]).append(':').append(v[1]).append(':').append(v[2]);
-			first = false;
+			sb.append(entry.getValue().toCsv(entry.getKey()));
 		}
 		configManager.setConfiguration("o7flip", SLOT_LISTED_KEY, sb.toString());
 	}
 
-	private void loadSlotListedAt()
+	private void loadSlotOffers()
 	{
 		String csv = configManager.getConfiguration("o7flip", SLOT_LISTED_KEY);
 		if (csv == null || csv.trim().isEmpty())
@@ -3166,8 +3484,7 @@ public class O7FlipPlugin extends Plugin
 			if (parts.length < 4) continue;
 			try
 			{
-				slotListedAt.put(Integer.parseInt(parts[0]), new long[]{
-					Long.parseLong(parts[1]), Long.parseLong(parts[2]), Long.parseLong(parts[3])});
+				slotOffers.put(Integer.parseInt(parts[0]), SlotOffer.fromParts(parts));
 			}
 			catch (NumberFormatException ignored)
 			{
@@ -3472,29 +3789,37 @@ public class O7FlipPlugin extends Plugin
 		return wrongness <= OFFER_GREEN_TOL ? 0 : (wrongness <= OFFER_MID_TOL ? 1 : 2);
 	}
 
-	public int offerCompetitiveTier(int itemId, boolean isBuy, long yourPrice)
+	public static long offerBenchmark(com.o7flip.model.Models.ItemInsights ins, boolean isBuy)
 	{
-		if (itemId <= 0 || yourPrice <= 0)
-		{
-			return -1;
-		}
-		com.o7flip.model.Models.ItemInsights ins = getOverlayInsights(itemId);
 		if (ins == null || ins.current == null)
 		{
-			return -1;
+			return -1L;
 		}
 		com.o7flip.model.Models.ItemInsights.Current c = ins.current;
 		Long rec = isBuy ? c.recBuy : c.recSell;
 		long live = isBuy ? c.buyPrice : c.sellPrice;
 		long benchmark = (rec != null && rec > 0) ? rec : live;
-		if (benchmark <= 0)
+		return benchmark > 0 ? benchmark : -1L;
+	}
+
+	public int offerTier(com.o7flip.model.Models.ItemInsights ins, int itemId, boolean isBuy, long yourPrice)
+	{
+		long benchmark = offerBenchmark(ins, isBuy);
+		int risk = offerRiskTier(itemId, isBuy, yourPrice);
+		if (benchmark <= 0 || yourPrice <= 0)
 		{
-			return -1;
+			return risk;
 		}
 		double wrongness = isBuy
 			? (benchmark - yourPrice) / (double) benchmark
 			: (yourPrice - benchmark) / (double) benchmark;
-		return competitiveTier(wrongness);
+		int tier = competitiveTier(wrongness);
+		return risk > tier ? risk : tier;
+	}
+
+	public int offerCompetitiveTier(int itemId, boolean isBuy, long yourPrice)
+	{
+		return itemId <= 0 ? -1 : offerTier(getOverlayInsights(itemId), itemId, isBuy, yourPrice);
 	}
 
 	public java.awt.Color offerTierColor(int tier)
@@ -3506,15 +3831,53 @@ public class O7FlipPlugin extends Plugin
 		return tier == 0 ? config.geBorderGood() : (tier == 1 ? config.geBorderMid() : config.geBorderBad());
 	}
 
+	private static int repriceKey(int itemId, boolean isBuy)
+	{
+		return itemId * 2 + (isBuy ? 1 : 0);
+	}
+
+	public boolean sellIsUnderwater(int itemId, long yourPrice)
+	{
+		if (itemId <= 0 || yourPrice <= 0)
+		{
+			return false;
+		}
+		Long avgCost = openPositionAvgCost(itemId);
+		return avgCost != null && avgCost > 0
+			&& yourPrice - com.o7flip.util.ProfitCalculator.geTaxFor(itemId, yourPrice, 1) < avgCost;
+	}
+
+	public int offerRiskTier(int itemId, boolean isBuy, long yourPrice)
+	{
+		int risk = repriceRiskTier(itemId, isBuy);
+		return (risk < 2 && !isBuy && sellIsUnderwater(itemId, yourPrice)) ? 2 : risk;
+	}
+
+	public int repriceRiskTier(int itemId, boolean isBuy)
+	{
+		com.o7flip.model.Models.RepriceResult rp = itemId <= 0 ? null : repriceCache.get(repriceKey(itemId, isBuy));
+		if (rp == null || rp.status == null)
+		{
+			return -1;
+		}
+		switch (rp.status)
+		{
+			case "underwater":      return 2;
+			case "break_even_only": return 1;
+			default:                return -1;
+		}
+	}
+
 	public com.o7flip.model.Models.RepriceResult getReprice(int itemId, boolean isBuy, int qty, long currentPrice, int holdMinutes)
 	{
 		if (itemId <= 0 || panel == null || !panel.isPremium() || !config.shareTradeData())
 		{
 			return null;
 		}
-		Long fetched = repriceFetchedAt.get(itemId);
+		final int key = repriceKey(itemId, isBuy);
+		Long fetched = repriceFetchedAt.get(key);
 		boolean stale = fetched == null || (System.currentTimeMillis() - fetched) > REPRICE_TTL_MS;
-		if (stale && executor != null && !executor.isShutdown() && repriceInFlight.add(itemId))
+		if (stale && executor != null && !executor.isShutdown() && repriceInFlight.add(key))
 		{
 			final Long buyPrice = getFrozenBuy(itemId);
 			executor.execute(() -> apiClient.fetchReprice(itemId, isBuy, buyPrice, qty, currentPrice, holdMinutes, res ->
@@ -3523,17 +3886,17 @@ public class O7FlipPlugin extends Plugin
 				{
 					if (res != null)
 					{
-						repriceCache.put(itemId, res);
+						repriceCache.put(key, res);
 					}
-					repriceFetchedAt.put(itemId, fetchStamp(res != null, REPRICE_TTL_MS));
+					repriceFetchedAt.put(key, fetchStamp(res != null, REPRICE_TTL_MS));
 				}
 				finally
 				{
-					repriceInFlight.remove(itemId);
+					repriceInFlight.remove(key);
 				}
 			}));
 		}
-		return repriceCache.get(itemId);
+		return repriceCache.get(key);
 	}
 
 	private long offerLastFillAtMs(int slot)
@@ -4119,46 +4482,33 @@ public class O7FlipPlugin extends Plugin
 		}
 	}
 
-	void onDumpsPageChanged(int page)
+	void onOtherPageChanged(int page)
 	{
-		executor.execute(() -> fetchDumpsAtPage(panel.getDumpsSortKey(), page));
+		executor.execute(() -> fetchOtherAtPage(page));
 	}
 
-	void onDipsPageChanged(int page)
+	void onOtherPresetChanged()
 	{
-		executor.execute(() -> fetchDipsAtPage(panel.getDipsSortKey(), page));
-	}
-
-	void onDipsSortChanged(String sort)
-	{
-		executor.execute(() -> fetchDipsAtPage(sort, 0));
-	}
-
-	private void fetchDipsAtPage(String sort, int page)
-	{
-		apiClient.fetchDips(sort, panel.getDipsActivityWindow(), page, (items, total) ->
+		final String preset = panel.getOtherPreset();
+		configManager.setConfiguration("o7flip", "otherPreset", preset);
+		List<? extends Row> cached = loadListCache("other_" + preset, panel.getOtherPresetClass());
+		if (cached != null && !cached.isEmpty())
 		{
-			if (items != null && !items.isEmpty()) saveCache("dips", items);
-			SwingUtilities.invokeLater(() -> panel.updateDips(items, total, page));
-		});
+			panel.updateOther(preset, cached, cached.size(), 0);
+		}
+		executor.execute(() -> fetchOtherAtPage(0));
 	}
 
-	void onDecantPageChanged(int page)
+	private void fetchOtherAtPage(int page)
 	{
-		SwingUtilities.invokeLater(() -> panel.rerenderDecants());
-	}
-
-	void onDecantSortChanged(int sortIdx)
-	{
-		SwingUtilities.invokeLater(() -> panel.rerenderDecants());
-	}
-
-	private void fetchDecantingNow()
-	{
-		apiClient.fetchDecanting(items ->
+		final String preset = panel.getOtherPreset();
+		final String sort = panel.getOtherSort();
+		apiClient.fetchOther(preset, sort, page, panel.getOtherPresetClass(), (items, total) ->
 		{
-			if (items != null && !items.isEmpty()) saveCache("decant", items);
-			SwingUtilities.invokeLater(() -> panel.updateDecanting(items));
+			if (items != null && !items.isEmpty() && sort.isEmpty()) saveCache("other_" + preset, items);
+			lastOther = items;
+			rebuildTrackedItems();
+			SwingUtilities.invokeLater(() -> panel.updateOther(preset, items, total, page));
 		});
 	}
 
@@ -4174,21 +4524,10 @@ public class O7FlipPlugin extends Plugin
 		return true;
 	}
 
-	void onOtherSubTabSelected(String name)
+	void onOtherTabSelected()
 	{
-		if (name == null || executor == null || executor.isShutdown()) return;
-		if (!tabSelectFresh(name)) return;
-		switch (name)
-		{
-			case "Dips":
-				executor.execute(() -> fetchDipsAtPage(panel.getDipsSortKey(), panel.getDipsPage()));
-				break;
-			case "Decant":
-				executor.execute(this::fetchDecantingNow);
-				break;
-			default:
-				break;
-		}
+		if (executor == null || executor.isShutdown() || !panel.isPremium() || !tabSelectFresh("Other")) return;
+		executor.execute(() -> fetchOtherAtPage(panel.getOtherPage()));
 	}
 
 	void onFavouritesTabSelected()
@@ -5518,50 +5857,9 @@ public class O7FlipPlugin extends Plugin
 		return k != null && !k.trim().isEmpty();
 	}
 
-	private void fetchDumpsAtPage(String sort, int page)
-	{
-		java.util.function.Consumer<DumpItem.Response> cb = resp ->
-		{
-			if (resp != null && resp.items != null && !resp.items.isEmpty())
-			{
-				saveCache("dumps", resp);
-			}
-			lastDumps = resp.items;
-			rebuildTrackedItems();
-			SwingUtilities.invokeLater(() -> panel.updateDumps(resp, page));
-		};
-		int     minScore   = panel.getDumpsMinScore();
-		boolean activeOnly = panel.getDumpsActiveOnly();
-		String  tier       = panel.getDumpsTier();
-		if (panel.dumpsUsesBotEndpoint())
-		{
-			apiClient.fetchBotDumps(sort,
-				panel.getDumpsMinProfit(), panel.getDumpsPriceMin(), panel.getDumpsPriceMax(),
-				minScore, activeOnly, tier,
-				page, cb);
-		}
-		else
-		{
-			apiClient.fetchDumps(sort,
-				panel.getDumpsMinProfit(), panel.getDumpsPriceMin(), panel.getDumpsPriceMax(),
-				minScore, activeOnly, tier,
-				page, cb);
-		}
-	}
-
-	void onDumpsSortChanged(String sort)
-	{
-		executor.execute(() -> fetchDumpsAtPage(sort, 0));
-	}
-
 	void onFlipsFilterChanged()
 	{
 		executor.execute(() -> fetchFlipsAtPage(0));
-	}
-
-	void onDumpsFilterChanged()
-	{
-		executor.execute(() -> fetchDumpsAtPage(panel.getDumpsSortKey(), 0));
 	}
 
 	void onPresetChanged()

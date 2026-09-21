@@ -245,7 +245,7 @@ public class ActiveOfferRow extends JPanel
 		}
 		boolean isBuy = offer.isBuy();
 		StringBuilder sb = new StringBuilder("<html><b>");
-		sb.append(verdictText(lastTier, isBuy)).append("</b><br>");
+		sb.append(verdictText(lastTier, plugin.offerRiskTier(offer.itemId, isBuy, offer.price), isBuy)).append("</b><br>");
 		sb.append("Your ").append(isBuy ? "buy" : "sell").append(": ")
 			.append(FlipItemPanel.formatGp(offer.price)).append(" gp");
 		com.o7flip.model.Models.ItemInsights ins = plugin.getOverlayInsights(offer.itemId);
@@ -258,7 +258,7 @@ public class ActiveOfferRow extends JPanel
 		sb.append("<br><br>Colour matches the Grand Exchange border:<br>")
 			.append("<font color='#3FC77F'>Green</font> competitive &nbsp;")
 			.append("<font color='#E8C34A'>Amber</font> borderline &nbsp;")
-			.append("<font color='#E05B5B'>Red</font> won't fill<br>")
+			.append("<font color='#E05B5B'>Red</font> losing or won't fill<br>")
 			.append(ClickRouter.CLICK_HINT).append("</html>");
 		return sb.toString();
 	}
@@ -277,17 +277,22 @@ public class ActiveOfferRow extends JPanel
 		return v < 0 ? 0 : Math.min(v, 255);
 	}
 
-	private static String verdictText(int tier, boolean isBuy)
+	private static String verdictText(int tier, int risk, boolean isBuy)
 	{
-		if (tier == 0)
+		if (risk == 2)
 		{
-			return "Competitive - should fill at this price";
+			return isBuy ? "Underwater - resale won't cover this buy" : "Underwater - you'd take a loss here";
 		}
-		if (tier == 1)
+		if (tier == 2)
 		{
-			return isBuy ? "A bit low - may fill slowly" : "A bit high - may fill slowly";
+			return isBuy ? "Underpriced - raise your buy to fill" : "Overpriced - lower your sell to fill";
 		}
-		return isBuy ? "Underpriced - raise your buy to fill" : "Overpriced - lower your sell to fill";
+		if (risk == 1)
+		{
+			return "Thin margin - little or no profit left";
+		}
+		return tier == 0 ? "Competitive - should fill at this price"
+			: (isBuy ? "A bit low - may fill slowly" : "A bit high - may fill slowly");
 	}
 
 	private static class ProgressBar extends JPanel

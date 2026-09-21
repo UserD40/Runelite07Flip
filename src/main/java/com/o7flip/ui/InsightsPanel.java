@@ -828,14 +828,17 @@ public class InsightsPanel extends JPanel
 		}
 		JPanel panel = sectionPanel("07Flip recommended");
 		ItemInsights.Current c = ins.current;
-		if (c == null || c.recBuy == null)
+		if (c == null || c.recBuy == null || c.recSell == null)
 		{
 			panel.add(row("No recommended prices", "—"));
 			return panel;
 		}
-		panel.add(rowGp("Buy",    c.recBuy,    null, Color.WHITE));
-		panel.add(rowGp("Sell",   c.recSell,   null, Color.WHITE));
-		panel.add(rowGp("Profit", c.recProfit, null, margingColor(c.recProfit)));
+		panel.add(rowGp("Buy",    c.recBuy,  null, Color.WHITE));
+		panel.add(rowGp("Sell",   c.recSell, null, Color.WHITE));
+		if (c.recProfit != null)
+		{
+			panel.add(rowGp("Profit", c.recProfit, null, margingColor(c.recProfit)));
+		}
 		return panel;
 	}
 

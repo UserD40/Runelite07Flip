@@ -205,12 +205,12 @@ public interface O7FlipConfig extends Config
 	}
 
 	@ConfigItem(
-		keyName = "showDumps",
+		keyName = "showOther",
 		name = "",
 		description = "",		position = 1,
 		hidden = true
 	)
-	default boolean showDumps()
+	default boolean showOther()
 	{
 		return true;
 	}
@@ -227,25 +227,14 @@ public interface O7FlipConfig extends Config
 	}
 
 	@ConfigItem(
-		keyName = "showDecant",
+		keyName = "otherPreset",
 		name = "",
 		description = "",		position = 7,
 		hidden = true
 	)
-	default boolean showDecant()
+	default String otherPreset()
 	{
-		return true;
-	}
-
-	@ConfigItem(
-		keyName = "showDips",
-		name = "",
-		description = "",		position = 8,
-		hidden = true
-	)
-	default boolean showDips()
-	{
-		return true;
+		return "dumps";
 	}
 
 	@ConfigItem(

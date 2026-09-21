@@ -28,30 +28,22 @@ import com.o7flip.O7FlipPlugin;
 import com.o7flip.model.Models.DumpItem;
 import com.o7flip.util.Fonts;
 import net.runelite.client.game.ItemManager;
-import net.runelite.client.ui.ColorScheme;
 import javax.swing.BorderFactory;
 import javax.swing.Box;
 import javax.swing.BoxLayout;
 import javax.swing.JComponent;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
-import javax.swing.SwingUtilities;
 import javax.swing.border.EmptyBorder;
 import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Component;
-import java.awt.Cursor;
-import java.awt.Dimension;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.RenderingHints;
-import java.awt.event.MouseAdapter;
-import java.awt.event.MouseEvent;
 
 public class DumpItemPanel extends JPanel
 {
-	private static final Color ODD_BG   = new Color(0x272727);
-	private static final Color HOVER_BG = new Color(0x3A3A3A);
 	private static final Color CLOCK    = new Color(0xFF981F);
 	private static final Color MUTED    = new Color(0x666666);
 	private static final Color UNVERIFIED_FG = new Color(0xAAAAAA);
@@ -60,7 +52,7 @@ public class DumpItemPanel extends JPanel
 
 	public DumpItemPanel(DumpItem item, ItemManager itemManager, boolean odd, O7FlipPlugin plugin)
 	{
-		Color bg = odd ? ODD_BG : ColorScheme.DARK_GRAY_COLOR;
+		Color bg = FlipItemPanel.frame(this, odd);
 		boolean clockAligned = Boolean.TRUE.equals(item.isClockAligned);
 		boolean stale = Boolean.TRUE.equals(item.patternStale);
 		boolean likely = !"confirmed".equalsIgnoreCase(item.tier);
@@ -69,13 +61,9 @@ public class DumpItemPanel extends JPanel
 
 		final Color tierStripe = stale ? MUTED
 			: (likely ? LIKELY_TIER : CONFIRMED_TIER);
-		setLayout(new BorderLayout(6, 0));
-		setBackground(bg);
 		setBorder(BorderFactory.createCompoundBorder(
 			new javax.swing.border.MatteBorder(0, 3, 0, 0, tierStripe),
 			new EmptyBorder(10, 8, 10, 8)));
-		setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
-		setAlignmentX(Component.LEFT_ALIGNMENT);
 
 		JLabel iconLabel = FlipItemPanel.buildIcon(item.itemId, itemManager);
 
@@ -90,7 +78,7 @@ public class DumpItemPanel extends JPanel
 
 		JPanel nameRow = new JPanel();
 		nameRow.setLayout(new BoxLayout(nameRow, BoxLayout.X_AXIS));
-		nameRow.setBackground(bg);
+		nameRow.setOpaque(false);
 		nameRow.setAlignmentX(Component.LEFT_ALIGNMENT);
 		nameRow.add(nameLabel);
 		nameRow.add(Box.createHorizontalGlue());
@@ -110,7 +98,7 @@ public class DumpItemPanel extends JPanel
 
 		JPanel buyRow = new JPanel();
 		buyRow.setLayout(new BoxLayout(buyRow, BoxLayout.X_AXIS));
-		buyRow.setBackground(bg);
+		buyRow.setOpaque(false);
 		buyRow.setAlignmentX(Component.LEFT_ALIGNMENT);
 		buyRow.add(buyLbl);
 		buyRow.add(Box.createHorizontalGlue());
@@ -137,7 +125,7 @@ public class DumpItemPanel extends JPanel
 
 		JPanel statusRow = new JPanel();
 		statusRow.setLayout(new BoxLayout(statusRow, BoxLayout.X_AXIS));
-		statusRow.setBackground(bg);
+		statusRow.setOpaque(false);
 		statusRow.setAlignmentX(Component.LEFT_ALIGNMENT);
 		statusRow.add(lastLbl);
 		statusRow.add(cadenceLbl);
@@ -148,37 +136,8 @@ public class DumpItemPanel extends JPanel
 		add(textPanel, BorderLayout.CENTER);
 
 		ClickRouter.attach(this, plugin, item.itemId, item.name);
-
-		addMouseListener(new MouseAdapter()
-		{
-			@Override
-			public void mouseEntered(MouseEvent e)
-			{
-				setBackground(HOVER_BG);
-				textPanel.setBackground(HOVER_BG);
-				nameRow.setBackground(HOVER_BG);
-				buyRow.setBackground(HOVER_BG);
-				statusRow.setBackground(HOVER_BG);
-			}
-			@Override
-			public void mouseExited(MouseEvent e)
-			{
-				setBackground(bg);
-				textPanel.setBackground(bg);
-				nameRow.setBackground(bg);
-				buyRow.setBackground(bg);
-				statusRow.setBackground(bg);
-			}
-			@Override
-			public void mousePressed(MouseEvent e)
-			{
-				if (SwingUtilities.isRightMouseButton(e) && !e.isShiftDown() && plugin != null && item.sellPrice > 0)
-				{
-					plugin.queueGeBuy(item.itemId, item.sellPrice, item.name);
-				}
-			}
-		});
-		setMaximumSize(new Dimension(Integer.MAX_VALUE, getPreferredSize().height));
+		FlipItemPanel.routeLabels(plugin, item.itemId, item.sellPrice, item.name, buyLbl, lastLbl, cadenceLbl);
+		FlipItemPanel.hoverAndQueueBuy(this, textPanel, bg, plugin, item.itemId, item.sellPrice, item.name);
 	}
 
 	private static JComponent buildBadge(String text, Color colour, String tooltip)
