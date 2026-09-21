@@ -86,85 +86,37 @@ public final class Models
 			return itemId + "@" + (closedAt == null ? "" : closedAt);
 		}
 	}
-	public static class DecantItem
+	public static class Row
 	{
 		public int    itemId;
-		public String potionName = "Unknown";
+		public String name = "Unknown";
+		public long   buyPrice;
+		public long   sellPrice;
+	}
+	public static class DecantItem extends Row
+	{
 		public String strategy = "";
-		@SerializedName("profit_per_4dose")
-		public long   profitPer4dose;
-		public long   profitPerDose;
 		public double roiPct;
-		public int    minHourlyVolume;
-		public int    dailyVolume;
 		public int    buyDose;
 		public int    sellDose;
 	}
-	public static class DipItem
+	public static class DipItem extends Row
 	{
-		public int     itemId;
-		public String  name = "Unknown";
-		public long    buyPrice;
-		public int     hourlyVolume;
-		public int     dailyVolume;
-		public int     buyLimit;
-		public boolean members = true;
-		public String  lastUpdated = "";
-
-		public String  type = "24h_dip";
-
 		@SerializedName("avg_24h_buy")
-		public Long    avg24hBuy;
-		public Double  dipPct;
-
-		@SerializedName("dip_pct_1d")
-		public Double  dipPct1d;
-		@SerializedName("dip_pct_7d")
-		public Double  dipPct7d;
-		@SerializedName("dip_pct_30d")
-		public Double  dipPct30d;
-
-		public Long    atlFloor;
-		public Double  buyVsAtlPct;
+		public Long   avg24hBuy;
+		public Double dipPct;
 	}
-	public static class DumpItem
+	public static class DumpItem extends Row
 	{
 		public String  tier;
-
-		public int     itemId;
-		public String  name = "Unknown";
-		public long    buyPrice;
-		public long    sellPrice;
-		public long    profit;
-		public int     dumpScore;
-		public double  dumpPct;
-		public String  dumpStatus = "none";
 		public Double  lastDumpHoursAgo;
-		public int     hourlyVolume;
-		public int     buyLimit;
-		public boolean members = true;
-
-		public Double   roiPct;
-		public Boolean  patternStale;
-		public Integer  dailyVolume;
-		public Integer  periodHours;
-		public Integer  dumpPeakHourUtc;
-		public Boolean  isClockAligned;
-
-		public static class Response
-		{
-			public java.util.List<DumpItem> items;
-			public int total;
-			public int confirmedCount;
-			public int likelyCount;
-		}
+		public Boolean patternStale;
+		public Integer periodHours;
+		public Integer dumpPeakHourUtc;
+		public Boolean isClockAligned;
 	}
-	public static class FlipItem
+	public static class FlipItem extends Row
 	{
-		public int itemId;
-		public String name = "Unknown";
-		public long buyPrice;
-		public long sellPrice;
 		public long profit;
 		public double roiPct;
 		public long potentialProfit;
@@ -187,6 +139,12 @@ public final class Models
 
 		public Integer etaBuyMinutes;
 		public Integer etaSellMinutes;
+
+		public String badge;
+		public String signal;
+		public Integer buyHourUtc;
+		public Integer sellHourUtc;
+		public Boolean sellNextDay;
 
 		public Long bandProfit;
 		public Long bandMargin;
@@ -674,9 +632,6 @@ public final class Models
 		public Long   flipSellPrice;
 
 		public Long   alertSellTarget;
-
-		public Long   dumpBuyPrice;
-		public Long   dumpSellPrice;
 	}
 	public static class TrackerStats
 	{
@@ -697,6 +652,22 @@ public final class Models
 			public String source;          // "verified" | "mixed" | "declared"
 		}
 	}
+	public static class OfferEvent
+	{
+		public String  event;
+		public long    offerInstanceId;
+		public boolean isBuy;
+		public int     itemId;
+		public String  name;
+		public long    priceEach;
+		public int     offerQuantity;
+		public int     filledQuantity;
+		public long    timestamp;
+		public Long    placedAt;
+		public String  outcome;
+		public String  source;
+	}
+
 	public static class TradeRecord
 	{
 		public int    itemId;
@@ -711,6 +682,8 @@ public final class Models
 		public Long tradeId;
 
 		public Long offerInstanceId;
+
+		public Long placedAt;
 
 		public boolean serverSynced;
 
@@ -729,6 +702,7 @@ public final class Models
 			c.partial         = partial;
 			c.tradeId         = tradeId;
 			c.offerInstanceId = offerInstanceId;
+			c.placedAt        = placedAt;
 			c.serverSynced    = serverSynced;
 			c.totalQuantity   = totalQuantity;
 			return c;

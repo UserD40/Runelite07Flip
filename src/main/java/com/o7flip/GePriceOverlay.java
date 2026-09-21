@@ -141,11 +141,11 @@ public class GePriceOverlay extends Overlay
 		}
 		if (buyPrice == null && data != null)
 		{
-			buyPrice = firstNonNull(data.flipBuyPrice, data.dumpBuyPrice);
+			buyPrice = data.flipBuyPrice;
 		}
 		if (sellPrice == null && data != null)
 		{
-			sellPrice = firstNonNull(data.flipSellPrice, data.dumpSellPrice);
+			sellPrice = data.flipSellPrice;
 		}
 
 		Long frozenSell = isPremium ? plugin.getFrozenSell(currentItemId) : null;
@@ -407,16 +407,6 @@ public class GePriceOverlay extends Overlay
 			}
 		}
 		return -1;
-	}
-
-	@SafeVarargs
-	private static <T> T firstNonNull(T... values)
-	{
-		for (T v : values)
-		{
-			if (v != null) return v;
-		}
-		return null;
 	}
 
 	private static String truncate(String s, int max)

@@ -25,8 +25,10 @@
 package com.o7flip;
 
 import com.o7flip.model.Models.DecantItem;
+import com.o7flip.model.Models.DipItem;
 import com.o7flip.model.Models.DumpItem;
 import com.o7flip.model.Models.FlipItem;
+import com.o7flip.model.Models.Row;
 import com.o7flip.model.Models.SearchResultItem;
 import com.o7flip.model.Models.TradeRecord;
 import com.o7flip.ui.DecantItemPanel;
@@ -117,15 +119,28 @@ public class O7FlipPanel extends PluginPanel
 		+ "full trade history kept in sync across every device.";
 	private static final String PITCH_SEARCH =
 		"Search every item in the game and get 07Flip's recommended buy and sell prices for each one.";
-	private static final String PITCH_DUMPS =
-		"Catch items being dumped below their usual price, with the score and history to tell a real "
-		+ "opportunity from a falling knife.";
-	private static final String PITCH_DIPS =
-		"Spot items trading under their recent range, ranked by how far they have fallen and how "
-		+ "reliably they bounce back.";
-	private static final String PITCH_DECANT =
-		"Turn potion decanting into steady profit. 07Flip works out which doses to buy and sell for "
-		+ "the best margin.";
+	private static final String PITCH_OTHER =
+		"Bot dumps, price dips, all-time lows, spikes, supply squeezes, potion decanting and item-set "
+		+ "arbitrage, each ranked by 07Flip and one dropdown away.";
+
+	private static final Object[][] OTHER_PRESETS = {
+		{"arbitrage", "Arbitrage", FlipItem.class},
+		{"atl",       "ATL",       FlipItem.class},
+		{"decant",    "Decant",    DecantItem.class},
+		{"dips",      "Dips",      DipItem.class},
+		{"dumps",     "Dumps",     DumpItem.class},
+		{"itemSets",  "Item sets", FlipItem.class},
+		{"spikes",    "Spikes",    FlipItem.class},
+		{"volatile",  "Volatile",  FlipItem.class},
+	};
+	private static final String[][] OTHER_SORTS = {
+		{"",             "Default order"},
+		{"profit",       "Profit"},
+		{"roi_pct",      "ROI %"},
+		{"buy_price",    "Buy price"},
+		{"daily_volume", "Daily volume"},
+		{"name",         "Name"},
+	};
 
 	private static final String[][] PRESETS = {
 		{"",                 "All Flips"},
@@ -175,38 +190,6 @@ public class O7FlipPanel extends PluginPanel
 		"10M+",
 	};
 
-	private static final long[]   DUMP_MIN_PROFITS       = {0, 1_000, 5_000, 25_000, 100_000};
-	private static final String[] DUMP_MIN_PROFIT_LABELS = {"Any Profit", "1K+", "5K+", "25K+", "100K+"};
-
-	private static final long[][] PRICE_RANGES = {
-		{0,               Long.MAX_VALUE},
-		{0,               10_000},
-		{10_000,          50_000},
-		{50_000,          100_000},
-		{100_000,         500_000},
-		{500_000,         1_000_000},
-		{1_000_000,       5_000_000},
-		{5_000_000,       10_000_000},
-		{10_000_000,      25_000_000},
-		{25_000_000,      50_000_000},
-		{50_000_000,      100_000_000},
-		{100_000_000,     Long.MAX_VALUE},
-	};
-	private static final String[] PRICE_RANGE_LABELS = {
-		"Any Price",
-		"0 \u2013 10K",
-		"10K \u2013 50K",
-		"50K \u2013 100K",
-		"100K \u2013 500K",
-		"500K \u2013 1M",
-		"1M \u2013 5M",
-		"5M \u2013 10M",
-		"10M \u2013 25M",
-		"25M \u2013 50M",
-		"50M \u2013 100M",
-		"100M+",
-	};
-
 	private int flipsMinProfitIdx  = 0;
 	private int flipsCapitalIdx    = 0;
 	private boolean flipsF2pOnly   = false;
@@ -220,19 +203,6 @@ public class O7FlipPanel extends PluginPanel
 	private static final String[] FLIPS_MIN_VOL_LABELS    = {"Any volume", "100+/hr", "500+/hr", "1K+/hr", "5K+/hr", "10K+/hr"};
 	private static final long[]   FLIPS_MIN_BUY_PRICE     = {0, 10, 100, 1_000, 10_000, 100_000};
 	private static final String[] FLIPS_MIN_BUY_PRICE_LABELS = {"Any price", "10+", "100+", "1K+", "10K+", "100K+"};
-	private int dumpsMinProfitIdx  = 0;
-	private int dumpsPriceRangeIdx = 0;
-
-	private String dumpsSortKey  = "max_profit";
-	private String dipsSortKey   = "recent";
-	private String dipsActivityWindow = "1d";
-	private boolean dumpsUseBotEndpoint = false;
-
-	private int     dumpsMinScore   = 0;
-	private boolean dumpsActiveOnly = true;
-	private String  dumpsTier       = "all";
-	private int     dumpsConfirmedTotal = 0;
-	private int     dumpsLikelyTotal    = 0;
 
 	private boolean isSignedIn = false;
 	private boolean isPremium  = false;
@@ -276,16 +246,16 @@ public class O7FlipPanel extends PluginPanel
 	}
 
 	private List<FlipItem>    allFlips   = new ArrayList<>();
-	private List<DumpItem>    allDumps   = new ArrayList<>();
-	private List<com.o7flip.model.Models.DipItem> allDips = new ArrayList<>();
-	private List<DecantItem>  allDecants = new ArrayList<>();
+	private List<? extends Row> allOther = new ArrayList<>();
+	private int     otherPresetIdx = -1;
+	private int     otherSortIdx;
+	private boolean otherLoading;
 	private List<FlipItem>    allFavourites = new ArrayList<>();
 	private JButton[] favouritesSortBtns;
 	private int favouritesSortIdx = 1;
 	private List<TradeRecord> allMyFlips = new ArrayList<>();
 
 	private int flipsSortIdx   = 0;
-	private int dumpsSortIdx   = 0;
 	private int myFlipsSortIdx = 0;
 	private int myFlipsPage    = 0;
 	private static final int MY_FLIPS_PAGE_SIZE = 5;
@@ -295,14 +265,10 @@ public class O7FlipPanel extends PluginPanel
 		com.o7flip.ui.MyTradesStatsPanel.Period.DAILY;
 
 	private int flipsPage   = 0;  private int flipsTotal  = 0;
-	private int dumpsPage   = 0;  private int dumpsTotal  = 0;
-	private int dipsPage    = 0;  private int dipsTotal   = 0;
-	private int decantPage  = 0;
+	private int otherPage   = 0;  private int otherTotal  = 0;
 
 	private JPanel flipsListPanel;
-	private JPanel dumpsListPanel;
-	private JPanel dipsListPanel;
-	private JPanel decantListPanel;
+	private JPanel otherListPanel;
 	private JPanel favouritesListPanel;
 	private JPanel optimizerListPanel;
 	private JPanel flipsSyncNotice;
@@ -318,7 +284,6 @@ public class O7FlipPanel extends PluginPanel
 	private boolean optFormCollapsed;
 	private JPanel  optCollapsedPanel;
 	private JPanel  optInputsHost;
-	private String lastOtherSubTab;
 	private JPanel myFlipsListPanel;
 	private javax.swing.Timer activeColorTimer;
 	private com.o7flip.ui.MyTradesStatsPanel myFlipsStatsPanel;
@@ -328,11 +293,6 @@ public class O7FlipPanel extends PluginPanel
 	private List<SearchResultItem> lastSearchItems;
 	private String lastSearchQuery = "";
 
-	private JButton[] dumpsSortBtns;
-	private JButton[] dumpsTierBtns;
-	private JPanel    dumpsTierBar;
-	private JButton[] dipsSortBtns;
-	private JButton[] decantSortBtns;
 	private JButton[] myFlipsSortBtns;
 	private JButton[] myFlipsMarginSortBtns;
 	private JButton[] myFlipsRecentSortBtns;
@@ -341,11 +301,7 @@ public class O7FlipPanel extends PluginPanel
 	private JButton   myFlipsPeriodButton;
 
 	private JLabel  flipsPageLabel;   private JButton flipsPrev,    flipsNext;
-	private JLabel  dumpsPageLabel;   private JButton dumpsPrev,    dumpsNext;
-	private JLabel  dipsPageLabel;    private JButton dipsPrev,     dipsNext;
-	private int     dipsSortIdx = 0;
-	private JLabel  decantPageLabel;  private JButton decantPrev,   decantNext;
-	private int     decantSortIdx = 0;
+	private JLabel  otherPageLabel;   private JButton otherPrev,    otherNext;
 
 	private JComboBox<String> flipsCapitalCombo;
 	private JComboBox<String> flipsSortCombo;
@@ -620,16 +576,6 @@ public class O7FlipPanel extends PluginPanel
 		return true;
 	}
 
-	public boolean dumpsUsesBotEndpoint()
-	{
-		return dumpsUseBotEndpoint;
-	}
-
-	public String getDumpsSortKey()
-	{
-		return dumpsSortKey;
-	}
-
 	public long getFlipsMinProfit()
 	{
 		return flipsMinProfitIdx > 0 ? MIN_PROFITS[flipsMinProfitIdx] : 0;
@@ -654,33 +600,9 @@ public class O7FlipPanel extends PluginPanel
 		return FLIPS_MIN_HOURLY_VOL[Math.max(0, Math.min(flipsMinHourlyVolIdx, FLIPS_MIN_HOURLY_VOL.length - 1))];
 	}
 
-	public long getDumpsMinProfit()
-	{
-		return dumpsMinProfitIdx > 0 ? DUMP_MIN_PROFITS[dumpsMinProfitIdx] : 0;
-	}
-
-	public long getDumpsPriceMin()
-	{
-		return dumpsPriceRangeIdx > 0 ? PRICE_RANGES[dumpsPriceRangeIdx][0] : 0;
-	}
-
-	public long getDumpsPriceMax()
-	{
-		return dumpsPriceRangeIdx > 0 ? PRICE_RANGES[dumpsPriceRangeIdx][1] : Long.MAX_VALUE;
-	}
-
-	public int     getDumpsMinScore()   { return dumpsMinScore; }
-	public boolean getDumpsActiveOnly() { return dumpsActiveOnly; }
-	public String  getDumpsTier()       { return dumpsTier; }
-
 	public int getFlipsPage()
 	{
 		return flipsPage;
-	}
-
-	public int getDumpsPage()
-	{
-		return dumpsPage;
 	}
 
 	public void setLoading(boolean loading)
@@ -718,56 +640,55 @@ public class O7FlipPanel extends PluginPanel
 		}
 	}
 
-	public void updateDumps(com.o7flip.model.Models.DumpItem.Response resp, int page)
-	{
-		allDumps = resp.items;
-		dumpsTotal = resp.total;
-		dumpsPage = page;
-		dumpsConfirmedTotal = resp.confirmedCount;
-		dumpsLikelyTotal    = resp.likelyCount;
-		repaintDumpsTierBar();
-		renderDumps(filtered());
-	}
-
 	public void updateMyFlips(List<TradeRecord> records)
 	{
 		allMyFlips = new ArrayList<>(records);
 		renderMyFlips();
 	}
 
-	public void updateDips(List<com.o7flip.model.Models.DipItem> items, int total, int page)
+	private int otherIdx()
 	{
-		allDips = items;
-		dipsTotal = total;
-		dipsPage = page;
-		renderDips(filtered());
+		if (otherPresetIdx < 0)
+		{
+			String key = config != null ? config.otherPreset() : "";
+			otherPresetIdx = 0;
+			for (int i = 0; i < OTHER_PRESETS.length; i++)
+			{
+				if (OTHER_PRESETS[i][0].equals(key)) otherPresetIdx = i;
+			}
+		}
+		return otherPresetIdx;
 	}
 
-	public void updateDecanting(List<DecantItem> items)
+	public String getOtherPreset()
 	{
-		allDecants = items != null ? items : new ArrayList<>();
-		decantPage = 0;
-		renderDecants(filtered());
+		return (String) OTHER_PRESETS[otherIdx()][0];
 	}
 
-	public void rerenderDecants()
+	@SuppressWarnings("unchecked")
+	public Class<? extends Row> getOtherPresetClass()
 	{
-		renderDecants(filtered());
+		return (Class<? extends Row>) OTHER_PRESETS[otherIdx()][2];
 	}
 
-	public String getDipsSortKey()
+	public int getOtherPage()
 	{
-		return dipsSortKey;
+		return otherPage;
 	}
 
-	public String getDipsActivityWindow()
+	public String getOtherSort()
 	{
-		return dipsActivityWindow == null ? "1d" : dipsActivityWindow;
+		return OTHER_SORTS[otherSortIdx][0];
 	}
 
-	public int getDipsPage()
+	public void updateOther(String preset, List<? extends Row> items, int total, int page)
 	{
-		return dipsPage;
+		if (!preset.equals(getOtherPreset())) return;
+		allOther = items != null ? items : new ArrayList<>();
+		otherTotal = total;
+		otherPage = page;
+		otherLoading = false;
+		renderOther(filtered());
 	}
 
 	public void updateFavourites(List<FlipItem> items)
@@ -852,9 +773,7 @@ public class O7FlipPanel extends PluginPanel
 		{
 			cl.show(mainArea, "tabs");
 			renderFlips("");
-			renderDumps("");
-			renderDips("");
-			renderDecants("");
+			renderOther("");
 			renderFavourites("");
 			return;
 		}
@@ -922,35 +841,13 @@ public class O7FlipPanel extends PluginPanel
 			.collect(Collectors.toList());
 	}
 
-	private List<DumpItem>   fDumps(String q)
+	private List<Row> fOther(String q)
 	{
-		return allDumps.stream()
+		return allOther.stream()
 			.filter(i -> notBlocked(i.itemId))
-			.filter(i -> affordable(i.buyPrice))
+			.filter(i -> i.buyPrice <= 0 || affordable(i.buyPrice))
 			.filter(i -> q.isEmpty() || matches(i.name, q))
 			.collect(Collectors.toList());
-	}
-
-	private List<com.o7flip.model.Models.DipItem> fDips(String q)
-	{
-		return allDips.stream()
-			.filter(i -> notBlocked(i.itemId))
-			.filter(i -> affordable(i.buyPrice))
-			.filter(i -> q.isEmpty() || matches(i.name, q))
-			.collect(Collectors.toList());
-	}
-
-	private List<DecantItem> fDecants(String q)
-	{
-		return q.isEmpty() ? allDecants : allDecants.stream().filter(i -> matches(i.potionName, q)).collect(Collectors.toList());
-	}
-
-	private List<DecantItem> sortDecants(List<DecantItem> items)
-	{
-		java.util.Comparator<DecantItem> c = decantSortIdx == 1 ? java.util.Comparator.comparingDouble((DecantItem x) -> x.roiPct)
-			: decantSortIdx == 2 ? java.util.Comparator.comparingInt((DecantItem x) -> x.dailyVolume)
-			: java.util.Comparator.comparingLong((DecantItem x) -> x.profitPer4dose);
-		return items.stream().sorted(c.reversed()).collect(Collectors.toList());
 	}
 
 	private List<FlipItem> fFavourites(String q)
@@ -1053,126 +950,29 @@ public class O7FlipPanel extends PluginPanel
 			"No flips found", "Try a different preset or filter");
 	}
 
-	private void renderDumps(String q)
+	private void renderOther(String q)
 	{
-		if (dumpsListPanel == null)
+		if (otherListPanel == null)
 		{
 			return;
 		}
-		hiliteFilter(dumpsSortBtns, dumpsSortIdx);
-
-		List<DumpItem> items = fDumps(q);
-		dumpsListPanel.removeAll();
-
-		int total = Math.max(dumpsTotal, items.size());
-		int pages = Math.max(1, (int) Math.ceil(total / (double) PAGE_SIZE));
-		dumpsPageLabel.setText(isSignedIn && total > 0 ? (dumpsPage + 1) + " / " + pages : "");
-		dumpsPrev.setEnabled(isSignedIn && dumpsPage > 0);
-		dumpsNext.setEnabled(isSignedIn && dumpsPage < pages - 1);
-
-		if (items.isEmpty())
-		{
-			dumpsListPanel.add(emptyLabel("No confirmed dumps right now",
-				"Bot activity is bursty — check back in an hour."));
-			dumpsListPanel.revalidate();
-			dumpsListPanel.repaint();
-			return;
-		}
-
-		List<DumpItem> dumping  = new ArrayList<>();
-		List<DumpItem> dueSoon  = new ArrayList<>();
-		List<DumpItem> pattern  = new ArrayList<>();
-		List<DumpItem> stale    = new ArrayList<>();
-		for (DumpItem it : items)
-		{
-			if (Boolean.TRUE.equals(it.patternStale))
-			{
-				stale.add(it);
-				continue;
-			}
-			String s = it.dumpStatus == null ? "" : it.dumpStatus;
-			switch (s)
-			{
-				case "dumping":  dumping.add(it);  break;
-				case "due_soon": dueSoon.add(it);  break;
-				default:         pattern.add(it);  break;
-			}
-		}
-
-		int idx = 0;
-		idx = appendGroup("Dumping now",    new Color(0xFF5555), dumping, idx);
-		idx = appendGroup("Due soon",       new Color(0xFF981F), dueSoon, idx);
-		idx = appendGroup("Pattern",        new Color(0xAAAAAA), pattern, idx);
-		idx = appendGroup("Stale patterns", new Color(0x666666), stale,   idx);
-
-		if (!isSignedIn && total > FREE_ROWS)
-		{
-			dumpsListPanel.add(signInPrompt(total - FREE_ROWS));
-		}
-
-		dumpsListPanel.revalidate();
-		dumpsListPanel.repaint();
+		final String key = getOtherPreset();
+		fillListPaged(otherListPanel, fOther(q), otherPage, otherTotal,
+			otherPageLabel, otherPrev, otherNext,
+			(item, odd) -> otherRow(key, item, odd),
+			otherLoading ? "Loading…" : "Nothing in " + OTHER_PRESETS[otherIdx()][1] + " right now",
+			otherLoading ? "" : "Check back in a few minutes");
 	}
 
-	private int appendGroup(String label, Color headerFg, List<DumpItem> rows, int startIdx)
+	private JComponent otherRow(String key, Row item, boolean odd)
 	{
-		if (rows.isEmpty())
+		switch (key)
 		{
-			return startIdx;
+			case "dumps":  return new DumpItemPanel((DumpItem) item, itemManager, odd, plugin);
+			case "dips":   return new DipItemPanel((DipItem) item, itemManager, odd, plugin);
+			case "decant": return new DecantItemPanel((DecantItem) item, itemManager, odd, plugin);
+			default:       return new FlipItemPanel((FlipItem) item, itemManager, odd, plugin);
 		}
-		JLabel header = new JLabel(label + "  (" + rows.size() + ")");
-		header.setFont(Fonts.BOLD);
-		header.setForeground(headerFg);
-		header.setBorder(new EmptyBorder(10, 12, 4, 12));
-		header.setAlignmentX(Component.LEFT_ALIGNMENT);
-		dumpsListPanel.add(header);
-
-		int idx = startIdx;
-		int ps = isSignedIn ? PAGE_SIZE : FREE_ROWS;
-		for (DumpItem it : rows)
-		{
-			if (idx >= ps) break;
-			dumpsListPanel.add(new DumpItemPanel(it, itemManager, idx % 2 != 0, plugin));
-			dumpsListPanel.add(sep());
-			idx++;
-		}
-		return idx;
-	}
-
-	private void renderDips(String q)
-	{
-		if (dipsListPanel == null)
-		{
-			return;
-		}
-		final String window = getDipsActivityWindow();
-		fillListPaged(dipsListPanel, fDips(q), dipsPage, dipsTotal,
-			dipsPageLabel, dipsPrev, dipsNext,
-			(item, odd) -> new DipItemPanel(item, itemManager, odd, plugin, window),
-			"No dip signals", "Items below the " + window + " average or near ATL will appear here");
-		hiliteFilter(dipsSortBtns, dipsSortIdx);
-	}
-
-	private void renderDecants(String q)
-	{
-		if (decantListPanel == null)
-		{
-			return;
-		}
-		List<DecantItem> all = sortDecants(fDecants(q));
-		int total = all.size();
-		int ps    = isSignedIn ? PAGE_SIZE : FREE_ROWS;
-		int pages = Math.max(1, (int) Math.ceil(total / (double) PAGE_SIZE));
-		int safe  = isSignedIn ? Math.max(0, Math.min(decantPage, pages - 1)) : 0;
-		decantPage = safe;
-		int start = safe * PAGE_SIZE;
-		int end   = Math.min(start + ps, total);
-		List<DecantItem> window = start < end ? all.subList(start, end) : new ArrayList<>();
-		fillListPaged(decantListPanel, window, decantPage, total,
-			decantPageLabel, decantPrev, decantNext,
-			(item, odd) -> new DecantItemPanel(item, itemManager, odd, plugin),
-			"No decanting opportunities", "");
-		hiliteFilter(decantSortBtns, decantSortIdx);
 	}
 
 	private void renderFavourites(String q)
@@ -2375,8 +2175,7 @@ public class O7FlipPanel extends PluginPanel
 	public void rerenderCapitalAffectedTabs()
 	{
 		String q = filtered();
-		renderDumps(q);
-		renderDips(q);
+		renderOther(q);
 		renderFavourites(q);
 	}
 
@@ -2470,26 +2269,12 @@ public class O7FlipPanel extends PluginPanel
 			case "Flips":     return config.showFlips();
 			case "Item":      return config.showInsights();
 			case "Trades":    return config.showMyFlips();
-			case "Other":     return otherTabHasContent();
+			case "Other":     return config.showOther();
 			case "Favs":      return config.showFavourites() && hasApiKey();
 			case "Plan":      return hasApiKey();   // optimizer is premium-only; signing in is the gate
 			default:          return false;
 		}
 	}
-
-	private boolean otherTabHasContent()
-	{
-		if (config == null) return false;
-		for (String name : OTHER_SUB_TABS)
-		{
-			if (subFeatureEnabled(name)) return true;
-		}
-		return false;
-	}
-
-	public static final List<String> OTHER_SUB_TABS = java.util.Arrays.asList(
-		"Dips", "Dumps", "Decant"
-	);
 
 	public static final List<String> MAIN_TAB_ORDER = java.util.Arrays.asList(
 		"Flips", "Trades", "Other", "Plan", "Item", "Favs"
@@ -2498,18 +2283,6 @@ public class O7FlipPanel extends PluginPanel
 	private boolean hasApiKey()
 	{
 		return config != null && config.apiKey() != null && !config.apiKey().trim().isEmpty();
-	}
-
-	private boolean subFeatureEnabled(String name)
-	{
-		if (config == null) return true;
-		switch (name)
-		{
-			case "Dumps":   return config.showDumps();
-			case "Dips":    return config.showDips();
-			case "Decant":  return config.showDecant();
-			default:        return false;
-		}
 	}
 
 	public List<String> resolveTabOrder()
@@ -2528,37 +2301,27 @@ public class O7FlipPanel extends PluginPanel
 		flipsSyncNotice = null;
 		planSyncNotice  = null;
 
-		JPanel flipsContent    = buildFlipsTab();
-		JPanel dumpsContent    = buildDumpsTab();
-		JPanel insightsContent = buildInsightsTab();
-		JPanel dipsContent       = buildDipsTab();
-		JPanel decantContent     = buildDecantTab();
+		JPanel flipsContent      = buildFlipsTab();
+		JPanel insightsContent   = buildInsightsTab();
+		JPanel otherContent      = buildOtherTab();
 		JPanel favouritesContent = buildFavouritesTab();
 		JPanel planContent       = buildPlanTab();
 
 		if (!isPremium)
 		{
-			dumpsContent     = buildPremiumGateTab("Dumps",  PITCH_DUMPS);
-			dipsContent      = buildPremiumGateTab("Dips",   PITCH_DIPS);
-			decantContent    = buildPremiumGateTab("Decant", PITCH_DECANT);
+			otherContent     = buildPremiumGateTab("Other",  PITCH_OTHER);
 			planContent      = buildPremiumGateTab("Plan",   PITCH_PLAN);
 			insightsContent  = buildPremiumGateTab("Item",   PITCH_ITEM);
 			planSyncNotice   = null;
 		}
 
-		JPanel otherContent      = buildOtherTab(dipsContent,
-			decantContent,
-			dumpsContent);
 		JPanel myFlipsContent  = buildMyFlipsTab();
 
 		java.util.Map<String, JPanel> contentByName = new java.util.HashMap<>();
 		contentByName.put("Flips",     flipsContent);
-		contentByName.put("Dumps",     dumpsContent);
 		contentByName.put("Item",      insightsContent);
 		contentByName.put("Other",     otherContent);
 		contentByName.put("Trades",    myFlipsContent);
-		contentByName.put("Dips",    dipsContent);
-		contentByName.put("Decant",  decantContent);
 		contentByName.put("Favs",    favouritesContent);
 		contentByName.put("Plan",    planContent);
 
@@ -2581,9 +2344,9 @@ public class O7FlipPanel extends PluginPanel
 			int idx = tabs.getSelectedIndex();
 			if (idx < 0) return;
 			String title = tabs.getTitleAt(idx);
-			if (OTHER_SUB_TABS.contains(title))
+			if ("Other".equals(title) && plugin != null)
 			{
-				lastOtherSubTab = title;
+				plugin.onOtherTabSelected();
 			}
 			if ("Item".equals(title))
 			{
@@ -3094,12 +2857,6 @@ public class O7FlipPanel extends PluginPanel
 	public void rebuildTabs()
 	{
 		String previouslySelected = currentSelectedTabName();
-		if ("Other".equals(previouslySelected))
-		{
-			String innerNow = currentInnerOtherSubTab();
-			if (innerNow != null) lastOtherSubTab = innerNow;
-		}
-
 		insightsPanel = null;
 
 		tabsWrapper.removeAll();
@@ -3108,20 +2865,13 @@ public class O7FlipPanel extends PluginPanel
 		tabsWrapper.repaint();
 		String q = filtered();
 		renderFlips(q);
-		renderDumps(q);
-		renderDips(q);
-		renderDecants(q);
+		renderOther(q);
 		renderFavourites(q);
 		refreshBlocklistFooter();
 
 		if (previouslySelected != null)
 		{
-			boolean restored = selectTab(previouslySelected);
-			if (!restored && OTHER_SUB_TABS.contains(previouslySelected))
-			{
-				lastOtherSubTab = previouslySelected;
-				selectTab("Other");
-			}
+			selectTab(previouslySelected);
 		}
 	}
 
@@ -3143,31 +2893,6 @@ public class O7FlipPanel extends PluginPanel
 			return null;
 		}
 		return pane.getTitleAt(idx);
-	}
-
-	private String currentInnerOtherSubTab()
-	{
-		if (tabsWrapper.getComponentCount() == 0) return null;
-		java.awt.Component c = tabsWrapper.getComponent(0);
-		if (!(c instanceof JTabbedPane)) return null;
-		JTabbedPane pane = (JTabbedPane) c;
-		int idx = pane.getSelectedIndex();
-		if (idx < 0 || !"Other".equals(pane.getTitleAt(idx))) return null;
-		java.awt.Component outerContent = pane.getComponentAt(idx);
-		if (outerContent instanceof java.awt.Container)
-		{
-			for (java.awt.Component child : ((java.awt.Container) outerContent).getComponents())
-			{
-				if (child instanceof JTabbedPane)
-				{
-					JTabbedPane inner = (JTabbedPane) child;
-					int innerIdx = inner.getSelectedIndex();
-					if (innerIdx >= 0) return inner.getTitleAt(innerIdx);
-					return null;
-				}
-			}
-		}
-		return null;
 	}
 
 	public void refreshBlocklistFooter()
@@ -3601,307 +3326,6 @@ public class O7FlipPanel extends PluginPanel
 			}
 		});
 		return chip;
-	}
-
-	private JPanel buildDumpsTierBar()
-	{
-		dumpsTierBtns = new JButton[3];
-		final String[] keys   = {"all", "confirmed", "likely"};
-		final String[] labels = {"All", "Confirmed", "Likely"};
-		JPanel bar = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 4));
-		bar.setBackground(ColorScheme.DARKER_GRAY_COLOR);
-		bar.setBorder(new MatteBorder(0, 0, 1, 0, new Color(0x3A3A3A)));
-		for (int i = 0; i < keys.length; i++)
-		{
-			final int idx = i;
-			JButton btn = pillButton(labels[i]);
-			btn.addActionListener(e ->
-			{
-				if (dumpsTier.equals(keys[idx])) return;
-				dumpsTier = keys[idx];
-				dumpsPage = 0;
-				repaintDumpsTierBar();
-				if (plugin != null) plugin.onDumpsFilterChanged();
-			});
-			dumpsTierBtns[i] = btn;
-			bar.add(btn);
-		}
-		repaintDumpsTierBar();
-		return bar;
-	}
-
-	private void repaintDumpsTierBar()
-	{
-		if (dumpsTierBtns == null) return;
-		final String[] keys = {"all", "confirmed", "likely"};
-		int totalAll = dumpsConfirmedTotal + dumpsLikelyTotal;
-		String[] withCounts = {
-			totalAll > 0 ? "All " + totalAll : "All",
-			dumpsConfirmedTotal > 0 ? "Confirmed " + dumpsConfirmedTotal : "Confirmed",
-			dumpsLikelyTotal > 0 ? "Likely " + dumpsLikelyTotal : "Likely",
-		};
-		for (int i = 0; i < dumpsTierBtns.length; i++)
-		{
-			dumpsTierBtns[i].setText(withCounts[i]);
-			applySortStyle(dumpsTierBtns[i], keys[i].equals(dumpsTier));
-		}
-	}
-
-	private JPanel buildDumpsTab()
-	{
-		dumpsTierBar = buildDumpsTierBar();
-
-		final String[] sortLabels = {"Max Profit", "Recovery", "Vol×Cons", "Score", "Recent"};
-		final String[] sortKeys   = {"max_profit", "recovery_pct", "volume_consistency", "dump_pct", "recent"};
-		dumpsSortIdx = 0;
-		for (int i = 0; i < sortKeys.length; i++) { if (sortKeys[i].equals(dumpsSortKey)) { dumpsSortIdx = i; break; } }
-		dumpsSortBtns = new JButton[sortLabels.length];
-		JPanel sortRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 4));
-		sortRow.setBackground(ColorScheme.DARKER_GRAY_COLOR);
-		sortRow.setBorder(new MatteBorder(0, 0, 1, 0, new Color(0x3A3A3A)));
-		for (int i = 0; i < sortLabels.length; i++)
-		{
-			final int idx = i;
-			JButton btn = pillButton(sortLabels[i]);
-			applySortStyle(btn, idx == dumpsSortIdx);
-			btn.addActionListener(e ->
-			{
-				dumpsSortIdx = idx;
-				dumpsSortKey = sortKeys[idx];
-				dumpsPage    = 0;
-				hiliteFilter(dumpsSortBtns, dumpsSortIdx);
-				if (plugin != null)
-				{
-					plugin.onDumpsSortChanged(dumpsSortKey);
-				}
-			});
-			dumpsSortBtns[i] = btn;
-			sortRow.add(btn);
-		}
-
-		JButton activeBtn = pillButton("Active");
-		activeBtn.setToolTipText("<html>When on, only items currently dumping or due soon<br>"
-			+ "(dump_status is dumping or due_soon) are shown.</html>");
-		applyToggleStyle(activeBtn, dumpsActiveOnly);
-		activeBtn.addActionListener(e ->
-		{
-			dumpsActiveOnly = !dumpsActiveOnly;
-			applyToggleStyle(activeBtn, dumpsActiveOnly);
-			dumpsPage = 0;
-			if (plugin != null) plugin.onDumpsFilterChanged();
-		});
-
-		final int[]    scoreThresholds = {0, 30, 60, 80};
-		final String[] scoreLabels     = {"Any score", "30+", "60+", "80+"};
-		JComboBox<String> minScoreCb = styledCombo(scoreLabels);
-		int initialScoreIdx = 0;
-		for (int i = 0; i < scoreThresholds.length; i++) { if (dumpsMinScore >= scoreThresholds[i]) initialScoreIdx = i; }
-		minScoreCb.setSelectedIndex(initialScoreIdx);
-		minScoreCb.addActionListener(e ->
-		{
-			dumpsMinScore = scoreThresholds[minScoreCb.getSelectedIndex()];
-			dumpsPage = 0;
-			if (plugin != null) plugin.onDumpsFilterChanged();
-		});
-
-		JComboBox<String> minProfitCb = styledCombo(DUMP_MIN_PROFIT_LABELS);
-		minProfitCb.addActionListener(e ->
-		{
-			dumpsMinProfitIdx = minProfitCb.getSelectedIndex();
-			dumpsPage = 0;
-			renderDumps(filtered());
-			if (plugin != null) plugin.onDumpsFilterChanged();
-		});
-
-		JComboBox<String> priceRangeCb = styledCombo(PRICE_RANGE_LABELS);
-		priceRangeCb.addActionListener(e ->
-		{
-			dumpsPriceRangeIdx = priceRangeCb.getSelectedIndex();
-			dumpsPage = 0;
-			renderDumps(filtered());
-			if (plugin != null) plugin.onDumpsFilterChanged();
-		});
-
-		JPanel moreInner = new JPanel();
-		moreInner.setLayout(new BoxLayout(moreInner, BoxLayout.Y_AXIS));
-		moreInner.setBackground(ColorScheme.DARKER_GRAY_COLOR);
-		moreInner.setBorder(new EmptyBorder(2, 8, 4, 8));
-		moreInner.setVisible(false);
-
-		JPanel moreRow1 = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 2));
-		moreRow1.setBackground(ColorScheme.DARKER_GRAY_COLOR);
-		moreRow1.add(activeBtn);
-		moreRow1.add(minScoreCb);
-
-		JPanel moreRow2 = new JPanel(new GridLayout(1, 2, 4, 0));
-		moreRow2.setBackground(ColorScheme.DARKER_GRAY_COLOR);
-		moreRow2.setBorder(new EmptyBorder(4, 0, 0, 0));
-		moreRow2.add(minProfitCb);
-		moreRow2.add(priceRangeCb);
-
-		moreInner.add(moreRow1);
-		moreInner.add(moreRow2);
-
-		JButton moreToggle = pillButton("More filters ▾");
-		moreToggle.setBackground(new Color(0x3E3E3E));
-		moreToggle.setForeground(ColorScheme.LIGHT_GRAY_COLOR);
-		moreToggle.addActionListener(e ->
-		{
-			boolean show = !moreInner.isVisible();
-			moreInner.setVisible(show);
-			moreToggle.setText(show ? "More filters ▴" : "More filters ▾");
-		});
-
-		JPanel moreToggleRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 2));
-		moreToggleRow.setBackground(ColorScheme.DARKER_GRAY_COLOR);
-		moreToggleRow.setBorder(new EmptyBorder(2, 8, 0, 8));
-		moreToggleRow.add(moreToggle);
-
-		JPanel topBar = new JPanel();
-		topBar.setLayout(new BoxLayout(topBar, BoxLayout.Y_AXIS));
-		topBar.setBackground(ColorScheme.DARKER_GRAY_COLOR);
-		topBar.add(dumpsTierBar);
-		topBar.add(sortRow);
-		topBar.add(moreToggleRow);
-		topBar.add(moreInner);
-
-		dumpsListPanel = listPanel();
-		dumpsPageLabel = pageLabel();
-		dumpsPrev      = pageBtn("\u2039");
-		dumpsNext      = pageBtn("\u203A");
-		dumpsPrev.addActionListener(e ->
-		{
-			if (plugin != null)
-			{
-				plugin.onDumpsPageChanged(--dumpsPage);
-			}
-		});
-		dumpsNext.addActionListener(e ->
-		{
-			if (plugin != null)
-			{
-				plugin.onDumpsPageChanged(++dumpsPage);
-			}
-		});
-
-		return assembleTab(topBar, dumpsListPanel, buildPageBar(dumpsPageLabel, dumpsPrev, dumpsNext));
-	}
-
-	private JPanel buildDipsTab()
-	{
-		dipsSortBtns  = new JButton[3];
-		dipsListPanel = listPanel();
-		dipsPageLabel = pageLabel();
-		dipsPrev      = pageBtn("‹");
-		dipsNext      = pageBtn("›");
-		dipsPrev.addActionListener(e ->
-		{
-			if (plugin != null)
-			{
-				plugin.onDipsPageChanged(--dipsPage);
-			}
-		});
-		dipsNext.addActionListener(e ->
-		{
-			if (plugin != null)
-			{
-				plugin.onDipsPageChanged(++dipsPage);
-			}
-		});
-
-		String[] windowLabels = {"1d", "7d", "30d"};
-		JButton[] dipsWindowBtns = new JButton[windowLabels.length];
-		JPanel windowRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 4));
-		windowRow.setBackground(ColorScheme.DARKER_GRAY_COLOR);
-		windowRow.setBorder(new EmptyBorder(2, 0, 0, 0));
-		for (int i = 0; i < windowLabels.length; i++)
-		{
-			final String w = windowLabels[i];
-			JButton btn = pillButton(w);
-			applySortStyle(btn, w.equals(dipsActivityWindow));
-			btn.addActionListener(e ->
-			{
-				if (w.equals(dipsActivityWindow)) return;
-				dipsActivityWindow = w;
-				dipsPage = 0;
-				for (int j = 0; j < dipsWindowBtns.length; j++)
-				{
-					applySortStyle(dipsWindowBtns[j], windowLabels[j].equals(dipsActivityWindow));
-				}
-				if (plugin != null) plugin.onDipsSortChanged(dipsSortKey);
-			});
-			dipsWindowBtns[i] = btn;
-			windowRow.add(btn);
-		}
-
-		String[] labels = {"Recent", "Dip %", "ATL %"};
-		String[] keys   = {"recent", "dip_pct", "atl_pct"};
-		JPanel sortRow = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 4));
-		sortRow.setBackground(ColorScheme.DARKER_GRAY_COLOR);
-		sortRow.setBorder(new MatteBorder(0, 0, 1, 0, new Color(0x3A3A3A)));
-		for (int i = 0; i < labels.length; i++)
-		{
-			final int idx = i;
-			JButton btn = pillButton(labels[i]);
-			applySortStyle(btn, idx == dipsSortIdx);
-			btn.addActionListener(e ->
-			{
-				dipsSortIdx = idx;
-				dipsSortKey = keys[idx];
-				dipsPage    = 0;
-				hiliteFilter(dipsSortBtns, dipsSortIdx);
-				if (plugin != null)
-				{
-					plugin.onDipsSortChanged(dipsSortKey);
-				}
-			});
-			dipsSortBtns[i] = btn;
-			sortRow.add(btn);
-		}
-
-		JPanel topBar = new JPanel();
-		topBar.setLayout(new BoxLayout(topBar, BoxLayout.Y_AXIS));
-		topBar.setBackground(ColorScheme.DARKER_GRAY_COLOR);
-		topBar.add(windowRow);
-		topBar.add(sortRow);
-
-		return assembleTab(topBar, dipsListPanel, buildPageBar(dipsPageLabel, dipsPrev, dipsNext));
-	}
-
-	private JPanel buildDecantTab()
-	{
-		decantSortBtns  = new JButton[3];
-		decantListPanel = listPanel();
-		decantPageLabel = pageLabel();
-		decantPrev      = pageBtn("‹");
-		decantNext      = pageBtn("›");
-		decantPrev.addActionListener(e ->
-		{
-			decantPage--;
-			if (plugin != null)
-			{
-				plugin.onDecantPageChanged(decantPage);
-			}
-		});
-		decantNext.addActionListener(e ->
-		{
-			decantPage++;
-			if (plugin != null)
-			{
-				plugin.onDecantPageChanged(decantPage);
-			}
-		});
-		return assembleTab(buildSortBar(decantSortBtns, new String[]{"Profit", "ROI %", "Volume"},
-			() -> decantSortIdx, i ->
-			{
-				decantSortIdx = i;
-				decantPage = 0;
-				if (plugin != null)
-				{
-					plugin.onDecantSortChanged(decantSortIdx);
-				}
-			}),
-			decantListPanel, buildPageBar(decantPageLabel, decantPrev, decantNext));
 	}
 
 	private void applyToggleStyle(JButton btn, boolean on)
@@ -4495,77 +3919,63 @@ public class O7FlipPanel extends PluginPanel
 		return s + "h fill";
 	}
 
-	private int topLeftSubTabIndex(int n)
+	private JPanel buildOtherTab()
 	{
-		if (n <= 0) return 0;
-		int perRow;
-		if (n <= 4)      perRow = n;
-		else if (n <= 6) perRow = 3;
-		else if (n <= 8) perRow = 4;
-		else             perRow = (int) Math.ceil(n / 2.0);
-		if (n <= perRow) return 0;
-		int bottomRowSize = n % perRow;
-		if (bottomRowSize == 0) bottomRowSize = perRow;
-		return bottomRowSize;
-	}
-
-	private JPanel buildOtherTab(JPanel dipsContent,
-	                             JPanel decantContent,
-	                             JPanel dumpsContent)
-	{
-		JTabbedPane inner = new JTabbedPane(JTabbedPane.TOP, JTabbedPane.WRAP_TAB_LAYOUT);
-		inner.setBackground(ColorScheme.DARK_GRAY_COLOR);
-		inner.setForeground(Color.WHITE);
-		inner.setFont(Fonts.SM);
-		applyStaticOrderUI(inner);
-
-		java.util.Map<String, JPanel> byName = new java.util.HashMap<>();
-		byName.put("Dips",    dipsContent);
-		byName.put("Decant",  decantContent);
-		byName.put("Dumps",   dumpsContent);
-
-		for (String name : OTHER_SUB_TABS)
+		String[] labels = new String[OTHER_PRESETS.length];
+		for (int i = 0; i < labels.length; i++)
 		{
-			if (!subFeatureEnabled(name)) continue;
-			JPanel content = byName.get(name);
-			if (content == null) continue;
-			inner.addTab(name, content);
+			labels[i] = (String) OTHER_PRESETS[i][1];
 		}
-
-		if (inner.getTabCount() > 0)
+		JComboBox<String> presetCombo = styledCombo(labels);
+		presetCombo.setSelectedIndex(otherIdx());
+		presetCombo.addActionListener(e ->
 		{
-			int targetIdx = -1;
-			if (lastOtherSubTab != null)
-			{
-				for (int i = 0; i < inner.getTabCount(); i++)
-				{
-					if (lastOtherSubTab.equals(inner.getTitleAt(i)))
-					{
-						targetIdx = i;
-						break;
-					}
-				}
-			}
-			if (targetIdx < 0)
-			{
-				targetIdx = topLeftSubTabIndex(inner.getTabCount());
-			}
-			inner.setSelectedIndex(targetIdx);
-		}
-
-		inner.addChangeListener(e ->
-		{
-			int idx = inner.getSelectedIndex();
-			if (idx < 0 || plugin == null) return;
-			String title = inner.getTitleAt(idx);
-			lastOtherSubTab = title;
-			plugin.onOtherSubTabSelected(title);
+			int idx = presetCombo.getSelectedIndex();
+			if (idx < 0 || idx == otherIdx()) return;
+			otherPresetIdx = idx;
+			otherPage = 0;
+			otherTotal = 0;
+			allOther = new ArrayList<>();
+			otherLoading = true;
+			renderOther(filtered());
+			if (plugin != null) plugin.onOtherPresetChanged();
 		});
+		String[] sortLabels = new String[OTHER_SORTS.length];
+		for (int i = 0; i < sortLabels.length; i++)
+		{
+			sortLabels[i] = OTHER_SORTS[i][1];
+		}
+		JComboBox<String> sortCombo = styledCombo(sortLabels);
+		sortCombo.setSelectedIndex(otherSortIdx);
+		sortCombo.addActionListener(e ->
+		{
+			int idx = sortCombo.getSelectedIndex();
+			if (idx < 0 || idx == otherSortIdx) return;
+			otherSortIdx = idx;
+			otherPage = 0;
+			otherLoading = true;
+			renderOther(filtered());
+			if (plugin != null) plugin.onOtherPageChanged(0);
+		});
+		JPanel topBar = new JPanel(new GridLayout(1, 2, 4, 0));
+		topBar.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+		topBar.setBorder(new EmptyBorder(6, 8, 6, 8));
+		topBar.add(presetCombo);
+		topBar.add(sortCombo);
 
-		JPanel wrap = new JPanel(new BorderLayout());
-		wrap.setBackground(ColorScheme.DARK_GRAY_COLOR);
-		wrap.add(inner, BorderLayout.CENTER);
-		return wrap;
+		otherListPanel = listPanel();
+		otherPageLabel = pageLabel();
+		otherPrev      = pageBtn("‹");
+		otherNext      = pageBtn("›");
+		otherPrev.addActionListener(e ->
+		{
+			if (plugin != null) plugin.onOtherPageChanged(--otherPage);
+		});
+		otherNext.addActionListener(e ->
+		{
+			if (plugin != null) plugin.onOtherPageChanged(++otherPage);
+		});
+		return assembleTab(topBar, otherListPanel, buildPageBar(otherPageLabel, otherPrev, otherNext));
 	}
 
 	private JScrollPane buildSearchView()

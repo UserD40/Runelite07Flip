@@ -31,11 +31,9 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.o7flip.model.Models;
 import com.o7flip.model.Models.AuthStatus;
-import com.o7flip.model.Models.DecantItem;
-import com.o7flip.model.Models.DumpItem;
 import com.o7flip.model.Models.FlipItem;
-import com.o7flip.model.Models.DipItem;
 import com.o7flip.model.Models.ItemInsights;
+import com.o7flip.model.Models.OfferEvent;
 import com.o7flip.model.Models.OptimizeResult;
 import com.o7flip.model.Models.RecommendedPrices;
 import com.o7flip.model.Models.RepriceResult;
@@ -67,7 +65,7 @@ public class O7FlipApiClient
 	private static final String    BASE_URL        = "https://07flip.com/api/runelite";
 
 	public volatile long flipsAsOfMs;
-	private static final String    PLUGIN_VERSION  = "1.1.0";
+	private static final String    PLUGIN_VERSION  = "1.3.0";
 	private static final String    USER_AGENT      = "07Flip-RuneLite/" + PLUGIN_VERSION;
 	private static final int       PAGE_LIMIT      = 10;
 	private static final MediaType MEDIA_TYPE_JSON = MediaType.get("application/json; charset=utf-8");
@@ -329,6 +327,10 @@ public class O7FlipApiClient
 			{
 				row.addProperty("offer_instance_id", t.offerInstanceId);
 			}
+			if (t.placedAt != null)
+			{
+				row.addProperty("placed_at", t.placedAt);
+			}
 			arr.add(row);
 			sentTrades.add(t);
 		}
@@ -469,6 +471,10 @@ public class O7FlipApiClient
 		{
 			body.addProperty("offer_instance_id", trade.offerInstanceId);
 		}
+		if (trade.placedAt != null)
+		{
+			body.addProperty("placed_at", trade.placedAt);
+		}
 
 		RequestBody requestBody = RequestBody.create(MEDIA_TYPE_JSON, gson.toJson(body));
 		Request.Builder builder = new Request.Builder()
@@ -513,6 +519,76 @@ public class O7FlipApiClient
 						log.warn("[07Flip] postTradeRecord parse error: {}", parse.getMessage());
 					}
 					if (onResult != null) onResult.accept(true, tradeId);
+				}
+				finally
+				{
+					response.close();
+				}
+			}
+		});
+	}
+
+	public void postOfferEvents(List<OfferEvent> events, Consumer<Boolean> onResult)
+	{
+		if (isRateLimited())
+		{
+			onResult.accept(false);
+			return;
+		}
+		JsonArray arr = new JsonArray();
+		for (OfferEvent e : events)
+		{
+			JsonObject o = new JsonObject();
+			o.addProperty("event",             e.event);
+			o.addProperty("offer_instance_id", e.offerInstanceId);
+			o.addProperty("is_buy",            e.isBuy);
+			o.addProperty("item_id",           e.itemId);
+			o.addProperty("name",              e.name);
+			o.addProperty("price_each",        e.priceEach);
+			o.addProperty("offer_quantity",    e.offerQuantity);
+			o.addProperty("filled_quantity",   e.filledQuantity);
+			o.addProperty("timestamp",         e.timestamp);
+			if (e.placedAt != null)
+			{
+				o.addProperty("placed_at", e.placedAt);
+			}
+			if (e.outcome != null)
+			{
+				o.addProperty("outcome", e.outcome);
+			}
+			o.addProperty("source", e.source);
+			arr.add(o);
+		}
+		Request.Builder builder = new Request.Builder()
+			.url(BASE_URL + "/offers")
+			.post(RequestBody.create(MEDIA_TYPE_JSON, gson.toJson(arr)))
+			.header("User-Agent", USER_AGENT);
+		String key = sanitizedApiKey();
+		if (key != null)
+		{
+			builder.header("Authorization", "Bearer " + key);
+		}
+		okHttpClient.newCall(builder.build()).enqueue(new Callback()
+		{
+			@Override
+			public void onFailure(Call call, IOException e)
+			{
+				log.warn("[07Flip] postOfferEvents failed: {}", e.getMessage());
+				onResult.accept(false);
+			}
+
+			@Override
+			public void onResponse(Call call, Response response)
+			{
+				try
+				{
+					if (response.code() == 429) markRateLimited(response);
+					if (response.code() == 401) signalUnauthorized();
+					if (!response.isSuccessful())
+					{
+						log.warn("[07Flip] postOfferEvents HTTP {}", response.code());
+					}
+					onResult.accept(response.isSuccessful());
 				}
 				finally
 				{
@@ -1222,20 +1298,12 @@ public class O7FlipApiClient
 		}
 	}
 
-	public void fetchDips(String sort, String window, int page,
-	                      BiConsumer<List<DipItem>, Integer> callback)
+	public <T extends Models.Row> void fetchOther(String preset, String sort, int page, Class<T> type,
+	                                              BiConsumer<List<T>, Integer> callback)
 	{
-		StringBuilder url = new StringBuilder(BASE_URL + "/dips?limit=").append(PAGE_LIMIT)
-			.append("&page=").append(page);
-		if (sort != null && !sort.isEmpty())
-		{
-			url.append("&sort=").append(sort);
-		}
-		if (window != null && !window.isEmpty() && !"1d".equals(window))
-		{
-			url.append("&activity_window=").append(window);
-		}
-		fetchPaged(url.toString(), "fetchDips", "dips", this::parseDipItem, callback);
+		fetchPaged(BASE_URL + "/v2/other?preset=" + preset + "&limit=" + PAGE_LIMIT + "&page=" + page
+			+ (sort.isEmpty() ? "" : "&sort=" + sort),
+			"fetchOther", "items", obj -> parseRow(obj, type), callback);
 	}
 
 	public void fetchFavourites(Consumer<List<FlipItem>> callback)
@@ -2066,132 +2134,14 @@ public class O7FlipApiClient
 		return o;
 	}
 
-	public void fetchDumps(String sort, long minProfit, long priceMin, long priceMax,
-	                       int minScore, boolean activeOnly, String tier,
-	                       int page, Consumer<DumpItem.Response> callback)
-	{
-		StringBuilder url = new StringBuilder(BASE_URL + "/dumps?limit=").append(PAGE_LIMIT)
-			.append("&page=").append(page);
-		if (sort != null && !sort.isEmpty())
-		{
-			url.append("&sort=").append(sort);
-		}
-		if (minProfit > 0)
-		{
-			url.append("&minProfit=").append(minProfit);
-		}
-		if (priceMin > 0)
-		{
-			url.append("&priceMin=").append(priceMin);
-		}
-		if (priceMax < Long.MAX_VALUE)
-		{
-			url.append("&priceMax=").append(priceMax);
-		}
-		if (minScore > 0)
-		{
-			url.append("&minScore=").append(minScore);
-		}
-		if (activeOnly)
-		{
-			url.append("&activeOnly=true");
-		}
-		if (tier != null && !tier.isEmpty() && !"all".equals(tier))
-		{
-			url.append("&tier=").append(tier);
-		}
-		fetchParsed(url.toString(), "fetchDumps", this::parseDumpsResponse, emptyDumpsResponse(), callback);
-	}
-
-	private static DumpItem.Response emptyDumpsResponse()
-	{
-		DumpItem.Response r = new DumpItem.Response();
-		r.items = new ArrayList<>();
-		return r;
-	}
-
-	private DumpItem.Response parseDumpsResponse(Response response) throws IOException
-	{
-		if (response.code() == 429)
-		{
-			markRateLimited(response);
-		}
-		if (!response.isSuccessful() || response.body() == null)
-		{
-			log.warn("[07Flip] /dumps HTTP {}", response.code());
-			return emptyDumpsResponse();
-		}
-		try
-		{
-			JsonObject json = gson.fromJson(response.body().string(), JsonObject.class);
-			DumpItem.Response out = new DumpItem.Response();
-			out.items = parseArray(json, "dumps", O7FlipApiClient.this::parseDumpItem);
-			out.total = getInt(json, "total", out.items.size());
-			if (json.has("tier_totals") && json.get("tier_totals").isJsonObject())
-			{
-				JsonObject t = json.getAsJsonObject("tier_totals");
-				out.confirmedCount = getInt(t, "confirmed", 0);
-				out.likelyCount    = getInt(t, "likely",    0);
-			}
-			return out;
-		}
-		catch (Exception e)
-		{
-			log.warn("[07Flip] /dumps parse error: {}", e.getMessage());
-			return emptyDumpsResponse();
-		}
-	}
-
-	public void fetchBotDumps(String sort, long minProfit, long priceMin, long priceMax,
-	                          int minScore, boolean activeOnly, String tier,
-	                          int page, Consumer<DumpItem.Response> callback)
-	{
-		StringBuilder url = new StringBuilder(BASE_URL + "/bot-dumps?limit=").append(PAGE_LIMIT)
-			.append("&page=").append(page);
-		if (sort != null && !sort.isEmpty())
-		{
-			url.append("&sort=").append(sort);
-		}
-		if (minProfit > 0)
-		{
-			url.append("&minProfit=").append(minProfit);
-		}
-		if (priceMin > 0)
-		{
-			url.append("&priceMin=").append(priceMin);
-		}
-		if (priceMax < Long.MAX_VALUE)
-		{
-			url.append("&priceMax=").append(priceMax);
-		}
-		if (minScore > 0)
-		{
-			url.append("&minScore=").append(minScore);
-		}
-		if (activeOnly)
-		{
-			url.append("&activeOnly=true");
-		}
-		if (tier != null && !tier.isEmpty() && !"all".equals(tier))
-		{
-			url.append("&tier=").append(tier);
-		}
-		fetchParsed(url.toString(), "fetchBotDumps", this::parseDumpsResponse, emptyDumpsResponse(), callback);
-	}
-
-	public void fetchBundle(
-		JsonObject sections,
-		BiConsumer<List<FlipItem>, Integer>  onFlips,
-		BiConsumer<List<DumpItem>, Integer>  onDumps,
-		Consumer<String>                     onConnectUrl
-	)
+	public void fetchBundle(Consumer<String> onConnectUrl)
 	{
 		if (isRateLimited())
 		{
 			return;
 		}
 		JsonObject body = new JsonObject();
-		body.add("sections", sections);
+		body.add("sections", new JsonObject());
 		RequestBody requestBody = RequestBody.create(MEDIA_TYPE_JSON, gson.toJson(body));
 
 		Request.Builder builder = new Request.Builder()
@@ -2228,21 +2178,7 @@ public class O7FlipApiClient
 				try
 				{
 					JsonObject root = gson.fromJson(response.body().string(), JsonObject.class);
-
-					if (onFlips != null && root.has("flips"))
-					{
-						JsonObject sec = root.getAsJsonObject("flips");
-						rememberFlipsAsOf(sec);
-						List<FlipItem> items = parseArray(sec, "flips", O7FlipApiClient.this::parseFlipItem);
-						onFlips.accept(items, getInt(sec, "total", items.size()));
-					}
-					if (onDumps != null && root.has("dumps"))
-					{
-						JsonObject sec = root.getAsJsonObject("dumps");
-						List<DumpItem> items = parseArray(sec, "dumps", O7FlipApiClient.this::parseDumpItem);
-						onDumps.accept(items, getInt(sec, "total", items.size()));
-					}
-					if (onConnectUrl != null && root.has("_auth"))
+					if (root.has("_auth"))
 					{
 						JsonObject auth = root.getAsJsonObject("_auth");
 						boolean connected = getBool(auth, "connected", true);
@@ -2255,17 +2191,6 @@ public class O7FlipApiClient
 				}
 			}
 		});
-	}
-
-	public void fetchDecanting(Consumer<List<DecantItem>> callback)
-	{
-		fetchList(BASE_URL + "/decanting", "fetchDecanting", "decants",
-			this::parseDecantItem, callback);
-	}
-
-	private DecantItem parseDecantItem(JsonObject obj)
-	{
-		return parser().fromJson(obj, DecantItem.class);
 	}
 
 	public void fetchRecommendedPrices(int itemId, Consumer<RecommendedPrices> callback)
@@ -2340,34 +2265,14 @@ public class O7FlipApiClient
 
 	private FlipItem parseFlipItem(JsonObject obj)
 	{
-		FlipItem item = parser().fromJson(obj, FlipItem.class);
-		if (item.name == null) item.name = "Unknown";
-		return item;
+		return parseRow(obj, FlipItem.class);
 	}
 
-	private DipItem parseDipItem(JsonObject obj)
+	private <T extends Models.Row> T parseRow(JsonObject obj, Class<T> type)
 	{
-		DipItem item = parser().fromJson(obj, DipItem.class);
-		if (item.name == null)        item.name        = "Unknown";
-		if (item.lastUpdated == null) item.lastUpdated = "";
-		if (item.type == null)        item.type        = "24h_dip";
-		return item;
-	}
-
-	private DumpItem parseDumpItem(JsonObject obj)
-	{
-		DumpItem item = parser().fromJson(obj, DumpItem.class);
-		if (item.name == null)       item.name       = "Unknown";
-		if (item.dumpStatus == null) item.dumpStatus = "none";
-		if (item.tier != null && item.tier.isEmpty())
-		{
-			item.tier = null;
-		}
-		if (item.buyPrice == 0)
-		{
-			item.buyPrice = getLong(obj, "current_price", 0);
-		}
-		return item;
+		T row = parser().fromJson(obj, type);
+		if (row.name == null) row.name = "Unknown";
+		return row;
 	}
 
 	@FunctionalInterface

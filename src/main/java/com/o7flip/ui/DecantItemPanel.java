@@ -27,62 +27,35 @@ package com.o7flip.ui;
 import com.o7flip.O7FlipPlugin;
 import com.o7flip.model.Models.DecantItem;
 import com.o7flip.util.Fonts;
-import com.o7flip.util.ItemIds;
 import net.runelite.client.game.ItemManager;
-import net.runelite.client.ui.ColorScheme;
 import javax.swing.Box;
 import javax.swing.BoxLayout;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.SwingConstants;
-import javax.swing.SwingUtilities;
-import javax.swing.border.EmptyBorder;
 import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Component;
-import java.awt.Cursor;
 import java.awt.Dimension;
-import java.awt.event.MouseAdapter;
-import java.awt.event.MouseEvent;
 
 public class DecantItemPanel extends JPanel
 {
-	private static final Color ODD_BG   = new Color(0x272727);
-	private static final Color HOVER_BG = new Color(0x3A3A3A);
-	private static final Color ORANGE   = new Color(0xFF981F);
-
 	public DecantItemPanel(DecantItem item, ItemManager itemManager, boolean odd, O7FlipPlugin plugin)
 	{
-		Color bg = odd ? ODD_BG : ColorScheme.DARK_GRAY_COLOR;
+		Color bg = FlipItemPanel.frame(this, odd);
+		JLabel iconLabel = FlipItemPanel.buildIcon(item.itemId, itemManager);
 
-		setLayout(new BorderLayout(8, 0));
-		setBackground(bg);
-		setBorder(new EmptyBorder(8, 10, 8, 10));
-		setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
-		setAlignmentX(Component.LEFT_ALIGNMENT);
-
-		int dose   = item.buyDose > 0 ? item.buyDose : 4;
-		int resolved = ItemIds.forPotion(item.potionName, dose);
-		if (resolved == 0 && item.itemId > 0)
-		{
-			resolved = item.itemId;
-		}
-		final int buyDoseItemId = resolved;
-		JLabel iconLabel = FlipItemPanel.buildIcon(buyDoseItemId, itemManager);
-
-		JLabel nameLabel = new JLabel(item.potionName);
+		JLabel nameLabel = new JLabel(item.name);
 		nameLabel.setFont(Fonts.BOLD);
 		nameLabel.setForeground(Color.WHITE);
 		nameLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
 
-		String buyText = item.buyDose > 0 ? "Buy " + item.buyDose + "-dose" : item.strategy;
-		JLabel buyLabel = new JLabel(buyText);
+		JLabel buyLabel = new JLabel(item.buyDose > 0 ? "Buy " + item.buyDose + "-dose" : item.strategy);
 		buyLabel.setFont(Fonts.SM);
 		buyLabel.setForeground(new Color(0xFF7070));
 		buyLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
 
-		String sellText = item.sellDose > 0 ? "Sell " + item.sellDose + "-dose" : "";
-		JLabel sellLabel = new JLabel(sellText);
+		JLabel sellLabel = new JLabel(item.sellDose > 0 ? "Sell " + item.sellDose + "-dose" : "");
 		sellLabel.setFont(Fonts.SM);
 		sellLabel.setForeground(new Color(0x00C27A));
 		sellLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
@@ -100,7 +73,7 @@ public class DecantItemPanel extends JPanel
 			"<html><center><b>" + String.format("%.1f", item.roiPct) + "%</b>"
 			+ "<br><font color='#888888'>ROI</font></center></html>");
 		roiLabel.setFont(Fonts.SM);
-		roiLabel.setForeground(ORANGE);
+		roiLabel.setForeground(new Color(0xFF981F));
 		roiLabel.setHorizontalAlignment(SwingConstants.RIGHT);
 		roiLabel.setPreferredSize(new Dimension(48, 0));
 
@@ -108,31 +81,7 @@ public class DecantItemPanel extends JPanel
 		add(textPanel, BorderLayout.CENTER);
 		add(roiLabel,  BorderLayout.EAST);
 
-		ClickRouter.attach(this, plugin, buyDoseItemId, item.potionName);
-
-		addMouseListener(new MouseAdapter()
-		{
-			@Override
-			public void mouseEntered(MouseEvent e)
-			{
-				setBackground(HOVER_BG);
-				textPanel.setBackground(HOVER_BG);
-			}
-			@Override
-			public void mouseExited(MouseEvent e)
-			{
-				setBackground(bg);
-				textPanel.setBackground(bg);
-			}
-			@Override
-			public void mousePressed(MouseEvent e)
-			{
-				if (SwingUtilities.isRightMouseButton(e) && !e.isShiftDown() && plugin != null && buyDoseItemId > 0)
-				{
-					plugin.queueGeBuy(buyDoseItemId, 0L, item.potionName);
-				}
-			}
-		});
-		setMaximumSize(new Dimension(Integer.MAX_VALUE, getPreferredSize().height));
+		ClickRouter.attach(this, plugin, item.itemId, item.name);
+		FlipItemPanel.hoverAndQueueBuy(this, textPanel, bg, plugin, item.itemId, 0L, item.name);
 	}
 }
