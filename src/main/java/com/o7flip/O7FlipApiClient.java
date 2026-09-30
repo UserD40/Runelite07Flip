@@ -65,7 +65,7 @@ public class O7FlipApiClient
 	private static final String    BASE_URL        = "https://07flip.com/api/runelite";
 
 	public volatile long flipsAsOfMs;
-	private static final String    PLUGIN_VERSION  = "1.3.0";
+	private static final String    PLUGIN_VERSION  = "1.3.1";
 	private static final String    USER_AGENT      = "07Flip-RuneLite/" + PLUGIN_VERSION;
 	private static final int       PAGE_LIMIT      = 10;
 	private static final MediaType MEDIA_TYPE_JSON = MediaType.get("application/json; charset=utf-8");
@@ -314,24 +314,7 @@ public class O7FlipApiClient
 		for (TradeRecord t : trades)
 		{
 			if (t == null || t.quantity <= 0) continue;
-			JsonObject row = new JsonObject();
-			row.addProperty("item_id",   t.itemId);
-			row.addProperty("name",      t.name);
-			row.addProperty("is_buy",    t.isBuy);
-			row.addProperty("quantity",  t.quantity);
-			row.addProperty("price_each", t.priceEach);
-			row.addProperty("total_gp",  t.totalGp);
-			row.addProperty("timestamp", t.timestamp);
-			row.addProperty("partial",   t.partial);
-			if (t.offerInstanceId != null)
-			{
-				row.addProperty("offer_instance_id", t.offerInstanceId);
-			}
-			if (t.placedAt != null)
-			{
-				row.addProperty("placed_at", t.placedAt);
-			}
-			arr.add(row);
+			arr.add(tradeJson(t));
 			sentTrades.add(t);
 		}
 		if (arr.size() == 0)
@@ -451,6 +434,28 @@ public class O7FlipApiClient
 		}
 	}
 
+	JsonObject tradeJson(TradeRecord t)
+	{
+		JsonObject row = new JsonObject();
+		row.addProperty("item_id",   t.itemId);
+		row.addProperty("name",      t.name);
+		row.addProperty("is_buy",    t.isBuy);
+		row.addProperty("quantity",  t.quantity);
+		row.addProperty("price_each", t.priceEach);
+		row.addProperty("total_gp",  t.totalGp);
+		row.addProperty("timestamp", t.timestamp);
+		row.addProperty("partial",   t.partial);
+		if (t.offerInstanceId != null)
+		{
+			row.addProperty("offer_instance_id", t.offerInstanceId);
+		}
+		if (t.placedAt != null)
+		{
+			row.addProperty("placed_at", t.placedAt);
+		}
+		return row;
+	}
+
 	public void postTradeRecord(TradeRecord trade, BiConsumer<Boolean, Long> onResult)
 	{
 		if (isRateLimited())
@@ -458,23 +463,7 @@ public class O7FlipApiClient
 			if (onResult != null) onResult.accept(false, null);
 			return;
 		}
-		JsonObject body = new JsonObject();
-		body.addProperty("item_id",   trade.itemId);
-		body.addProperty("name",      trade.name);
-		body.addProperty("is_buy",    trade.isBuy);
-		body.addProperty("quantity",  trade.quantity);
-		body.addProperty("price_each", trade.priceEach);
-		body.addProperty("total_gp",  trade.totalGp);
-		body.addProperty("timestamp", trade.timestamp);
-		body.addProperty("partial",   trade.partial);
-		if (trade.offerInstanceId != null)
-		{
-			body.addProperty("offer_instance_id", trade.offerInstanceId);
-		}
-		if (trade.placedAt != null)
-		{
-			body.addProperty("placed_at", trade.placedAt);
-		}
+		JsonObject body = tradeJson(trade);
 
 		RequestBody requestBody = RequestBody.create(MEDIA_TYPE_JSON, gson.toJson(body));
 		Request.Builder builder = new Request.Builder()

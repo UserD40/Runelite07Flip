@@ -41,6 +41,7 @@ import net.runelite.api.ScriptID;
 import net.runelite.api.events.ClientTick;
 import net.runelite.api.events.GameTick;
 import net.runelite.api.events.ScriptPostFired;
+import net.runelite.api.events.VarbitChanged;
 import net.runelite.api.gameval.InterfaceID;
 import net.runelite.api.gameval.VarClientID;
 import net.runelite.api.gameval.VarPlayerID;
@@ -164,6 +165,15 @@ public class O7FlipPlugin extends Plugin
 	private long confirmCheckKey = Long.MIN_VALUE;
 	private long confirmCheckAtMs = 0L;
 	private Boolean confirmCheckResult;
+	/*
+	 * Unnamed 64-bit varp holding the price typed on the GE setup screen since the
+	 * 2026-09-30 "beyond max cash" update; it replaced varbit GE_NEWOFFER_PRICE (4398)
+	 * and sits just before GE_TAX_SLOT_LONG_0 (5754) in RuneLite 1.13.1's gameval.
+	 * Set to -1 to disable the Confirm-button tint. The tint is only ever drawn after
+	 * this varp has been seen changing to a real price while the setup screen is open.
+	 */
+	private static final int GE_SETUP_PRICE_VARP = 5753;
+	private volatile boolean setupPriceVarpConfirmed;
 
 	private int sellSetupArmedItemId = -1;
 
@@ -1590,6 +1600,17 @@ public class O7FlipPlugin extends Plugin
 	}
 
 	@Subscribe
+	public void onVarbitChanged(VarbitChanged event)
+	{
+		if (setupPriceVarpConfirmed || event.getVarpId() != GE_SETUP_PRICE_VARP || event.getLongValue() <= 0)
+		{
+			return;
+		}
+		Widget setup = client.getWidget(InterfaceID.GeOffers.SETUP);
+		setupPriceVarpConfirmed = setup != null && !setup.isHidden();
+	}
+
+	@Subscribe
 	public void onClientTick(ClientTick event)
 	{
 		Widget setup = client.getWidget(InterfaceID.GeOffers.SETUP);
@@ -1697,9 +1718,13 @@ public class O7FlipPlugin extends Plugin
 		{
 			return null;
 		}
+		if (!setupPriceVarpConfirmed)
+		{
+			return null;
+		}
 		boolean sell = isGeSellSetup();
-		long entered = client.getVarbitValue(VarbitID.GE_NEWOFFER_PRICE);
-		long key = ((long) itemId << 33) | (sell ? 1L << 32 : 0L) | entered;
+		long entered = client.getVarpLongValue(GE_SETUP_PRICE_VARP);
+		long key = (((long) itemId << 33) | (sell ? 1L << 32 : 0L)) ^ (entered * 0x9E3779B97F4A7C15L);
 		long now = System.currentTimeMillis();
 		if (key != confirmCheckKey || now - confirmCheckAtMs > 1000L)
 		{
