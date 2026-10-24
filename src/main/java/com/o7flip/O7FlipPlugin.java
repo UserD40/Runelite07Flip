@@ -38,6 +38,7 @@ import net.runelite.api.GrandExchangeOfferState;
 import net.runelite.api.events.GameStateChanged;
 import net.runelite.api.events.GrandExchangeOfferChanged;
 import net.runelite.api.ScriptID;
+import net.runelite.api.events.BeforeRender;
 import net.runelite.api.events.ClientTick;
 import net.runelite.api.events.GameTick;
 import net.runelite.api.events.ScriptPostFired;
@@ -160,6 +161,11 @@ public class O7FlipPlugin extends Plugin
 	volatile int    pendingGeSetItemId = -1;
 	volatile long   pendingGeInputPrice = -1;
 	private boolean gePriceInputFilled  = false;
+	private int     geAutoFilledKey     = -1;
+	private int     offerEnteredKey     = -1;
+	private long    offerEnteredPrice   = -1L;
+	private long    offerVarpAtEntry    = -1L;
+	private int     offerLinesSig       = 0;
 
 	public volatile long confirmHighlightUntilMs = 0L;
 	private long confirmCheckKey = Long.MIN_VALUE;
@@ -644,7 +650,7 @@ public class O7FlipPlugin extends Plugin
 		return fresh;
 	}
 
-	private Long openPositionAvgCost(int itemId)
+	Long openPositionAvgCost(int itemId)
 	{
 		com.o7flip.util.ProfitCalculator.Result r = positions();
 		com.o7flip.util.ProfitCalculator.OpenPosition pos = r.openPositions.get(itemId);
@@ -1610,11 +1616,34 @@ public class O7FlipPlugin extends Plugin
 		setupPriceVarpConfirmed = setup != null && !setup.isHidden();
 	}
 
+	@Subscribe(priority = -1)
+	public void onBeforeRender(BeforeRender event)
+	{
+		if (client.isResized() || client.getVarcIntValue(VarClientID.MESLAYERMODE) == 0)
+		{
+			return;
+		}
+		Widget frame = client.getWidget(ComponentID.CHATBOX_FRAME);
+		Widget ge = client.getWidget(InterfaceID.GeOffers.UNIVERSE);
+		if (frame != null && frame.isSelfHidden() && ge != null && !ge.isHidden())
+		{
+			frame.setHidden(false);
+		}
+	}
+
 	@Subscribe
 	public void onClientTick(ClientTick event)
 	{
+		pushOfferLines();
 		Widget setup = client.getWidget(InterfaceID.GeOffers.SETUP);
-		if (setup == null || setup.isHidden() || !isGePriceEntryOpen())
+		if (setup == null || setup.isHidden())
+		{
+			gePriceInputFilled = false;
+			geAutoFilledKey = -1;
+			offerEnteredKey = -1;
+			return;
+		}
+		if (!isGePriceEntryOpen())
 		{
 			gePriceInputFilled = false;
 			return;
@@ -1624,14 +1653,22 @@ public class O7FlipPlugin extends Plugin
 			return;
 		}
 		long price = pendingGeInputPrice;
+		int itemId = resolveItemIdFromSetupWidget();
+		boolean sell = isGeSellSetup();
+		int key = itemId > 0 ? itemId * 2 + (sell ? 1 : 0) : -1;
+		if (key != -1 && key == geAutoFilledKey)
+		{
+			pendingGeInputPrice = -1;
+			gePriceInputFilled = true;
+			return;
+		}
 		if (price == -1)
 		{
-			int itemId = resolveItemIdFromSetupWidget();
 			if (itemId <= 0)
 			{
 				return;
 			}
-			price = isGeSellSetup() ? computeAutoSellPrice(itemId) : computeAutoBuyPrice(itemId);
+			price = sell ? computeAutoSellPrice(itemId) : computeAutoBuyPrice(itemId);
 		}
 		if (price <= 0)
 		{
@@ -1639,6 +1676,28 @@ public class O7FlipPlugin extends Plugin
 		}
 		pendingGeInputPrice = -1;
 		autoFillPriceInput(price);
+		if (gePriceInputFilled && key != -1)
+		{
+			geAutoFilledKey = key;
+		}
+	}
+
+	private void pushOfferLines()
+	{
+		if (panel == null)
+		{
+			return;
+		}
+		long offer = geSetupOfferPrice();
+		int setupItemId = offer > 0 ? currentGeSetupItemId() : -1;
+		Map<Integer, com.o7flip.model.Models.ActiveOfferSnapshot> offers = activeOffers;
+		int sig = java.util.Objects.hash(setupItemId, offer, System.identityHashCode(offers));
+		if (sig == offerLinesSig)
+		{
+			return;
+		}
+		offerLinesSig = sig;
+		SwingUtilities.invokeLater(() -> panel.updateOfferLines(offers, setupItemId, offer));
 	}
 
 	private void autoFillPriceInput(long price)
@@ -1770,6 +1829,40 @@ public class O7FlipPlugin extends Plugin
 		return chatboxPromptHas(input, "price");
 	}
 
+	public long geSetupOfferPrice()
+	{
+		long varp = setupPriceVarpConfirmed ? client.getVarpLongValue(GE_SETUP_PRICE_VARP) : -1L;
+		int itemId = currentGeSetupItemId();
+		int key = itemId > 0 ? itemId * 2 + (isGeSellSetup() ? 1 : 0) : -1;
+		if (isGePriceEntryOpen())
+		{
+			long typed = O7FlipPanel.parseCapital(client.getWidget(ComponentID.CHATBOX_FULL_INPUT).getText().replace("*", ""));
+			if (typed > 0)
+			{
+				offerEnteredKey = key;
+				offerEnteredPrice = typed;
+				offerVarpAtEntry = varp;
+				return typed;
+			}
+		}
+		if (key == -1 || key != offerEnteredKey)
+		{
+			return -1L;
+		}
+		if (varp > 0 && varp != offerVarpAtEntry)
+		{
+			offerEnteredPrice = varp;
+			offerVarpAtEntry = varp;
+		}
+		return offerEnteredPrice;
+	}
+
+	public String chartPeriod()
+	{
+		String period = selectedChartPeriod;
+		return period != null ? period : config.defaultChartPeriod().chartLabel();
+	}
+
 	public boolean isGeQuantityEntryOpen()
 	{
 		Widget input = client.getWidget(ComponentID.CHATBOX_FULL_INPUT);
@@ -1838,6 +1931,7 @@ public class O7FlipPlugin extends Plugin
 			{
 				return;
 			}
+			geAutoFilledKey = -1;
 			pendingGeInputPrice = price;
 		});
 	}

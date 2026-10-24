@@ -705,6 +705,14 @@ public class O7FlipPanel extends PluginPanel
 		}
 	}
 
+	public void updateOfferLines(java.util.Map<Integer, com.o7flip.model.Models.ActiveOfferSnapshot> offers, int setupItemId, long setupPrice)
+	{
+		if (insightsPanel != null)
+		{
+			insightsPanel.updateOfferLines(offers, setupItemId, setupPrice);
+		}
+	}
+
 	public void addFavouriteRow(FlipItem item)
 	{
 		if (item == null || item.itemId <= 0)

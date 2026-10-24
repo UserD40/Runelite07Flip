@@ -324,18 +324,6 @@ public interface O7FlipConfig extends Config
 	}
 
 	@ConfigItem(
-		keyName = "showGeOverlayScore",
-		name = "Show Score row",
-		description = "Show the 07Flip merchant score row inside the GE setup overlay. Turn off for a smaller overlay.",
-		section = geOverlaySection,
-		position = 1
-	)
-	default boolean showGeOverlayScore()
-	{
-		return true;
-	}
-
-	@ConfigItem(
 		keyName = "showGeOverlayBuyLimit",
 		name = "Show Buy limit row",
 		description = "Show the 4-hour GE buy limit inside the GE setup overlay.",
@@ -343,18 +331,6 @@ public interface O7FlipConfig extends Config
 		position = 2
 	)
 	default boolean showGeOverlayBuyLimit()
-	{
-		return true;
-	}
-
-	@ConfigItem(
-		keyName = "showGeOverlayVolume",
-		name = "Show Volume row",
-		description = "Show hourly GE volume inside the GE setup overlay. Turn off for a smaller overlay.",
-		section = geOverlaySection,
-		position = 3
-	)
-	default boolean showGeOverlayVolume()
 	{
 		return true;
 	}

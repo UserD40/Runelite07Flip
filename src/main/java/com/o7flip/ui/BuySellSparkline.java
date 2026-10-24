@@ -74,6 +74,7 @@ public class BuySellSparkline extends JPanel
 	private final int  intervalMinutes;
 
 	private int hoverX = -1;
+	private long[] offerPrices = new long[0];
 
 	public BuySellSparkline(Long[] buy, Long[] sell, int height, String xStartLabel, String xEndLabel,
 	                        long startEpochMs, int intervalMinutes)
@@ -157,11 +158,34 @@ public class BuySellSparkline extends JPanel
 			drawSeries(g2, sell, n, plotX, plotW, plotY, plotH, min, max, SELL_COL);
 			g2.setStroke(prev);
 
+			paintOffers(g2, plotX, plotY, plotW, plotH, min, max);
 			paintHover(g2, plotX, plotY, plotW, plotH, min, max, n);
 		}
 		finally
 		{
 			g2.dispose();
+		}
+	}
+
+	public void setOffers(long[] prices)
+	{
+		if (java.util.Arrays.equals(prices, offerPrices))
+		{
+			return;
+		}
+		offerPrices = prices;
+		repaint();
+	}
+
+	private void paintOffers(Graphics2D g2, int plotX, int plotY, int plotW, int plotH, long min, long max)
+	{
+		g2.setStroke(new BasicStroke(1f, BasicStroke.CAP_BUTT, BasicStroke.JOIN_MITER, 1f, new float[]{4f, 3f}, 0f));
+		g2.setColor(MiniChart.OFFER);
+		for (long price : offerPrices)
+		{
+			double norm = Math.max(0.0, Math.min(1.0, (price - min) / (double) (max - min)));
+			int y = plotY + (int) Math.round((1.0 - norm) * plotH);
+			g2.drawLine(plotX, y, plotX + plotW, y);
 		}
 	}
 

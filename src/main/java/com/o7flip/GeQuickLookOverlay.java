@@ -63,7 +63,7 @@ public class GeQuickLookOverlay extends Overlay
 	private static final int   ICON_FILL_ALPHA  = 50;
 	private static final int   ICON_FRAME_ALPHA = 210;
 	private static final int   CHART_W    = 172;
-	private static final int   CHART_H    = 32;
+	private static final int   CHART_H    = 42;
 
 	private final Client client;
 	private final O7FlipPlugin plugin;
@@ -401,7 +401,7 @@ public class GeQuickLookOverlay extends Overlay
 			.color(HEADER)
 			.build());
 
-		BufferedImage chart = buildChart(v.ins);
+		BufferedImage chart = MiniChart.render(CHART_W, CHART_H, v.ins, plugin.chartPeriod(), snap.price);
 		if (chart != null)
 		{
 			panel.getChildren().add(LineComponent.builder().left(" ").build());
@@ -461,6 +461,7 @@ public class GeQuickLookOverlay extends Overlay
 		Rectangle r = quickLookRect(slot);
 		Graphics2D g2 = (Graphics2D) graphics.create();
 		g2.translate(r.x, r.y);
+		g2.setFont(FontManager.getRunescapeSmallFont());
 		panel.render(g2);
 		g2.dispose();
 	}
@@ -533,51 +534,6 @@ public class GeQuickLookOverlay extends Overlay
 				return true;
 			default:
 				return false;
-		}
-	}
-
-	private BufferedImage buildChart(ItemInsights ins)
-	{
-		String period = plugin.selectedChartPeriod;
-		if (period == null)
-		{
-			period = config.defaultChartPeriod().chartLabel();
-		}
-		Long[] buy  = sparklineBuyFor(ins, period);
-		Long[] sell = sparklineSellFor(ins, period);
-		if ((buy == null || buy.length == 0) && (sell == null || sell.length == 0))
-		{
-			buy  = ins.sparkline24hBuy;
-			sell = ins.sparkline24hSell;
-		}
-		if ((buy == null || buy.length == 0) && (sell == null || sell.length == 0))
-		{
-			return null;
-		}
-		return MiniChart.render(CHART_W, CHART_H, buy, sell);
-	}
-
-	private static Long[] sparklineBuyFor(ItemInsights ins, String period)
-	{
-		switch (period)
-		{
-			case "2h":  return ins.sparkline2hBuy;
-			case "4h":  return ins.sparkline4hBuy;
-			case "7d":  return ins.sparkline7dBuy;
-			case "30d": return ins.sparkline30dBuy;
-			default:    return ins.sparkline24hBuy;
-		}
-	}
-
-	private static Long[] sparklineSellFor(ItemInsights ins, String period)
-	{
-		switch (period)
-		{
-			case "2h":  return ins.sparkline2hSell;
-			case "4h":  return ins.sparkline4hSell;
-			case "7d":  return ins.sparkline7dSell;
-			case "30d": return ins.sparkline30dSell;
-			default:    return ins.sparkline24hSell;
 		}
 	}
 
