@@ -31,6 +31,7 @@ import net.runelite.api.MenuAction;
 import net.runelite.api.gameval.InterfaceID;
 import net.runelite.api.gameval.VarPlayerID;
 import net.runelite.api.widgets.Widget;
+import net.runelite.client.ui.FontManager;
 import net.runelite.client.ui.overlay.Overlay;
 import net.runelite.client.ui.overlay.OverlayLayer;
 import net.runelite.client.ui.overlay.OverlayMenuEntry;
@@ -68,7 +69,7 @@ public class GePriceOverlay extends Overlay
 	private BufferedImage cachedChartImage = null;
 
 	private static final int CHART_W = 180;
-	private static final int CHART_H = 38;
+	private static final int CHART_H = 48;
 
 	@Inject
 	public GePriceOverlay(Client client, O7FlipPlugin plugin, O7FlipConfig config)
@@ -219,64 +220,58 @@ public class GePriceOverlay extends Overlay
 				.right(FlipItemPanel.formatGp(sellPrice))
 				.rightColor(sellIsFrozen ? HEADER : INFO_GRAY)
 				.build());
-
-			if (sellIsFrozen)
-			{
-				panel.getChildren().add(LineComponent.builder()
-					.left("Locked at your buy")
-					.leftColor(INFO_GRAY)
-					.right("")
-					.build());
-
-				if (buyPrice != null && buyPrice > 0)
-				{
-					long sellTax = com.o7flip.util.ProfitCalculator.geTaxFor(currentItemId, sellPrice, 1);
-					long marginPerItem = sellPrice - buyPrice - sellTax;
-					String sign = marginPerItem >= 0 ? "+" : "";
-					panel.getChildren().add(LineComponent.builder()
-						.left("Margin / item")
-						.leftColor(INFO_GRAY)
-						.right(sign + FlipItemPanel.formatGp(marginPerItem))
-						.rightColor(marginPerItem >= 0 ? SELL_GREEN : BUY_RED)
-						.build());
-				}
-			}
 		}
 
-		com.o7flip.model.Models.ItemInsights insights = plugin.getOverlayInsights(currentItemId);
-		appendInsightsRows(insights, currentItemId);
-		appendInsightsChart(insights, currentItemId);
+		long offer = plugin.geSetupOfferPrice();
+		appendMargin(currentItemId, buyPrice, sellPrice, offer);
+		appendBuyLimit(ins);
+		appendInsightsChart(ins, currentItemId, offer);
+		if (offer > 0)
+		{
+			panel.getChildren().add(LineComponent.builder()
+				.left("Your offer")
+				.leftColor(com.o7flip.ui.MiniChart.OFFER)
+				.right(FlipItemPanel.formatGp(offer))
+				.rightColor(com.o7flip.ui.MiniChart.OFFER)
+				.build());
+		}
 
+		graphics.setFont(FontManager.getRunescapeSmallFont());
 		return panel.render(graphics);
 	}
 
-	private void appendInsightsRows(com.o7flip.model.Models.ItemInsights insights, int itemId)
+	private void appendMargin(int itemId, Long buyPrice, Long sellPrice, long offer)
 	{
-		Integer score = lookupFlip07Score(itemId);
-
-		int hourlyVol = insights != null && insights.volume != null ? insights.volume.hourly : 0;
-		int buyLimit  = insights != null ? insights.buyLimit : 0;
-
-		boolean wantScore    = config.showGeOverlayScore()  && score != null;
-		boolean wantVolume   = config.showGeOverlayVolume() && hourlyVol > 0;
-		boolean wantBuyLimit = config.showGeOverlayBuyLimit() && buyLimit > 0;
-
-		if (!wantScore && !wantVolume && !wantBuyLimit)
+		long buy;
+		long sell;
+		if (plugin.isGeSellSetup())
+		{
+			Long avgCost = plugin.openPositionAvgCost(itemId);
+			buy  = avgCost != null && avgCost > 0 ? avgCost : (buyPrice != null ? buyPrice : 0L);
+			sell = offer > 0 ? offer : (sellPrice != null ? sellPrice : 0L);
+		}
+		else
+		{
+			buy  = offer > 0 ? offer : (buyPrice != null ? buyPrice : 0L);
+			sell = sellPrice != null ? sellPrice : 0L;
+		}
+		if (buy <= 0 || sell <= 0)
 		{
 			return;
 		}
-		if (wantScore)
-		{
-			Color scoreColor = score >= 70 ? SELL_GREEN
-				: score >= 40 ? new Color(0xE8A838) : BUY_RED;
-			panel.getChildren().add(LineComponent.builder()
-				.left("Score")
-				.leftColor(INFO_GRAY)
-				.right(String.valueOf(score))
-				.rightColor(scoreColor)
-				.build());
-		}
-		if (wantBuyLimit)
+		long margin = sell - buy - com.o7flip.util.ProfitCalculator.geTaxFor(itemId, sell, 1);
+		panel.getChildren().add(LineComponent.builder()
+			.left("Margin / item")
+			.leftColor(INFO_GRAY)
+			.right((margin >= 0 ? "+" : "") + FlipItemPanel.formatGp(margin))
+			.rightColor(margin >= 0 ? SELL_GREEN : BUY_RED)
+			.build());
+	}
+
+	private void appendBuyLimit(com.o7flip.model.Models.ItemInsights insights)
+	{
+		int buyLimit = insights != null ? insights.buyLimit : 0;
+		if (config.showGeOverlayBuyLimit() && buyLimit > 0)
 		{
 			panel.getChildren().add(LineComponent.builder()
 				.left("Buy limit")
@@ -285,83 +280,27 @@ public class GePriceOverlay extends Overlay
 				.rightColor(INFO_GRAY)
 				.build());
 		}
-		if (wantVolume)
-		{
-			panel.getChildren().add(LineComponent.builder()
-				.left("Volume / h")
-				.leftColor(INFO_GRAY)
-				.right(FlipItemPanel.formatGp(hourlyVol))
-				.rightColor(INFO_GRAY)
-				.build());
-		}
 	}
 
-	private Integer lookupFlip07Score(int itemId)
-	{
-		for (com.o7flip.model.Models.FlipItem f : plugin.lastFlips)
-		{
-			if (f.itemId == itemId)
-			{
-				return f.flip07Score;
-			}
-		}
-		return null;
-	}
-
-	private void appendInsightsChart(com.o7flip.model.Models.ItemInsights insights, int itemId)
+	private void appendInsightsChart(com.o7flip.model.Models.ItemInsights insights, int itemId, long offer)
 	{
 		if (insights == null || !config.showGeOverlayChart())
 		{
 			return;
 		}
-		String period = plugin.selectedChartPeriod;
-		if (period == null)
+		String period = plugin.chartPeriod();
+		int dataHash = java.util.Objects.hash(System.identityHashCode(insights), period, offer);
+		if (cachedChartItemId != itemId || cachedChartDataHash != dataHash)
 		{
-			period = config.defaultChartPeriod().chartLabel();
-		}
-		Long[] buy  = sparklineBuyFor(insights, period);
-		Long[] sell = sparklineSellFor(insights, period);
-		if ((buy == null || buy.length == 0) && (sell == null || sell.length == 0))
-		{
-			period = "24h";
-			buy  = insights.sparkline24hBuy;
-			sell = insights.sparkline24hSell;
-		}
-		if ((buy == null || buy.length == 0) && (sell == null || sell.length == 0))
-		{
-			return;
-		}
-		int dataHash = java.util.Arrays.deepHashCode(new Object[]{buy, sell, period});
-		if (cachedChartImage == null || cachedChartItemId != itemId || cachedChartDataHash != dataHash)
-		{
-			cachedChartImage   = com.o7flip.ui.MiniChart.render(CHART_W, CHART_H, buy, sell);
+			cachedChartImage   = com.o7flip.ui.MiniChart.render(CHART_W, CHART_H, insights, period, offer);
 			cachedChartItemId  = itemId;
 			cachedChartDataHash = dataHash;
 		}
-		panel.getChildren().add(new ImageComponent(cachedChartImage));
-	}
-
-	private static Long[] sparklineBuyFor(com.o7flip.model.Models.ItemInsights ins, String period)
-	{
-		switch (period)
+		if (cachedChartImage != null)
 		{
-			case "2h":  return ins.sparkline2hBuy;
-			case "4h":  return ins.sparkline4hBuy;
-			case "7d":  return ins.sparkline7dBuy;
-			case "30d": return ins.sparkline30dBuy;
-			default:    return ins.sparkline24hBuy;
-		}
-	}
-
-	private static Long[] sparklineSellFor(com.o7flip.model.Models.ItemInsights ins, String period)
-	{
-		switch (period)
-		{
-			case "2h":  return ins.sparkline2hSell;
-			case "4h":  return ins.sparkline4hSell;
-			case "7d":  return ins.sparkline7dSell;
-			case "30d": return ins.sparkline30dSell;
-			default:    return ins.sparkline24hSell;
+			panel.getChildren().add(LineComponent.builder().left(" ").build());
+			panel.getChildren().add(new ImageComponent(cachedChartImage));
+			panel.getChildren().add(LineComponent.builder().left(" ").build());
 		}
 	}
 

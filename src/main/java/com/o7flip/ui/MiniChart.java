@@ -24,8 +24,11 @@
  */
 package com.o7flip.ui;
 
+import com.o7flip.model.Models.ItemInsights;
+import net.runelite.client.ui.FontManager;
 import java.awt.BasicStroke;
 import java.awt.Color;
+import java.awt.FontMetrics;
 import java.awt.Graphics2D;
 import java.awt.RenderingHints;
 import java.awt.image.BufferedImage;
@@ -36,17 +39,31 @@ public final class MiniChart
 	private static final Color SELL_COL = new Color(0x00C27A);
 	private static final Color TRACK    = new Color(0x3A3A3A);
 	private static final Color MID_LINE = new Color(0x303030);
+	private static final Color AXIS_LBL = new Color(0x888888);
+	public static final Color OFFER     = new Color(0xA8D8F0);
+	private static final int   PAD      = 5;
 
 	private MiniChart() {}
 
-	public static BufferedImage render(int width, int height, Long[] buy, Long[] sell)
+	public static BufferedImage render(int width, int height, ItemInsights ins, String period, long offer)
 	{
+		Long[] buy  = series(ins, period, true);
+		Long[] sell = series(ins, period, false);
+		if (isEmpty(buy) && isEmpty(sell))
+		{
+			buy  = ins.sparkline24hBuy;
+			sell = ins.sparkline24hSell;
+		}
+		if (isEmpty(buy) && isEmpty(sell))
+		{
+			return null;
+		}
 		BufferedImage img = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
 		Graphics2D g2 = img.createGraphics();
 		try
 		{
 			g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-			paint(g2, width, height, buy, sell);
+			paint(g2, width, height, buy, sell, offer);
 		}
 		finally
 		{
@@ -55,15 +72,37 @@ public final class MiniChart
 		return img;
 	}
 
-	private static void paint(Graphics2D g2, int w, int h, Long[] buy, Long[] sell)
+	private static Long[] series(ItemInsights ins, String period, boolean buy)
+	{
+		switch (period)
+		{
+			case "2h":  return buy ? ins.sparkline2hBuy  : ins.sparkline2hSell;
+			case "4h":  return buy ? ins.sparkline4hBuy  : ins.sparkline4hSell;
+			case "7d":  return buy ? ins.sparkline7dBuy  : ins.sparkline7dSell;
+			case "30d": return buy ? ins.sparkline30dBuy : ins.sparkline30dSell;
+			default:    return buy ? ins.sparkline24hBuy : ins.sparkline24hSell;
+		}
+	}
+
+	private static boolean isEmpty(Long[] a)
+	{
+		return a == null || a.length == 0;
+	}
+
+	private static boolean valid(Long v)
+	{
+		return v != null && v > 0;
+	}
+
+	private static void paint(Graphics2D g2, int w, int h, Long[] buy, Long[] sell, long offer)
 	{
 		Long[] b = buy  != null ? buy  : new Long[0];
 		Long[] s = sell != null ? sell : new Long[0];
 
 		long min = Long.MAX_VALUE;
 		long max = Long.MIN_VALUE;
-		for (Long v : b) { if (v != null && v > 0) { if (v < min) min = v; if (v > max) max = v; } }
-		for (Long v : s) { if (v != null && v > 0) { if (v < min) min = v; if (v > max) max = v; } }
+		for (Long v : b) { if (valid(v)) { if (v < min) min = v; if (v > max) max = v; } }
+		for (Long v : s) { if (valid(v)) { if (v < min) min = v; if (v > max) max = v; } }
 
 		boolean enoughData = min != Long.MAX_VALUE && max > min;
 		if (!enoughData)
@@ -75,19 +114,57 @@ public final class MiniChart
 			return;
 		}
 
-		g2.setColor(MID_LINE);
+		int ph = h - 2 * PAD;
+		long mid = min + (max - min) / 2;
+		String[] labels = {
+			FlipItemPanel.formatGpCompact(max), FlipItemPanel.formatGpCompact(mid), FlipItemPanel.formatGpCompact(min)};
+		g2.setFont(FontManager.getRunescapeSmallFont());
+		FontMetrics fm = g2.getFontMetrics();
+		int gutter = 0;
+		for (String l : labels)
+		{
+			gutter = Math.max(gutter, fm.stringWidth(l));
+		}
+		int x0 = gutter + 5;
+		int pw = w - x0;
+		int[] gridY = {PAD, PAD + (ph - 1) / 2, PAD + ph - 1};
 		g2.setStroke(new BasicStroke(1f));
-		g2.drawLine(0, h / 2, w, h / 2);
+		for (int i = 0; i < 3; i++)
+		{
+			g2.setColor(MID_LINE);
+			g2.drawLine(x0, gridY[i], w, gridY[i]);
+			g2.setColor(AXIS_LBL);
+			g2.drawString(labels[i], gutter - fm.stringWidth(labels[i]), gridY[i] + fm.getAscent() / 2);
+		}
 
 		int n = Math.max(b.length, s.length);
 		g2.setStroke(new BasicStroke(1.3f));
-		drawSeries(g2, b, n, w, h, min, max, BUY_COL);
-		drawSeries(g2, s, n, w, h, min, max, SELL_COL);
+		drawSeries(g2, b, n, x0, pw, ph, min, max, BUY_COL);
+		drawSeries(g2, s, n, x0, pw, ph, min, max, SELL_COL);
+
+		if (offer > 0)
+		{
+			int y = Math.max(PAD, Math.min(PAD + ph - 1, yFor(offer, ph, min, max)));
+			g2.setColor(OFFER);
+			g2.setStroke(new BasicStroke(1f, BasicStroke.CAP_BUTT, BasicStroke.JOIN_MITER,
+				1f, new float[]{4f, 3f}, 0f));
+			g2.drawLine(x0, y, w, y);
+		}
 	}
 
-	private static void drawSeries(Graphics2D g2, Long[] series, int n, int w, int h, long min, long max, Color colour)
+	private static int xFor(int i, int n, int x0, int pw)
 	{
-		if (series == null || series.length < 2)
+		return x0 + (int) Math.round((double) i / (n - 1) * (pw - 1));
+	}
+
+	private static int yFor(long v, int ph, long min, long max)
+	{
+		return PAD + (int) Math.round((1.0 - (v - min) / (double) (max - min)) * (ph - 1));
+	}
+
+	private static void drawSeries(Graphics2D g2, Long[] series, int n, int x0, int pw, int ph, long min, long max, Color colour)
+	{
+		if (series.length < 2)
 		{
 			return;
 		}
@@ -99,7 +176,7 @@ public final class MiniChart
 		for (int i = 0; i < n; i++)
 		{
 			Long v = i < series.length ? series[i] : null;
-			if (v == null || v <= 0)
+			if (!valid(v))
 			{
 				if (runLen >= 2)
 				{
@@ -108,9 +185,8 @@ public final class MiniChart
 				runLen = 0;
 				continue;
 			}
-			xs[runLen] = (int) Math.round((double) i / (n - 1) * (w - 1));
-			double norm = (v - min) / (double) (max - min);
-			ys[runLen] = (int) Math.round((1.0 - norm) * (h - 1));
+			xs[runLen] = xFor(i, n, x0, pw);
+			ys[runLen] = yFor(v, ph, min, max);
 			runLen++;
 		}
 		if (runLen >= 2)

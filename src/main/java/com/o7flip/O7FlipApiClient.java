@@ -65,7 +65,7 @@ public class O7FlipApiClient
 	private static final String    BASE_URL        = "https://07flip.com/api/runelite";
 
 	public volatile long flipsAsOfMs;
-	private static final String    PLUGIN_VERSION  = "1.3.1";
+	private static final String    PLUGIN_VERSION  = "1.3.2";
 	private static final String    USER_AGENT      = "07Flip-RuneLite/" + PLUGIN_VERSION;
 	private static final int       PAGE_LIMIT      = 10;
 	private static final MediaType MEDIA_TYPE_JSON = MediaType.get("application/json; charset=utf-8");

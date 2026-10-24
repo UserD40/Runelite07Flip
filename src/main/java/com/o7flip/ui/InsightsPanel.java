@@ -26,9 +26,11 @@ package com.o7flip.ui;
 
 import com.o7flip.O7FlipConfig;
 import com.o7flip.O7FlipPlugin;
+import com.o7flip.model.Models.ActiveOfferSnapshot;
 import com.o7flip.model.Models.FlipItem;
 import com.o7flip.model.Models.ItemInsights;
 import com.o7flip.util.Fonts;
+import net.runelite.api.GrandExchangeOfferState;
 import net.runelite.client.game.ItemManager;
 import net.runelite.client.ui.ColorScheme;
 import net.runelite.client.util.LinkBrowser;
@@ -73,6 +75,12 @@ public class InsightsPanel extends JPanel
 	private ItemInsights lastShown;
 
 	private int desiredChartPeriodIdx = -1;
+
+	private BuySellSparkline sparkline;
+	private JLabel offerLegend;
+	private java.util.Map<Integer, ActiveOfferSnapshot> lastOffers = Collections.emptyMap();
+	private int  lastSetupItemId = -1;
+	private long lastSetupPrice = -1L;
 
 	private int     currentItemId;
 	private String  currentItemName;
@@ -1266,13 +1274,20 @@ public class InsightsPanel extends JPanel
 			? desiredChartPeriodIdx : defaultPeriodIndex(periods);
 		selectChartPeriod(periods, chips, startIdx, chartHolder);
 
-		JPanel legend = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 8, 0));
+		JPanel keys = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 8, 0));
+		keys.setBackground(SECTION_BG);
+		keys.add(legendChip("Buy",  BuySellSparkline.BUY_COL));
+		keys.add(legendChip("Sell", BuySellSparkline.SELL_COL));
+		offerLegend = legendChip("", MiniChart.OFFER);
+		offerLegend.setHorizontalAlignment(SwingConstants.RIGHT);
+		JPanel legend = new JPanel(new BorderLayout());
 		legend.setBackground(SECTION_BG);
 		legend.setBorder(new EmptyBorder(4, 0, 0, 0));
 		legend.setAlignmentX(Component.LEFT_ALIGNMENT);
-		legend.add(legendChip("Buy",  BuySellSparkline.BUY_COL));
-		legend.add(legendChip("Sell", BuySellSparkline.SELL_COL));
+		legend.add(keys, BorderLayout.WEST);
+		legend.add(offerLegend, BorderLayout.EAST);
 		panel.add(legend);
+		applyOfferLines();
 
 		return panel;
 	}
@@ -1306,13 +1321,58 @@ public class InsightsPanel extends JPanel
 			plugin.selectedChartPeriod = p.label;
 		}
 		chartHolder.removeAll();
-		chartHolder.add(new BuySellSparkline(p.buy, p.sell, 80, p.axisStart, "now", p.startEpochMs, p.intervalMinutes), BorderLayout.CENTER);
+		sparkline = new BuySellSparkline(p.buy, p.sell, 80, p.axisStart, "now", p.startEpochMs, p.intervalMinutes);
+		applyOfferLines();
+		chartHolder.add(sparkline, BorderLayout.CENTER);
 		for (int i = 0; i < chips.size(); i++)
 		{
 			chips.get(i).setForeground(i == idx ? HEADER_COL : new Color(0x777777));
 		}
 		chartHolder.revalidate();
 		chartHolder.repaint();
+	}
+
+	public void updateOfferLines(java.util.Map<Integer, ActiveOfferSnapshot> offers, int setupItemId, long setupPrice)
+	{
+		lastOffers = offers;
+		lastSetupItemId = setupItemId;
+		lastSetupPrice = setupPrice;
+		applyOfferLines();
+	}
+
+	private void applyOfferLines()
+	{
+		if (sparkline == null)
+		{
+			return;
+		}
+		List<Long> prices = new ArrayList<>();
+		List<String> labels = new ArrayList<>();
+		for (ActiveOfferSnapshot o : lastOffers.values())
+		{
+			if (o.itemId == currentItemId && o.price > 0
+				&& (o.state == GrandExchangeOfferState.BUYING || o.state == GrandExchangeOfferState.SELLING))
+			{
+				prices.add(o.price);
+				labels.add((o.isBuy() ? "Your buy " : "Your sell ") + FlipItemPanel.formatGpCompact(o.price));
+			}
+		}
+		if (lastSetupItemId == currentItemId && lastSetupPrice > 0)
+		{
+			prices.add(lastSetupPrice);
+			labels.add("Your offer " + FlipItemPanel.formatGpCompact(lastSetupPrice));
+		}
+		long[] p = new long[prices.size()];
+		for (int i = 0; i < p.length; i++)
+		{
+			p[i] = prices.get(i);
+		}
+		sparkline.setOffers(p);
+		if (offerLegend != null)
+		{
+			offerLegend.setText(labels.isEmpty() ? "" : "<html><div align='right'>■ "
+				+ String.join("<br>■ ", labels) + "</div></html>");
+		}
 	}
 
 	private static JLabel legendChip(String label, Color colour)
