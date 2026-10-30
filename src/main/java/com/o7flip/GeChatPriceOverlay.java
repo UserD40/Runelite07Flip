@@ -29,6 +29,7 @@ import com.o7flip.ui.FlipItemPanel;
 import net.runelite.api.Client;
 import net.runelite.api.widgets.ComponentID;
 import net.runelite.api.widgets.Widget;
+import net.runelite.client.input.KeyListener;
 import net.runelite.client.input.MouseListener;
 import net.runelite.client.ui.overlay.Overlay;
 import net.runelite.client.ui.overlay.OverlayLayer;
@@ -40,11 +41,12 @@ import java.awt.FontMetrics;
 import java.awt.Graphics2D;
 import java.awt.Point;
 import java.awt.Rectangle;
+import java.awt.event.KeyEvent;
 import java.awt.event.MouseEvent;
 import java.util.ArrayList;
 import java.util.List;
 
-public class GeChatPriceOverlay extends Overlay implements MouseListener
+public class GeChatPriceOverlay extends Overlay implements MouseListener, KeyListener
 {
 	private static final Color CLEAR_BG    = new Color(0xC8302E);
 	private static final Color PRICE       = new Color(0x14358C);
@@ -56,6 +58,7 @@ public class GeChatPriceOverlay extends Overlay implements MouseListener
 
 	private final List<Zone> zones = new ArrayList<>();
 	private Point hover;
+	private boolean consumeTyped;
 
 	@Inject
 	public GeChatPriceOverlay(Client client, O7FlipPlugin plugin, O7FlipConfig config)
@@ -292,6 +295,40 @@ public class GeChatPriceOverlay extends Overlay implements MouseListener
 	{
 		hover = e.getPoint();
 		return e;
+	}
+
+	@Override
+	public void keyPressed(KeyEvent e)
+	{
+		if (!plugin.isGePriceKeysActive())
+		{
+			return;
+		}
+		O7FlipConfig.GePriceDefault which = config.geQuickKey().matches(e) ? O7FlipConfig.GePriceDefault.QUICK
+			: config.geRecKey().matches(e) ? O7FlipConfig.GePriceDefault.SEVEN_FLIP
+			: config.gePatientKey().matches(e) ? O7FlipConfig.GePriceDefault.PATIENT : null;
+		if (which == null)
+		{
+			return;
+		}
+		plugin.fillLadderPrice(which);
+		consumeTyped = true;
+		e.consume();
+	}
+
+	@Override
+	public void keyTyped(KeyEvent e)
+	{
+		if (consumeTyped)
+		{
+			e.consume();
+		}
+	}
+
+	@Override
+	public void keyReleased(KeyEvent e)
+	{
+		consumeTyped = false;
 	}
 
 	private static final class Chip

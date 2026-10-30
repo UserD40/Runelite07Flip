@@ -136,6 +136,9 @@ public class O7FlipPlugin extends Plugin
 	private net.runelite.client.input.MouseManager mouseManager;
 
 	@Inject
+	private net.runelite.client.input.KeyManager keyManager;
+
+	@Inject
 	private Gson gson;
 
 	@Inject
@@ -161,6 +164,7 @@ public class O7FlipPlugin extends Plugin
 	volatile int    pendingGeSetItemId = -1;
 	volatile long   pendingGeInputPrice = -1;
 	private boolean gePriceInputFilled  = false;
+	private volatile boolean gePriceKeysActive = false;
 	private int     geAutoFilledKey     = -1;
 	private int     offerEnteredKey     = -1;
 	private long    offerEnteredPrice   = -1L;
@@ -1056,6 +1060,7 @@ public class O7FlipPlugin extends Plugin
 		overlayManager.add(geQuickLookOverlay);
 		overlayManager.add(geChatPriceOverlay);
 		mouseManager.registerMouseListener(geChatPriceOverlay);
+		keyManager.registerKeyListener(geChatPriceOverlay);
 
 		loadTradeHistory();
 		loadBondLedger();
@@ -1138,6 +1143,8 @@ public class O7FlipPlugin extends Plugin
 		overlayManager.remove(geQuickLookOverlay);
 		overlayManager.remove(geChatPriceOverlay);
 		mouseManager.unregisterMouseListener(geChatPriceOverlay);
+		keyManager.unregisterKeyListener(geChatPriceOverlay);
+		gePriceKeysActive = false;
 		clientToolbar.removeNavigation(navButton);
 		log.debug("[07Flip] Stopped");
 	}
@@ -1638,12 +1645,14 @@ public class O7FlipPlugin extends Plugin
 		Widget setup = client.getWidget(InterfaceID.GeOffers.SETUP);
 		if (setup == null || setup.isHidden())
 		{
+			gePriceKeysActive = false;
 			gePriceInputFilled = false;
 			geAutoFilledKey = -1;
 			offerEnteredKey = -1;
 			return;
 		}
-		if (!isGePriceEntryOpen())
+		gePriceKeysActive = isGePriceEntryOpen();
+		if (!gePriceKeysActive)
 		{
 			gePriceInputFilled = false;
 			return;
@@ -1737,6 +1746,25 @@ public class O7FlipPlugin extends Plugin
 		{
 			gePriceInputFilled = true;
 			setPriceInput(price);
+		});
+	}
+
+	public boolean isGePriceKeysActive()
+	{
+		return gePriceKeysActive;
+	}
+
+	public void fillLadderPrice(O7FlipConfig.GePriceDefault which)
+	{
+		clientThread.invokeLater(() ->
+		{
+			int itemId = currentGeSetupItemId();
+			long price = itemId > 0 && isGePriceEntryOpen() ? ladderPrice(itemId, isGeSellSetup(), which) : -1L;
+			if (price > 0)
+			{
+				gePriceInputFilled = true;
+				setPriceInput(price);
+			}
 		});
 	}
 
