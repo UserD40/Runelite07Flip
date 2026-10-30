@@ -25,11 +25,13 @@
 package com.o7flip;
 
 import java.awt.Color;
+import java.awt.event.KeyEvent;
 import net.runelite.client.config.Alpha;
 import net.runelite.client.config.Config;
 import net.runelite.client.config.ConfigGroup;
 import net.runelite.client.config.ConfigItem;
 import net.runelite.client.config.ConfigSection;
+import net.runelite.client.config.Keybind;
 import net.runelite.client.config.Range;
 
 @ConfigGroup("o7flip")
@@ -522,6 +524,45 @@ public interface O7FlipConfig extends Config
 	default Color geTooltipBg()
 	{
 		return new Color(15, 15, 15, 240);
+	}
+
+	@ConfigItem(
+		keyName = "geQuickKey",
+		name = "Quick price key",
+		description = "While the Set-a-price chatbox is open, press this key to enter the Quick (fills faster) price "
+			+ "for a buy or a sell.",
+		section = geSection,
+		position = 8
+	)
+	default Keybind geQuickKey()
+	{
+		return new Keybind(KeyEvent.VK_I, 0);
+	}
+
+	@ConfigItem(
+		keyName = "geRecKey",
+		name = "07Flip price key",
+		description = "While the Set-a-price chatbox is open, press this key to enter the 07Flip recommended price "
+			+ "for a buy or a sell.",
+		section = geSection,
+		position = 9
+	)
+	default Keybind geRecKey()
+	{
+		return new Keybind(KeyEvent.VK_O, 0);
+	}
+
+	@ConfigItem(
+		keyName = "gePatientKey",
+		name = "Patient price key",
+		description = "While the Set-a-price chatbox is open, press this key to enter the Patient (better price) price "
+			+ "for a buy or a sell.",
+		section = geSection,
+		position = 10
+	)
+	default Keybind gePatientKey()
+	{
+		return new Keybind(KeyEvent.VK_P, 0);
 	}
 
 	enum GePriceDefault
