@@ -31,7 +31,9 @@ import com.o7flip.model.Models.FlipItem;
 import com.o7flip.model.Models.OfferEvent;
 import com.o7flip.model.Models.TrackedItemData;
 import com.o7flip.model.Models.TradeRecord;
+import com.o7flip.ui.FlipItemPanel;
 import net.runelite.api.Client;
+import net.runelite.api.Item;
 import net.runelite.api.GameState;
 import net.runelite.api.GrandExchangeOffer;
 import net.runelite.api.GrandExchangeOfferState;
@@ -41,9 +43,12 @@ import net.runelite.api.ScriptID;
 import net.runelite.api.events.BeforeRender;
 import net.runelite.api.events.ClientTick;
 import net.runelite.api.events.GameTick;
+import net.runelite.api.events.ItemContainerChanged;
 import net.runelite.api.events.ScriptPostFired;
 import net.runelite.api.events.VarbitChanged;
 import net.runelite.api.gameval.InterfaceID;
+import net.runelite.api.gameval.InventoryID;
+import net.runelite.api.gameval.ItemID;
 import net.runelite.api.gameval.VarClientID;
 import net.runelite.api.gameval.VarPlayerID;
 import net.runelite.api.gameval.VarbitID;
@@ -208,6 +213,17 @@ public class O7FlipPlugin extends Plugin
 	public volatile Map<Integer, TrackedItemData> trackedItems = Collections.emptyMap();
 
 	private static final long CASH_BUCKET = 100_000L;
+	private static final long[] NEXT_FLIP_CASH_TIERS = {1_000_000L, 2_500_000L, 5_000_000L, 10_000_000L,
+		25_000_000L, 50_000_000L, 100_000_000L, 250_000_000L, 500_000_000L, 1_000_000_000L, 2_000_000_000L};
+	private static final String NEXT_FLIP_BANK_KEY = "nextFlipBank_";
+	private static final String NEXT_FLIP_STATE_KEY = "nextFlipState";
+	private volatile long lastNextFlipTier;
+	private volatile long invCash = -1L;
+	private volatile long bankCash = -1L;
+	private volatile long bankSeenMs;
+	private volatile long bankAccount = Long.MIN_VALUE;
+	private volatile Map<Integer, Integer> nextFlipQty = Collections.emptyMap();
+	private final Set<Integer> nextFlipSkipped = java.util.concurrent.ConcurrentHashMap.newKeySet();
 
 	private final java.util.concurrent.ConcurrentHashMap<Integer, com.o7flip.model.Models.RecommendedPrices> recPriceCache
 		= new java.util.concurrent.ConcurrentHashMap<>();
@@ -2017,9 +2033,18 @@ public class O7FlipPlugin extends Plugin
 			SwingUtilities.invokeLater(() -> panel.updateMyFlips(snap));
 			return;
 		}
+		if ("nextFlipSendCash".equals(key))
+		{
+			refreshNextFlip();
+			return;
+		}
 		if (isTabStructureKey(key))
 		{
-			SwingUtilities.invokeLater(() -> panel.rebuildTabs());
+			SwingUtilities.invokeLater(() ->
+			{
+				panel.rebuildTabs();
+				refreshNextFlip();
+			});
 		}
 	}
 
@@ -2032,6 +2057,7 @@ public class O7FlipPlugin extends Plugin
 			case "showItem":
 			case "showFavourites":
 			case "showMyFlips":
+			case "showNextFlip":
 				return true;
 			default:
 				return false;
@@ -2114,6 +2140,7 @@ public class O7FlipPlugin extends Plugin
 		if (config.showFlips())
 		{
 			fetchFlipsAtPage(flipsPage);
+			refreshNextFlip();
 		}
 
 		if (config.showOther() && panel.isPremium())
@@ -2682,6 +2709,211 @@ public class O7FlipPlugin extends Plugin
 		return new com.o7flip.model.Models.ActiveOfferSnapshot(
 			slot, offer.getItemId(), name, offer.getPrice(),
 			offer.getQuantitySold(), offer.getTotalQuantity(), offer.getState());
+	}
+
+	@Subscribe
+	public void onItemContainerChanged(ItemContainerChanged event)
+	{
+		int id = event.getContainerId();
+		if (id != InventoryID.INV && id != InventoryID.BANK)
+		{
+			return;
+		}
+		long gp = 0L;
+		for (Item it : event.getItemContainer().getItems())
+		{
+			if (it.getId() == ItemID.COINS)
+			{
+				gp += it.getQuantity();
+			}
+			else if (it.getId() == ItemID.PLATINUM)
+			{
+				gp += it.getQuantity() * 1000L;
+			}
+		}
+		if (id == InventoryID.INV)
+		{
+			invCash = gp;
+		}
+		else
+		{
+			bankAccount = client.getAccountHash();
+			bankCash = gp;
+			bankSeenMs = System.currentTimeMillis();
+			configManager.setConfiguration("o7flip", NEXT_FLIP_BANK_KEY + bankAccount, gp + "," + bankSeenMs);
+		}
+		long cash = detectedCash();
+		if (config.nextFlipSendCash() && cash > 0 && cashTier(cash) != lastNextFlipTier)
+		{
+			refreshNextFlip();
+		}
+		SwingUtilities.invokeLater(panel::onCashDetected);
+	}
+
+	public long detectedCash()
+	{
+		if (invCash < 0)
+		{
+			return -1L;
+		}
+		long account = client.getAccountHash();
+		if (account != bankAccount)
+		{
+			bankAccount = account;
+			bankCash = -1L;
+			String saved = configManager.getConfiguration("o7flip", NEXT_FLIP_BANK_KEY + account);
+			if (saved != null && saved.indexOf(',') > 0)
+			{
+				try
+				{
+					bankCash = Long.parseLong(saved.substring(0, saved.indexOf(',')));
+					bankSeenMs = Long.parseLong(saved.substring(saved.indexOf(',') + 1));
+				}
+				catch (NumberFormatException ignored)
+				{
+					bankCash = -1L;
+				}
+			}
+		}
+		return invCash + Math.max(0L, bankCash) + deployedCapital();
+	}
+
+	public String cashBreakdown()
+	{
+		String bank = bankCash < 0 ? "not seen yet, open your bank once"
+			: FlipItemPanel.formatGp(bankCash) + " (seen " + Math.max(0L, (System.currentTimeMillis() - bankSeenMs) / 60_000L) + "m ago)";
+		return "<html>Inventory: " + FlipItemPanel.formatGp(Math.max(0L, invCash))
+			+ "<br>Bank: " + bank
+			+ "<br>In GE buy offers: " + FlipItemPanel.formatGp(deployedCapital())
+			+ "<br><font color='#888888'>" + (config.nextFlipSendCash()
+				? "Only a rough tier (e.g. 25M) is sent to 07flip.com, never the exact amount."
+				: "Cash is not sent to 07flip.com; picks are sized on this machine only.") + "</font></html>";
+	}
+
+	static long cashTier(long cash)
+	{
+		long tier = NEXT_FLIP_CASH_TIERS[0];
+		for (long t : NEXT_FLIP_CASH_TIERS)
+		{
+			if (cash >= t)
+			{
+				tier = t;
+			}
+		}
+		return tier;
+	}
+
+	public int buyLimitRemaining(int itemId)
+	{
+		Integer limit = buyLimitByItem.get(itemId);
+		if (limit == null || limit <= 0)
+		{
+			return Integer.MAX_VALUE;
+		}
+		BuyLimitWindow w = buyLimitWindows.get(itemId);
+		if (w == null || System.currentTimeMillis() - w.windowStartMs >= BUY_LIMIT_WINDOW_MS)
+		{
+			return limit;
+		}
+		return Math.max(0, limit - w.boughtQty);
+	}
+
+	static int sizeNextFlip(Integer serverQty, long cash, long price, int limitLeft)
+	{
+		if (price <= 0 || cash <= 0 || limitLeft <= 0)
+		{
+			return 0;
+		}
+		long qty = Math.min(cash / price, limitLeft);
+		if (serverQty != null)
+		{
+			qty = Math.min(qty, serverQty);
+		}
+		return (int) Math.max(0L, qty);
+	}
+
+	public List<FlipItem> nextFlipPicks(List<FlipItem> rows, int max, boolean premium)
+	{
+		Set<Integer> inSlots = new HashSet<>();
+		for (com.o7flip.model.Models.ActiveOfferSnapshot s : activeOffers.values())
+		{
+			if (s != null)
+			{
+				inSlots.add(s.itemId);
+			}
+		}
+		long cash = detectedCash();
+		Map<Integer, Integer> qtys = new HashMap<>();
+		List<FlipItem> picks = new ArrayList<>();
+		for (FlipItem f : rows)
+		{
+			if (inSlots.contains(f.itemId) || isBlocked(f.itemId) || nextFlipSkipped.contains(f.itemId))
+			{
+				continue;
+			}
+			int qty = sizeNextFlip(f.suggestQty, cash, nextFlipPrice(f, premium), buyLimitRemaining(f.itemId));
+			if (qty > 0)
+			{
+				qtys.put(f.itemId, qty);
+				picks.add(f);
+			}
+		}
+		picks.sort((a, b) -> Long.compare(
+			nextFlipUnitProfit(b, premium) * qtys.get(b.itemId),
+			nextFlipUnitProfit(a, premium) * qtys.get(a.itemId)));
+		nextFlipQty = qtys;
+		return picks.size() > max ? new ArrayList<>(picks.subList(0, max)) : picks;
+	}
+
+	public static long nextFlipUnitProfit(FlipItem f, boolean premium)
+	{
+		return premium && f.recProfit != null ? f.recProfit : f.profit;
+	}
+
+	public static long nextFlipPrice(FlipItem f, boolean premium)
+	{
+		return premium && f.recBuyPrice != null && f.recBuyPrice > 0 ? f.recBuyPrice : f.buyPrice;
+	}
+
+	public int nextFlipQtyFor(int itemId)
+	{
+		return nextFlipQty.getOrDefault(itemId, -1);
+	}
+
+	public void skipNextFlip(int itemId)
+	{
+		nextFlipSkipped.add(itemId);
+	}
+
+	public void refreshNextFlip()
+	{
+		if (!config.showFlips() || panel == null || !panel.isNextFlipMode())
+		{
+			return;
+		}
+		long cash = detectedCash();
+		long tier = config.nextFlipSendCash() && cash > 0 ? cashTier(cash) : 0L;
+		lastNextFlipTier = tier;
+		String preset = panel.nextFlipPreset();
+		int horizon = panel.nextFlipHorizon();
+		if (panel.nextFlipNeedsKey())
+		{
+			SwingUtilities.invokeLater(() -> panel.updateNextFlip(new ArrayList<>()));
+			return;
+		}
+		executor.execute(() -> apiClient.fetchSuggest(preset, horizon, tier,
+			(items, total) -> SwingUtilities.invokeLater(() -> panel.updateNextFlip(items))));
+	}
+
+	public String nextFlipState()
+	{
+		String s = configManager.getConfiguration("o7flip", NEXT_FLIP_STATE_KEY);
+		return s == null ? "" : s;
+	}
+
+	public void persistNextFlipState(String state)
+	{
+		configManager.setConfiguration("o7flip", NEXT_FLIP_STATE_KEY, state);
 	}
 
 	@Subscribe

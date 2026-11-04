@@ -81,6 +81,7 @@ import java.awt.GridLayout;
 import java.awt.Insets;
 import java.awt.Rectangle;
 import java.awt.RenderingHints;
+import java.awt.event.ActionListener;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.util.ArrayList;
@@ -133,6 +134,30 @@ public class O7FlipPanel extends PluginPanel
 		{"spikes",    "Spikes",    FlipItem.class},
 		{"volatile",  "Volatile",  FlipItem.class},
 	};
+	private static final String[][] NEXT_FLIP_PROFILES = {
+		{"all",        "All flips"},
+		{"highVolume", "High volume"},
+		{"highMargin", "High margin"},
+		{"stable",     "Low risk"},
+	};
+	private static final Object[][] NEXT_FLIP_HORIZONS = {
+		{30,   "Quick ≤30m"},
+		{60,   "Within 1h"},
+		{240,  "Normal ≤4h"},
+		{480,  "Patient ≤8h"},
+		{1440, "Within 24h"},
+	};
+	private int nextFlipProfileIdx;
+	private int nextFlipHorizonIdx;
+	private boolean nextFlipMode;
+	private boolean nextFlipLoading = true;
+	private List<FlipItem> nextFlipRows = new ArrayList<>();
+	private JPanel nextFlipControls;
+	private JPanel flipsListControls;
+	private JPanel flipsPageBar;
+	private JButton nextFlipModeBtn;
+	private JButton allFlipsModeBtn;
+	private JLabel nextFlipCash;
 	private static final String[][] OTHER_SORTS = {
 		{"",             "Default order"},
 		{"profit",       "Profit"},
@@ -952,6 +977,11 @@ public class O7FlipPanel extends PluginPanel
 
 	private void renderFlips(String q)
 	{
+		if (nextFlipMode && plugin != null)
+		{
+			renderNextFlip();
+			return;
+		}
 		fillListPaged(flipsListPanel, fFlips(q), flipsPage, flipsTotal,
 			flipsPageLabel, flipsPrev, flipsNext,
 			(item, odd) -> new FlipItemPanel(item, itemManager, odd, plugin),
@@ -3059,17 +3089,27 @@ public class O7FlipPanel extends PluginPanel
 		flipsFilterPanel = buildFlipsFilterPanel();
 		flipsFilterPanel.setVisible(false);
 
+		flipsListControls = new JPanel();
+		flipsListControls.setLayout(new BoxLayout(flipsListControls, BoxLayout.Y_AXIS));
+		flipsListControls.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+		flipsListControls.add(headerRow);
+		flipsListControls.add(flipsChipBar);
+		flipsListControls.add(flipsFilterPanel);
+
 		JPanel topBar = new JPanel();
 		topBar.setLayout(new BoxLayout(topBar, BoxLayout.Y_AXIS));
 		topBar.setBackground(ColorScheme.DARKER_GRAY_COLOR);
-		topBar.add(headerRow);
-		topBar.add(flipsChipBar);
-		topBar.add(flipsFilterPanel);
+		boolean nextFlipOn = config == null || config.showNextFlip();
+		if (nextFlipOn)
+		{
+			buildNextFlipControls(topBar);
+		}
+		topBar.add(flipsListControls);
 
 		flipsListPanel = listPanel();
 		flipsPageLabel = pageLabel();
-		flipsPrev      = pageBtn("\u2039");
-		flipsNext      = pageBtn("\u203A");
+		flipsPrev      = pageBtn("‹");
+		flipsNext      = pageBtn("›");
 		flipsPrev.addActionListener(e ->
 		{
 			if (plugin != null)
@@ -3088,8 +3128,229 @@ public class O7FlipPanel extends PluginPanel
 		rebuildFlipsChipBar();
 
 		flipsSyncNotice = buildSyncNotice();
-		return assembleTab(northWithNotice(topBar, flipsSyncNotice), flipsListPanel,
-			buildPageBar(flipsPageLabel, flipsPrev, flipsNext));
+		flipsPageBar = buildPageBar(flipsPageLabel, flipsPrev, flipsNext);
+		nextFlipMode = nextFlipOn && nextFlipMode;
+		applyFlipsMode();
+		return assembleTab(northWithNotice(topBar, flipsSyncNotice), flipsListPanel, flipsPageBar);
+	}
+
+	private void buildNextFlipControls(JPanel topBar)
+	{
+		String[] st = plugin != null ? plugin.nextFlipState().split(",") : new String[0];
+		nextFlipProfileIdx = stateIdx(st, 0, NEXT_FLIP_PROFILES.length);
+		nextFlipHorizonIdx = stateIdx(st, 1, NEXT_FLIP_HORIZONS.length);
+		nextFlipMode = stateIdx(st, 2, 2) == 1;
+
+		nextFlipModeBtn = pillButton("Next flip");
+		allFlipsModeBtn = pillButton("All flips");
+		nextFlipModeBtn.addActionListener(e -> setNextFlipMode(true));
+		allFlipsModeBtn.addActionListener(e -> setNextFlipMode(false));
+		JPanel pills = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 0));
+		pills.setOpaque(false);
+		pills.add(allFlipsModeBtn);
+		pills.add(nextFlipModeBtn);
+
+		nextFlipCash = new JLabel();
+		nextFlipCash.setFont(Fonts.SM);
+		nextFlipCash.setForeground(new Color(0xAAAAAA));
+
+		JPanel modeRow = new JPanel(new BorderLayout());
+		modeRow.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+		modeRow.setBorder(new EmptyBorder(6, 4, 4, 8));
+		modeRow.add(pills, BorderLayout.WEST);
+		modeRow.add(nextFlipCash, BorderLayout.EAST);
+
+		String[] profiles = new String[NEXT_FLIP_PROFILES.length];
+		for (int i = 0; i < profiles.length; i++) profiles[i] = NEXT_FLIP_PROFILES[i][1];
+		String[] horizons = new String[NEXT_FLIP_HORIZONS.length];
+		for (int i = 0; i < horizons.length; i++) horizons[i] = (String) NEXT_FLIP_HORIZONS[i][1];
+		JComboBox<String> profileCombo = styledCombo(profiles);
+		profileCombo.setSelectedIndex(nextFlipProfileIdx);
+		JComboBox<String> horizonCombo = styledCombo(horizons);
+		horizonCombo.setSelectedIndex(nextFlipHorizonIdx);
+
+		nextFlipControls = new JPanel(new GridLayout(1, 2, 4, 0));
+		nextFlipControls.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+		nextFlipControls.setBorder(new EmptyBorder(0, 8, 6, 8));
+		nextFlipControls.add(profileCombo);
+		nextFlipControls.add(horizonCombo);
+
+		ActionListener changed = e ->
+		{
+			nextFlipProfileIdx = profileCombo.getSelectedIndex();
+			nextFlipHorizonIdx = horizonCombo.getSelectedIndex();
+			saveNextFlipState();
+			nextFlipRows = new ArrayList<>();
+			nextFlipLoading = true;
+			renderFlips(filtered());
+			if (plugin != null) plugin.refreshNextFlip();
+		};
+		profileCombo.addActionListener(changed);
+		horizonCombo.addActionListener(changed);
+
+		topBar.add(modeRow);
+		topBar.add(nextFlipControls);
+		onCashDetected();
+	}
+
+	private void setNextFlipMode(boolean next)
+	{
+		if (next == nextFlipMode)
+		{
+			return;
+		}
+		nextFlipMode = next;
+		saveNextFlipState();
+		applyFlipsMode();
+		renderFlips(filtered());
+		if (next && plugin != null)
+		{
+			plugin.refreshNextFlip();
+		}
+	}
+
+	private void applyFlipsMode()
+	{
+		if (nextFlipModeBtn != null)
+		{
+			applySortStyle(nextFlipModeBtn, nextFlipMode);
+			applySortStyle(allFlipsModeBtn, !nextFlipMode);
+			nextFlipControls.setVisible(nextFlipMode);
+			nextFlipCash.setVisible(nextFlipMode);
+		}
+		flipsListControls.setVisible(!nextFlipMode);
+		flipsPageBar.setVisible(!nextFlipMode);
+	}
+
+	private static int stateIdx(String[] st, int i, int n)
+	{
+		try
+		{
+			int v = Integer.parseInt(st[i].trim());
+			return v >= 0 && v < n ? v : 0;
+		}
+		catch (RuntimeException e)
+		{
+			return 0;
+		}
+	}
+
+	private void saveNextFlipState()
+	{
+		if (plugin != null)
+		{
+			plugin.persistNextFlipState(nextFlipProfileIdx + "," + nextFlipHorizonIdx + "," + (nextFlipMode ? 1 : 0));
+		}
+	}
+
+	public boolean isNextFlipMode()
+	{
+		return nextFlipMode;
+	}
+
+	public String nextFlipPreset()
+	{
+		return NEXT_FLIP_PROFILES[nextFlipProfileIdx][0];
+	}
+
+	public boolean nextFlipNeedsKey()
+	{
+		boolean keyed = config != null && config.apiKey() != null && !config.apiKey().trim().isEmpty();
+		return !keyed && ("highVolume".equals(nextFlipPreset()) || "stable".equals(nextFlipPreset()));
+	}
+
+	public int nextFlipHorizon()
+	{
+		return (Integer) NEXT_FLIP_HORIZONS[nextFlipHorizonIdx][0];
+	}
+
+	public void updateNextFlip(List<FlipItem> rows)
+	{
+		nextFlipRows = rows != null ? rows : new ArrayList<>();
+		nextFlipLoading = false;
+		if (nextFlipMode)
+		{
+			renderFlips(filtered());
+		}
+	}
+
+	public void onCashDetected()
+	{
+		if (nextFlipCash == null || plugin == null)
+		{
+			return;
+		}
+		long cash = plugin.detectedCash();
+		nextFlipCash.setText(cash < 0 ? "" : "Cash " + FlipItemPanel.formatGpCompact(cash));
+		nextFlipCash.setToolTipText(cash < 0 ? null : plugin.cashBreakdown());
+		if (nextFlipMode && flipsListPanel != null)
+		{
+			renderFlips(filtered());
+		}
+	}
+
+	private void renderNextFlip()
+	{
+		flipsListPanel.removeAll();
+		List<FlipItem> picks = plugin.nextFlipPicks(nextFlipRows, isPremium ? 3 : 1, isPremium);
+		if (plugin.detectedCash() < 0)
+		{
+			flipsListPanel.add(emptyLabel("Log in to see your next flip", "Picks are sized to your cash"));
+		}
+		else if (nextFlipNeedsKey())
+		{
+			flipsListPanel.add(emptyLabel("Free API key needed", "Add it in the plugin settings"));
+		}
+		else if (picks.isEmpty())
+		{
+			flipsListPanel.add(emptyLabel(nextFlipLoading ? "Loading…" : "Nothing fits right now",
+				nextFlipLoading ? "" : "Try a longer time window"));
+		}
+		for (int i = 0; i < picks.size(); i++)
+		{
+			FlipItem f = picks.get(i);
+			flipsListPanel.add(new FlipItemPanel(f, itemManager, i % 2 != 0, plugin));
+			flipsListPanel.add(nextFlipActions(f, plugin.nextFlipQtyFor(f.itemId)));
+			flipsListPanel.add(sep());
+		}
+		flipsListPanel.revalidate();
+		flipsListPanel.repaint();
+	}
+
+	private JPanel nextFlipActions(FlipItem f, int qty)
+	{
+		long price = O7FlipPlugin.nextFlipPrice(f, isPremium);
+		long profitEach = O7FlipPlugin.nextFlipUnitProfit(f, isPremium);
+		JLabel info = new JLabel("Buy " + FlipItemPanel.formatGp(qty) + "  ·  +"
+			+ FlipItemPanel.formatGpCompact(profitEach * qty));
+		info.setFont(Fonts.SM);
+		info.setForeground(new Color(0xCCCCCC));
+		info.setToolTipText("Buy " + FlipItemPanel.formatGp(qty) + " at " + FlipItemPanel.formatGp(price)
+			+ " gp for about +" + FlipItemPanel.formatGp(profitEach * qty) + " gp after tax");
+
+		JButton buy = pillButton("Buy");
+		buy.setToolTipText("Queue this buy on the GE; the quantity prompt then offers Next flip: "
+			+ FlipItemPanel.formatGp(qty));
+		buy.addActionListener(e -> plugin.queueGeBuy(f.itemId, price, f.name));
+		JButton skip = pillButton("Skip");
+		skip.addActionListener(e ->
+		{
+			plugin.skipNextFlip(f.itemId);
+			renderFlips(filtered());
+		});
+		JPanel buttons = new JPanel(new FlowLayout(FlowLayout.RIGHT, 4, 0));
+		buttons.setOpaque(false);
+		buttons.add(buy);
+		buttons.add(skip);
+
+		JPanel row = new JPanel(new BorderLayout());
+		row.setBackground(ColorScheme.DARKER_GRAY_COLOR);
+		row.setBorder(new EmptyBorder(2, 10, 4, 6));
+		row.setAlignmentX(Component.LEFT_ALIGNMENT);
+		row.setMaximumSize(new Dimension(Integer.MAX_VALUE, 26));
+		row.add(info, BorderLayout.CENTER);
+		row.add(buttons, BorderLayout.EAST);
+		return row;
 	}
 
 	private JPanel buildFlipsFilterPanel()

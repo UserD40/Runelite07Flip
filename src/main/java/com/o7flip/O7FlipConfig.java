@@ -183,6 +183,33 @@ public interface O7FlipConfig extends Config
 	}
 
 	@ConfigItem(
+		keyName = "showNextFlip",
+		name = "Show Next flip",
+		description = "Add a Next flip / All flips switch to the Flips tab. Next flip: pick a strategy and a time, and it "
+			+ "suggests what to buy for the cash you are carrying.",
+		section = generalSection,
+		position = 5
+	)
+	default boolean showNextFlip()
+	{
+		return true;
+	}
+
+	@ConfigItem(
+		keyName = "nextFlipSendCash",
+		name = "Size Next flip to your cash",
+		description = "<html>Reads the coins and platinum tokens in your inventory and bank (plus gp in GE buy offers) "
+			+ "to size Next flip suggestions. <b>Only a rough tier such as 25M is sent to 07flip.com, never the exact "
+			+ "amount.</b> Untick to keep it on this machine; suggestions are then sized locally only.</html>",
+		section = generalSection,
+		position = 6
+	)
+	default boolean nextFlipSendCash()
+	{
+		return true;
+	}
+
+	@ConfigItem(
 		keyName = "narrowByPendingOffers",
 		name = "",
 		description = "",

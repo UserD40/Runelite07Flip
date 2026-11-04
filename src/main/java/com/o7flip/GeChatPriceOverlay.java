@@ -129,6 +129,13 @@ public class GeChatPriceOverlay extends Overlay implements MouseListener, KeyLis
 			{
 				drawPriceItem(graphics, fm, "Plan: ", FlipItemPanel.formatGp(planQty), "",
 					ib.x + 4, qtyTop, chipH, planQty);
+				qtyTop += chipH;
+			}
+			int nextQty = !sell ? plugin.nextFlipQtyFor(itemId) : -1;
+			if (nextQty > 0)
+			{
+				drawPriceItem(graphics, fm, "Next flip: ", FlipItemPanel.formatGp(nextQty), "",
+					ib.x + 4, qtyTop, chipH, nextQty);
 			}
 			return null;
 		}
