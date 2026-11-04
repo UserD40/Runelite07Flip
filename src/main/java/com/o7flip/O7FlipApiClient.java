@@ -1189,6 +1189,13 @@ public class O7FlipApiClient
 		});
 	}
 
+	public void fetchSuggest(String preset, int horizon, long cashTier, BiConsumer<List<FlipItem>, Integer> callback)
+	{
+		fetchPaged(BASE_URL + "/v2/flips?sort=suggest&limit=10&preset=" + preset + "&horizon=" + horizon
+				+ (cashTier > 0 ? "&cashStack=" + cashTier : ""),
+			"fetchSuggest", "flips", this::parseFlipItem, callback);
+	}
+
 	public void fetchFlips(String preset, String sort, long minProfit, long priceMin, long priceMax,
 	                       long cashStack, int page,
 	                       BiConsumer<List<FlipItem>, Integer> callback,

@@ -139,6 +139,7 @@ public final class Models
 
 		public Integer etaBuyMinutes;
 		public Integer etaSellMinutes;
+		public Integer suggestQty;
 
 		public String badge;
 		public String signal;
