@@ -1155,14 +1155,14 @@ public class InsightsPanel extends JPanel
 		final long   startEpochMs;
 		final int    intervalMinutes;
 
-		ChartPeriod(String label, Long[] buy, Long[] sell, String axisStart, String startIso, int intervalMinutes)
+		ChartPeriod(String label, Long[] buy, Long[] sell, String axisStart, String startIso, int spanMinutes)
 		{
 			this.label           = label;
 			this.buy             = buy;
 			this.sell            = sell;
 			this.axisStart       = axisStart;
 			this.startEpochMs     = parseIsoToEpochMs(startIso);
-			this.intervalMinutes = intervalMinutes;
+			this.intervalMinutes = spanMinutes / Math.max(1, Math.max(buy.length, sell.length));
 		}
 	}
 
@@ -1200,23 +1200,23 @@ public class InsightsPanel extends JPanel
 		final List<ChartPeriod> periods = new ArrayList<>();
 		if (hasSeries(ins.sparkline2hBuy, ins.sparkline2hSell))
 		{
-			periods.add(new ChartPeriod("2h", ins.sparkline2hBuy, ins.sparkline2hSell, "−2h", ins.sparkline2hStart, 5));
+			periods.add(new ChartPeriod("2h", ins.sparkline2hBuy, ins.sparkline2hSell, "−2h", ins.sparkline2hStart, 120));
 		}
 		if (hasSeries(ins.sparkline4hBuy, ins.sparkline4hSell))
 		{
-			periods.add(new ChartPeriod("4h", ins.sparkline4hBuy, ins.sparkline4hSell, "−4h", ins.sparkline4hStart, 5));
+			periods.add(new ChartPeriod("4h", ins.sparkline4hBuy, ins.sparkline4hSell, "−4h", ins.sparkline4hStart, 240));
 		}
 		if (hasSeries(ins.sparkline24hBuy, ins.sparkline24hSell))
 		{
-			periods.add(new ChartPeriod("24h", ins.sparkline24hBuy, ins.sparkline24hSell, "−24h", ins.sparkline24hStart, 60));
+			periods.add(new ChartPeriod("24h", ins.sparkline24hBuy, ins.sparkline24hSell, "−24h", ins.sparkline24hStart, 1440));
 		}
 		if (hasSeries(ins.sparkline7dBuy, ins.sparkline7dSell))
 		{
-			periods.add(new ChartPeriod("7d", ins.sparkline7dBuy, ins.sparkline7dSell, "−7d", ins.sparkline7dStart, 240));
+			periods.add(new ChartPeriod("7d", ins.sparkline7dBuy, ins.sparkline7dSell, "−7d", ins.sparkline7dStart, 10080));
 		}
 		if (hasSeries(ins.sparkline30dBuy, ins.sparkline30dSell))
 		{
-			periods.add(new ChartPeriod("30d", ins.sparkline30dBuy, ins.sparkline30dSell, "−30d", ins.sparkline30dStart, 1440));
+			periods.add(new ChartPeriod("30d", ins.sparkline30dBuy, ins.sparkline30dSell, "−30d", ins.sparkline30dStart, 43200));
 		}
 
 		JPanel headerRow = new JPanel(new BorderLayout());

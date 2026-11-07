@@ -1083,17 +1083,26 @@ public class O7FlipApiClient
 		out.sparkline4hBuy    = parseNullableLongArray(root, "sparkline_4h_buy");
 		out.sparkline4hSell   = parseNullableLongArray(root, "sparkline_4h_sell");
 		out.sparkline4hStart  = getString(root, "sparkline_4h_start", "");
-		out.sparkline24hBuy   = parseNullableLongArray(root, "sparkline_24h_buy");
-		out.sparkline24hSell  = parseNullableLongArray(root, "sparkline_24h_sell");
-		out.sparkline24hStart = getString(root, "sparkline_24h_start", "");
-		out.sparkline7dBuy    = parseNullableLongArray(root, "sparkline_7d_buy");
-		out.sparkline7dSell   = parseNullableLongArray(root, "sparkline_7d_sell");
-		out.sparkline7dStart  = getString(root, "sparkline_7d_start", "");
-		out.sparkline30dBuy   = parseNullableLongArray(root, "sparkline_30d_buy");
-		out.sparkline30dSell  = parseNullableLongArray(root, "sparkline_30d_sell");
-		out.sparkline30dStart = getString(root, "sparkline_30d_start", "");
+		String d = sparkKey(root, "24h");
+		out.sparkline24hBuy   = parseNullableLongArray(root, d + "_buy");
+		out.sparkline24hSell  = parseNullableLongArray(root, d + "_sell");
+		out.sparkline24hStart = getString(root, d + "_start", "");
+		d = sparkKey(root, "7d");
+		out.sparkline7dBuy    = parseNullableLongArray(root, d + "_buy");
+		out.sparkline7dSell   = parseNullableLongArray(root, d + "_sell");
+		out.sparkline7dStart  = getString(root, d + "_start", "");
+		d = sparkKey(root, "30d");
+		out.sparkline30dBuy   = parseNullableLongArray(root, d + "_buy");
+		out.sparkline30dSell  = parseNullableLongArray(root, d + "_sell");
+		out.sparkline30dStart = getString(root, d + "_start", "");
 
 		return out;
+	}
+
+	private String sparkKey(JsonObject root, String period)
+	{
+		return parseNullableLongArray(root, "sparkline_" + period + "_fine_buy").length > 1
+			? "sparkline_" + period + "_fine" : "sparkline_" + period;
 	}
 
 	private Long[] parseNullableLongArray(JsonObject parent, String key)

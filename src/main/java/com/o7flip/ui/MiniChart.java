@@ -173,20 +173,20 @@ public final class MiniChart
 		int[] xs = new int[n];
 		int[] ys = new int[n];
 		int runLen = 0;
+		Long last = null;
 		for (int i = 0; i < n; i++)
 		{
 			Long v = i < series.length ? series[i] : null;
-			if (!valid(v))
+			if (valid(v))
 			{
-				if (runLen >= 2)
-				{
-					g2.drawPolyline(xs, ys, runLen);
-				}
-				runLen = 0;
+				last = v;
+			}
+			if (last == null)
+			{
 				continue;
 			}
 			xs[runLen] = xFor(i, n, x0, pw);
-			ys[runLen] = yFor(v, ph, min, max);
+			ys[runLen] = yFor(last, ph, min, max);
 			runLen++;
 		}
 		if (runLen >= 2)
