@@ -308,8 +308,15 @@ public class BuySellSparkline extends JPanel
 		{
 			return null;
 		}
-		Long v = series[idx];
-		return (v == null || v <= 0) ? null : v;
+		for (int i = idx; i >= 0; i--)
+		{
+			Long v = series[i];
+			if (v != null && v > 0)
+			{
+				return v;
+			}
+		}
+		return null;
 	}
 
 	private void paintAxes(Graphics2D g2, int plotX, int plotY, int plotW, int plotH, long min, long max)
@@ -389,14 +396,9 @@ public class BuySellSparkline extends JPanel
 		int runLen = 0;
 		for (int i = 0; i < n; i++)
 		{
-			Long v = i < series.length ? series[i] : null;
-			if (v == null || v <= 0)
+			Long v = valueAt(series, Math.min(i, series.length - 1));
+			if (v == null)
 			{
-				if (runLen >= 2)
-				{
-					g2.drawPolyline(xs, ys, runLen);
-				}
-				runLen = 0;
 				continue;
 			}
 			xs[runLen] = plotX + (int) Math.round((double) i / (n - 1) * (plotW - 1));
