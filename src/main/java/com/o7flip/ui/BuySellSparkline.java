@@ -75,6 +75,7 @@ public class BuySellSparkline extends JPanel
 
 	private int hoverX = -1;
 	private long[] offerPrices = new long[0];
+	private long boughtAtPrice;
 
 	public BuySellSparkline(Long[] buy, Long[] sell, int height, String xStartLabel, String xEndLabel,
 	                        long startEpochMs, int intervalMinutes)
@@ -130,6 +131,17 @@ public class BuySellSparkline extends JPanel
 			long max = Long.MIN_VALUE;
 			min = updateMin(min, buy);   max = updateMax(max, buy);
 			min = updateMin(min, sell);  max = updateMax(max, sell);
+			if (min != Long.MAX_VALUE)
+			{
+				Long[] lines = new Long[offerPrices.length + 1];
+				for (int i = 0; i < offerPrices.length; i++)
+				{
+					lines[i] = offerPrices[i];
+				}
+				lines[offerPrices.length] = boughtAtPrice;
+				min = updateMin(min, lines);
+				max = updateMax(max, lines);
+			}
 
 			boolean enoughData = min != Long.MAX_VALUE && max > min;
 			if (!enoughData)
@@ -167,13 +179,14 @@ public class BuySellSparkline extends JPanel
 		}
 	}
 
-	public void setOffers(long[] prices)
+	public void setOffers(long[] prices, long boughtAt)
 	{
-		if (java.util.Arrays.equals(prices, offerPrices))
+		if (java.util.Arrays.equals(prices, offerPrices) && boughtAt == boughtAtPrice)
 		{
 			return;
 		}
 		offerPrices = prices;
+		boughtAtPrice = boughtAt;
 		repaint();
 	}
 
@@ -183,10 +196,18 @@ public class BuySellSparkline extends JPanel
 		g2.setColor(MiniChart.OFFER);
 		for (long price : offerPrices)
 		{
-			double norm = Math.max(0.0, Math.min(1.0, (price - min) / (double) (max - min)));
-			int y = plotY + (int) Math.round((1.0 - norm) * plotH);
-			g2.drawLine(plotX, y, plotX + plotW, y);
+			g2.drawLine(plotX, lineY(price, plotY, plotH, min, max), plotX + plotW, lineY(price, plotY, plotH, min, max));
 		}
+		if (boughtAtPrice > 0)
+		{
+			MiniChart.drawBoughtLine(g2, plotX, plotX + plotW, lineY(boughtAtPrice, plotY, plotH, min, max));
+		}
+	}
+
+	private static int lineY(long price, int plotY, int plotH, long min, long max)
+	{
+		double norm = Math.max(0.0, Math.min(1.0, (price - min) / (double) (max - min)));
+		return plotY + (int) Math.round((1.0 - norm) * plotH);
 	}
 
 	private void paintHover(Graphics2D g2, int plotX, int plotY, int plotW, int plotH, long min, long max, int n)

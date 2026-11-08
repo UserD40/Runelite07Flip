@@ -174,6 +174,7 @@ public final class Models
 		public Score   score;
 		public Projection projection;
 		public Frozen  frozen;
+		public Long    yourAvgBuy;
 		public Indicators indicators;
 		public Liquidity  liquidity;
 

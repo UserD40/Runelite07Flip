@@ -401,7 +401,8 @@ public class GeQuickLookOverlay extends Overlay
 			.color(HEADER)
 			.build());
 
-		BufferedImage chart = MiniChart.render(CHART_W, CHART_H, v.ins, plugin.chartPeriod(), snap.price);
+		long boughtAt = plugin.boughtAt(snap.itemId);
+		BufferedImage chart = MiniChart.render(CHART_W, CHART_H, v.ins, plugin.chartPeriod(), snap.price, boughtAt);
 		if (chart != null)
 		{
 			panel.getChildren().add(LineComponent.builder().left(" ").build());
@@ -426,6 +427,10 @@ public class GeQuickLookOverlay extends Overlay
 			FlipItemPanel.formatGpCompact(c.buyPrice) + " > " + FlipItemPanel.formatGpCompact(c.sellPrice)
 				+ (age != null ? " · " + ageCompact(age) : ""), INFO));
 		panel.getChildren().add(line("Yours", FlipItemPanel.formatGp(snap.price) + " gp", Color.WHITE));
+		if (boughtAt > 0)
+		{
+			panel.getChildren().add(line("Bought at", FlipItemPanel.formatGp(boughtAt) + " gp", MiniChart.BOUGHT));
+		}
 		panel.getChildren().add(line(snap.isBuy() ? "07Flip buy" : "07Flip sell",
 			FlipItemPanel.formatGp(v.benchmark) + " gp", v.tier == 0 ? INFO : HEADER));
 

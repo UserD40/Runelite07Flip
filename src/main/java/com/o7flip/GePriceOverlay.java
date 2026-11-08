@@ -289,10 +289,11 @@ public class GePriceOverlay extends Overlay
 			return;
 		}
 		String period = plugin.chartPeriod();
-		int dataHash = java.util.Objects.hash(System.identityHashCode(insights), period, offer);
+		long boughtAt = plugin.boughtAt(itemId);
+		int dataHash = java.util.Objects.hash(System.identityHashCode(insights), period, offer, boughtAt);
 		if (cachedChartItemId != itemId || cachedChartDataHash != dataHash)
 		{
-			cachedChartImage   = com.o7flip.ui.MiniChart.render(CHART_W, CHART_H, insights, period, offer);
+			cachedChartImage   = com.o7flip.ui.MiniChart.render(CHART_W, CHART_H, insights, period, offer, boughtAt);
 			cachedChartItemId  = itemId;
 			cachedChartDataHash = dataHash;
 		}

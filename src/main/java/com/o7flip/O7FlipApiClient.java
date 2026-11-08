@@ -1077,6 +1077,12 @@ public class O7FlipApiClient
 			out.frozen = f;
 		}
 
+		JsonObject yp = optObject(root, "your_position");
+		if (yp != null && getLong(yp, "qty", 0L) > 0 && getLong(yp, "avg_buy_price", 0L) > 0)
+		{
+			out.yourAvgBuy = getLong(yp, "avg_buy_price", 0L);
+		}
+
 		out.sparkline2hBuy    = parseNullableLongArray(root, "sparkline_2h_buy");
 		out.sparkline2hSell   = parseNullableLongArray(root, "sparkline_2h_sell");
 		out.sparkline2hStart  = getString(root, "sparkline_2h_start", "");
