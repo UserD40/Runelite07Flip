@@ -670,7 +670,7 @@ public class O7FlipPlugin extends Plugin
 		return fresh;
 	}
 
-	Long openPositionAvgCost(int itemId)
+	public Long openPositionAvgCost(int itemId)
 	{
 		com.o7flip.util.ProfitCalculator.Result r = positions();
 		com.o7flip.util.ProfitCalculator.OpenPosition pos = r.openPositions.get(itemId);
@@ -679,6 +679,22 @@ public class O7FlipPlugin extends Plugin
 			return null;
 		}
 		return Math.round(pos.remainingCostBasis / (double) pos.remainingQty);
+	}
+
+	public long boughtAt(int itemId)
+	{
+		com.o7flip.model.Models.ItemInsights ins = overlayInsightsCache.get(itemId);
+		com.o7flip.model.Models.ItemInsights current = currentInsights;
+		if ((ins == null || ins.yourAvgBuy == null) && current != null && current.itemId == itemId)
+		{
+			ins = current;
+		}
+		if (ins != null && ins.yourAvgBuy != null)
+		{
+			return ins.yourAvgBuy;
+		}
+		Long cost = openPositionAvgCost(itemId);
+		return cost != null ? cost : 0L;
 	}
 
 	public boolean isPriceLocked(int itemId)
@@ -1707,6 +1723,11 @@ public class O7FlipPlugin extends Plugin
 		}
 	}
 
+	public void resendOfferLines()
+	{
+		offerLinesSig = 0;
+	}
+
 	private void pushOfferLines()
 	{
 		if (panel == null)
@@ -1715,14 +1736,15 @@ public class O7FlipPlugin extends Plugin
 		}
 		long offer = geSetupOfferPrice();
 		int setupItemId = offer > 0 ? currentGeSetupItemId() : -1;
+		boolean setupSell = setupItemId > 0 && isGeSellSetup();
 		Map<Integer, com.o7flip.model.Models.ActiveOfferSnapshot> offers = activeOffers;
-		int sig = java.util.Objects.hash(setupItemId, offer, System.identityHashCode(offers));
+		int sig = java.util.Objects.hash(setupItemId, offer, setupSell, System.identityHashCode(offers));
 		if (sig == offerLinesSig)
 		{
 			return;
 		}
 		offerLinesSig = sig;
-		SwingUtilities.invokeLater(() -> panel.updateOfferLines(offers, setupItemId, offer));
+		SwingUtilities.invokeLater(() -> panel.updateOfferLines(offers, setupItemId, offer, setupSell));
 	}
 
 	private void autoFillPriceInput(long price)

@@ -41,11 +41,13 @@ public final class MiniChart
 	private static final Color MID_LINE = new Color(0x303030);
 	private static final Color AXIS_LBL = new Color(0x888888);
 	public static final Color OFFER     = new Color(0xA8D8F0);
+	public static final Color BOUGHT    = new Color(0xFFD23F);
+	private static final Color BOUGHT_HALO = new Color(0, 0, 0, 200);
 	private static final int   PAD      = 5;
 
 	private MiniChart() {}
 
-	public static BufferedImage render(int width, int height, ItemInsights ins, String period, long offer)
+	public static BufferedImage render(int width, int height, ItemInsights ins, String period, long offer, long boughtAt)
 	{
 		Long[] buy  = series(ins, period, true);
 		Long[] sell = series(ins, period, false);
@@ -63,7 +65,7 @@ public final class MiniChart
 		try
 		{
 			g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-			paint(g2, width, height, buy, sell, offer);
+			paint(g2, width, height, buy, sell, offer, boughtAt);
 		}
 		finally
 		{
@@ -94,7 +96,7 @@ public final class MiniChart
 		return v != null && v > 0;
 	}
 
-	private static void paint(Graphics2D g2, int w, int h, Long[] buy, Long[] sell, long offer)
+	private static void paint(Graphics2D g2, int w, int h, Long[] buy, Long[] sell, long offer, long boughtAt)
 	{
 		Long[] b = buy  != null ? buy  : new Long[0];
 		Long[] s = sell != null ? sell : new Long[0];
@@ -103,6 +105,14 @@ public final class MiniChart
 		long max = Long.MIN_VALUE;
 		for (Long v : b) { if (valid(v)) { if (v < min) min = v; if (v > max) max = v; } }
 		for (Long v : s) { if (valid(v)) { if (v < min) min = v; if (v > max) max = v; } }
+		for (long v : new long[]{offer, boughtAt})
+		{
+			if (v > 0 && min != Long.MAX_VALUE)
+			{
+				min = Math.min(min, v);
+				max = Math.max(max, v);
+			}
+		}
 
 		boolean enoughData = min != Long.MAX_VALUE && max > min;
 		if (!enoughData)
@@ -150,6 +160,21 @@ public final class MiniChart
 				1f, new float[]{4f, 3f}, 0f));
 			g2.drawLine(x0, y, w, y);
 		}
+		if (boughtAt > 0)
+		{
+			drawBoughtLine(g2, x0, w, Math.max(PAD, Math.min(PAD + ph - 1, yFor(boughtAt, ph, min, max))));
+		}
+	}
+
+	public static void drawBoughtLine(Graphics2D g2, int x1, int x2, int y)
+	{
+		float[] dash = {7f, 4f};
+		g2.setStroke(new BasicStroke(3.5f, BasicStroke.CAP_BUTT, BasicStroke.JOIN_MITER, 1f, dash, 0f));
+		g2.setColor(BOUGHT_HALO);
+		g2.drawLine(x1, y, x2, y);
+		g2.setStroke(new BasicStroke(2f, BasicStroke.CAP_BUTT, BasicStroke.JOIN_MITER, 1f, dash, 0f));
+		g2.setColor(BOUGHT);
+		g2.drawLine(x1, y, x2, y);
 	}
 
 	private static int xFor(int i, int n, int x0, int pw)

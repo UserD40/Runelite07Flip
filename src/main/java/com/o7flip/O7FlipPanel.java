@@ -730,11 +730,11 @@ public class O7FlipPanel extends PluginPanel
 		}
 	}
 
-	public void updateOfferLines(java.util.Map<Integer, com.o7flip.model.Models.ActiveOfferSnapshot> offers, int setupItemId, long setupPrice)
+	public void updateOfferLines(java.util.Map<Integer, com.o7flip.model.Models.ActiveOfferSnapshot> offers, int setupItemId, long setupPrice, boolean setupSell)
 	{
 		if (insightsPanel != null)
 		{
-			insightsPanel.updateOfferLines(offers, setupItemId, setupPrice);
+			insightsPanel.updateOfferLines(offers, setupItemId, setupPrice, setupSell);
 		}
 	}
 
@@ -2562,6 +2562,11 @@ public class O7FlipPanel extends PluginPanel
 		if (insightsPanel == null && insightsHost != null)
 		{
 			insightsPanel = new com.o7flip.ui.InsightsPanel(itemManager, plugin, config);
+			if (plugin != null)
+			{
+				insightsPanel.updateOfferLines(plugin.activeOffers, -1, -1L, false);
+				plugin.resendOfferLines();
+			}
 			insightsHost.add(insightsPanel);
 			com.o7flip.model.Models.ItemInsights loaded = plugin != null ? plugin.currentInsights : null;
 			if (loaded != null)

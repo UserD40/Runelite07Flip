@@ -81,6 +81,8 @@ public class InsightsPanel extends JPanel
 	private java.util.Map<Integer, ActiveOfferSnapshot> lastOffers = Collections.emptyMap();
 	private int  lastSetupItemId = -1;
 	private long lastSetupPrice = -1L;
+	private boolean lastSetupSell;
+	private JLabel marginLegend;
 
 	private int     currentItemId;
 	private String  currentItemName;
@@ -1280,11 +1282,18 @@ public class InsightsPanel extends JPanel
 		keys.add(legendChip("Sell", BuySellSparkline.SELL_COL));
 		offerLegend = legendChip("", MiniChart.OFFER);
 		offerLegend.setHorizontalAlignment(SwingConstants.RIGHT);
+		marginLegend = new JLabel();
+		marginLegend.setFont(Fonts.SM);
+		marginLegend.setBorder(new EmptyBorder(3, 0, 0, 0));
+		JPanel left = new JPanel(new BorderLayout());
+		left.setBackground(SECTION_BG);
+		left.add(keys, BorderLayout.NORTH);
+		left.add(marginLegend, BorderLayout.SOUTH);
 		JPanel legend = new JPanel(new BorderLayout());
 		legend.setBackground(SECTION_BG);
 		legend.setBorder(new EmptyBorder(4, 0, 0, 0));
 		legend.setAlignmentX(Component.LEFT_ALIGNMENT);
-		legend.add(keys, BorderLayout.WEST);
+		legend.add(left, BorderLayout.WEST);
 		legend.add(offerLegend, BorderLayout.EAST);
 		panel.add(legend);
 		applyOfferLines();
@@ -1332,11 +1341,12 @@ public class InsightsPanel extends JPanel
 		chartHolder.repaint();
 	}
 
-	public void updateOfferLines(java.util.Map<Integer, ActiveOfferSnapshot> offers, int setupItemId, long setupPrice)
+	public void updateOfferLines(java.util.Map<Integer, ActiveOfferSnapshot> offers, int setupItemId, long setupPrice, boolean setupSell)
 	{
 		lastOffers = offers;
 		lastSetupItemId = setupItemId;
 		lastSetupPrice = setupPrice;
+		lastSetupSell = setupSell;
 		applyOfferLines();
 	}
 
@@ -1367,12 +1377,39 @@ public class InsightsPanel extends JPanel
 		{
 			p[i] = prices.get(i);
 		}
-		sparkline.setOffers(p);
+		long boughtAt = plugin.boughtAt(currentItemId);
+		sparkline.setOffers(p, boughtAt);
 		if (offerLegend != null)
 		{
-			offerLegend.setText(labels.isEmpty() ? "" : "<html><div align='right'>■ "
-				+ String.join("<br>■ ", labels) + "</div></html>");
+			String bought = boughtAt > 0 ? "<font color='#FFD23F'>■ Bought at "
+				+ FlipItemPanel.formatGpCompact(boughtAt) + "</font>" + (labels.isEmpty() ? "" : "<br>") : "";
+			offerLegend.setText(bought.isEmpty() && labels.isEmpty() ? "" : "<html><div align='right'>" + bought
+				+ (labels.isEmpty() ? "" : "■ " + String.join("<br>■ ", labels)) + "</div></html>");
 		}
+		if (marginLegend != null)
+		{
+			long sell = yourSellPrice();
+			long net = sell - com.o7flip.util.ProfitCalculator.geTaxFor(currentItemId, sell, 1) - boughtAt;
+			boolean show = boughtAt > 0 && sell > 0;
+			marginLegend.setText(show ? "After tax " + (net >= 0 ? "+" : "") + FlipItemPanel.formatGp(net) + " gp each" : "");
+			marginLegend.setForeground(net >= 0 ? BuySellSparkline.SELL_COL : BuySellSparkline.BUY_COL);
+		}
+	}
+
+	private long yourSellPrice()
+	{
+		if (lastSetupSell && lastSetupItemId == currentItemId && lastSetupPrice > 0)
+		{
+			return lastSetupPrice;
+		}
+		for (ActiveOfferSnapshot o : lastOffers.values())
+		{
+			if (o.itemId == currentItemId && !o.isBuy() && o.state == GrandExchangeOfferState.SELLING && o.price > 0)
+			{
+				return o.price;
+			}
+		}
+		return 0L;
 	}
 
 	private static JLabel legendChip(String label, Color colour)
