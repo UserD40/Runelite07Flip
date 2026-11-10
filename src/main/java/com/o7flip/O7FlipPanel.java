@@ -1387,6 +1387,9 @@ public class O7FlipPanel extends PluginPanel
 					return Long.compare(b.timestamp, a.timestamp);
 				});
 				break;
+			case 3:
+				filtered.sort((a, b) -> Long.compare(b.timestamp, a.timestamp));
+				break;
 			default:
 				filtered.sort((a, b) ->
 				{
@@ -2686,9 +2689,9 @@ public class O7FlipPanel extends PluginPanel
 		myFlipsMarginSortBar.setMaximumSize(
 			new Dimension(Integer.MAX_VALUE, myFlipsMarginSortBar.getPreferredSize().height));
 
-		myFlipsRecentSortBtns = new JButton[3];
+		myFlipsRecentSortBtns = new JButton[4];
 		myFlipsRecentSortBar = buildSortBar(myFlipsRecentSortBtns,
-			new String[]{"Profit", "ROI", "Quantity"},
+			new String[]{"Profit", "ROI", "Qty", "Latest"},
 			() -> myFlipsRecentSortIdx,
 			i ->
 			{

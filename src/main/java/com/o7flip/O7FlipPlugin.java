@@ -939,9 +939,9 @@ public class O7FlipPlugin extends Plugin
 		switch (which)
 		{
 			case QUICK:   return sell ? base - step : base + step;
-			case PATIENT: return sell ? base + step : base - step;
+			case PATIENT: return sell ? Math.max(base + step, breakEvenSellPrice(itemId)) : base - step;
 			case MARKET:  return live > 0 ? live : base;
-			default:      return base;
+			default:      return sell ? Math.max(base, breakEvenSellPrice(itemId)) : base;
 		}
 	}
 
