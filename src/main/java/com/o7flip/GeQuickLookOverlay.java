@@ -509,7 +509,7 @@ public class GeQuickLookOverlay extends Overlay
 				panel.getChildren().add(line(isBuy ? "Max buy" : "Break-even sell",
 					FlipItemPanel.formatGp(rp.breakEvenPrice) + " gp", HEADER));
 				panel.getChildren().add(TitleComponent.builder()
-					.text(isBuy ? "Hold - thin margin" : "Hold - margin should recover")
+					.text(isBuy ? "Hold - thin margin" : "Hold at break-even")
 					.color(HEADER)
 					.build());
 				return true;
